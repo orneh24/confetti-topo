@@ -19,7 +19,7 @@
 #   3. Shutdown and convert to template in vCenter
 #
 # Updating an already-deployed VM (backup, health check and rollback):
-#   topo-update.sh <topo-dir | topo.tar.gz>     (see scripts/topo-update.sh)
+#   topo-update.sh   (latest build; or <topo-dir | topo.tar.gz>)     (see scripts/topo-update.sh)
 # runs this script with --update. That mode installs everything the build
 # does (packages, code, OpenRC and cron scripts, motd) but leaves the root
 # password, topo.env, the database, host keys and the template clean-up
@@ -413,11 +413,10 @@ cat > /etc/motd <<'MOTDEOF'
   | DB:        /var/lib/confetti-topo/topo.db |
   | Logs:      rc-service confetti-topo status  |
   |                                               |
-  | To update this VM to a newer build:           |
-  |   copy topo/ here (scp -r topo root@<ip>: |
-  |   from the repo), then run:                   |
-  |     topo-update.sh /root/topo             |
-  |   (topo-update.sh --rollback goes back)     |
+  | To update this VM to the latest build, run:   |
+  |     topo-update.sh                            |
+  | (settings and data are kept; topo-update.sh   |
+  |  --rollback goes back one version)            |
   +-----------------------------------------------+
 
 MOTDEOF

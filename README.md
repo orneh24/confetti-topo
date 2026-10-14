@@ -72,7 +72,7 @@ TOPO_DB_PATH=mock.db TOPO_PORT=8080 TOPO_PING_ENABLED=false python serve.py
 same pattern as confetti-traffic's hub and confetti-butler. **It has not been run yet**; it is a copy of
 butler's script, which has run on a real Alpine 3.24 VM.
 
-- **Update a running VM:** `topo-update.sh [-y] <topo-dir|tarball>` (asks first without `-y`) installs the new code and packages
+- **Update a running VM:** `topo-update.sh` (no arguments: downloads the latest build from GitHub; a `<topo-dir|tarball>` argument updates from that instead and asks first without `-y`) installs the new code and packages
   (`build-template.sh --update`), checks it, backs up the database,
   swaps it in, and rolls back by itself if it does not come up. `--rollback` goes back one version.
 - **Backups:** nightly (7 kept) to `/var/lib/confetti-topo/backups`.
