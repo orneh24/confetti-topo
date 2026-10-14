@@ -408,7 +408,6 @@ cat > /etc/motd <<'MOTDEOF'
   |                                               |
   | confetti-topo VM                            |
   |                                               |
-  | Dashboard: http://<this-vm-ip>/               |
   | Config:    /opt/confetti-topo/topo.env    |
   | DB:        /var/lib/confetti-topo/topo.db |
   | Logs:      rc-service confetti-topo status  |
