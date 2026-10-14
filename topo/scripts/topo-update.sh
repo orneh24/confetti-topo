@@ -1,0 +1,206 @@
+#!/bin/sh
+# topo-update.sh — update a running confetti-topo VM in place, with rollback.
+#
+# Usage:
+#   topo-update.sh [-y] <topo-dir | topo.tar.gz>   update from a copy of topo/
+#   topo-update.sh --rollback                          go back to the previous version
+#
+# Without -y it shows the installed build and the source and asks first (a
+# closed stdin counts as "no"). Pass -y from scripts and over a non-tty SSH.
+#
+# What it does: runs the new tree's build-template.sh --update (the same
+# install steps as the build, so there is no second file list here): apk
+# packages, the app code into /opt/confetti-topo.new, the OpenRC, cron and
+# login scripts, the motd. Then it checks the new code imports, backs up the
+# database, swaps /opt/confetti-topo, restarts the service and waits for
+# /api/health. If the new version does not come up healthy it swaps the old
+# code back by itself. The previous version stays in /opt/confetti-topo.prev
+# for a manual --rollback.
+#
+# topo.env is carried over; the root password, host keys and database are
+# not touched. Rollback restores the app code only: packages and the OpenRC /
+# cron scripts stay at the new version (they are written before the swap).
+#
+# The database is not restored on rollback: new versions only add tables and
+# columns, which the old code ignores. The pre-update backup path is printed
+# in case it is ever needed.
+
+set -eu
+
+INSTALL_DIR="/opt/confetti-topo"
+PREV_DIR="${INSTALL_DIR}.prev"
+NEW_DIR="${INSTALL_DIR}.new"
+DB_DIR="/var/lib/confetti-topo"
+DB_FILE="${TOPO_DB_PATH:-${DB_DIR}/topo.db}"
+BACKUP_DIR="${DB_DIR}/backups"
+BACKUP_KEEP=5
+SERVICE="confetti-topo"
+HEALTH_WAIT_S=30
+
+log() { printf '[topo-update] %s\n' "$1"; }
+die() { printf '[topo-update] FATAL: %s\n' "$1" >&2; exit 1; }
+
+[ "$(id -u)" -eq 0 ] || die "Must run as root"
+AUTO_YES=""
+if [ "${1:-}" = "-y" ] || [ "${1:-}" = "--yes" ]; then
+    AUTO_YES="1"
+    shift
+fi
+[ $# -eq 1 ] || die "Usage: topo-update.sh [-y] <topo-dir | topo.tar.gz> | --rollback"
+
+TMP_DIR=""
+cleanup() {
+    [ -z "$TMP_DIR" ] || rm -rf "$TMP_DIR"
+}
+trap cleanup EXIT
+
+# Port as the service sees it: topo.env wins over the default.
+health_url() {
+    _port=$(sed -n 's/^TOPO_PORT=//p' "${INSTALL_DIR}/topo.env" 2>/dev/null | tail -1)
+    printf 'http://127.0.0.1:%s/api/health' "${_port:-80}"
+}
+
+wait_healthy() {
+    _url=$(health_url)
+    _i=0
+    while [ "$_i" -lt "$HEALTH_WAIT_S" ]; do
+        if curl -fs -m 3 -o /dev/null "$_url"; then
+            return 0
+        fi
+        sleep 1
+        _i=$((_i + 1))
+    done
+    return 1
+}
+
+# Put the previous version back. $1 = where the current (bad) one is parked.
+swap_back() {
+    rc-service "$SERVICE" stop >/dev/null 2>&1 || true
+    rm -rf "$1"
+    mv "$INSTALL_DIR" "$1"
+    mv "$PREV_DIR" "$INSTALL_DIR"
+    rc-service "$SERVICE" start >/dev/null 2>&1 || true
+}
+
+if [ "$1" = "--rollback" ]; then
+    [ -d "$PREV_DIR" ] || die "No previous version at $PREV_DIR"
+    log "Rolling back to the previous version"
+    swap_back "${INSTALL_DIR}.rolled-back"
+    wait_healthy || die "Previous version did not become healthy — check /var/log/confetti-topo.log"
+    log "Rolled back. The version you left is in ${INSTALL_DIR}.rolled-back"
+    exit 0
+fi
+
+SRC="$1"
+[ -d "$INSTALL_DIR" ] || die "$INSTALL_DIR not found — run build-template.sh first"
+
+# -------------------------------------------------------------------
+# 1. Locate the new code
+# -------------------------------------------------------------------
+TMP_DIR=$(mktemp -d)
+if [ -f "$SRC" ]; then
+    log "Unpacking $SRC"
+    tar -xzf "$SRC" -C "$TMP_DIR" || die "Could not unpack $SRC"
+    SRC_DIR=""
+    for _d in "$TMP_DIR" "$TMP_DIR"/*/ "$TMP_DIR"/*/topo; do
+        if [ -f "${_d%/}/serve.py" ]; then SRC_DIR="${_d%/}"; break; fi
+    done
+    [ -n "$SRC_DIR" ] || die "No serve.py found in $SRC"
+elif [ -d "$SRC" ]; then
+    SRC_DIR="${SRC%/}"
+else
+    die "$SRC is neither a directory nor a file"
+fi
+
+for _f in serve.py app/app.py templates static requirements.txt build-template.sh; do
+    [ -e "${SRC_DIR}/${_f}" ] || die "${SRC_DIR} does not look like topo/: missing ${_f}"
+done
+sh -n "${SRC_DIR}/build-template.sh" || die "${SRC_DIR}/build-template.sh does not parse — nothing was changed"
+
+if [ -z "$AUTO_YES" ]; then
+    log "Installed: $(cat "${INSTALL_DIR}/BUILD" 2>/dev/null || echo 'no build id')"
+    log "From:      $SRC"
+    echo "This installs the new code and packages, restarts confetti-topo and keeps"
+    echo "topo.env and the database (backed up first). It rolls back if the new"
+    echo "version does not come up healthy."
+    printf 'Update now? [y/N] '
+    read -r ANSWER || ANSWER=""
+    case "$ANSWER" in
+        [yY]*) ;;
+        *)
+            log "Cancelled. Nothing changed."
+            exit 0
+            ;;
+    esac
+fi
+
+# -------------------------------------------------------------------
+# 2. Install the new tree into a staging dir and check it before stopping anything
+# -------------------------------------------------------------------
+log "Running build-template.sh --update (new code goes to $NEW_DIR)"
+rm -rf "$NEW_DIR"
+TOPO_STAGE_DIR="$NEW_DIR" sh "${SRC_DIR}/build-template.sh" --update ||
+    { rm -rf "$NEW_DIR"; die "build-template.sh --update failed (see above) — the running version was not swapped"; }
+# Settings and credentials stay as they are.
+if [ -f "${INSTALL_DIR}/topo.env" ]; then
+    cp -p "${INSTALL_DIR}/topo.env" "$NEW_DIR/topo.env"
+fi
+
+# Import the app against a throwaway database: catches a syntax error or a
+# missing Python package now, while the old version is still running.
+log "Checking the new code imports"
+if ! (cd "$NEW_DIR" && TOPO_DB_PATH="${TMP_DIR}/check.db" python3 -c "import app.app" 2>"${TMP_DIR}/import.err"); then
+    cat "${TMP_DIR}/import.err" >&2
+    rm -rf "$NEW_DIR"
+    die "New version does not import — the running version was not swapped"
+fi
+find "$NEW_DIR" -name __pycache__ -type d -prune -exec rm -rf {} + 2>/dev/null || true
+
+# -------------------------------------------------------------------
+# 3. Back up the database (WAL-safe: sqlite3 .backup, not a file copy)
+# -------------------------------------------------------------------
+BACKUP=""
+if [ -f "$DB_FILE" ]; then
+    command -v sqlite3 >/dev/null 2>&1 || die "sqlite3 not found (apk add sqlite) — nothing was changed"
+    mkdir -p "$BACKUP_DIR"
+    chmod 700 "$BACKUP_DIR"
+    BACKUP="${BACKUP_DIR}/topo-pre-update-$(date -u +%Y%m%d-%H%M%S).db"
+    log "Backing up the database to $BACKUP"
+    sqlite3 "$DB_FILE" ".backup '${BACKUP}'" || die "Database backup failed — nothing was changed"
+    chmod 600 "$BACKUP"
+    # Keep the newest few pre-update backups.
+    ls -1t "${BACKUP_DIR}"/topo-pre-update-*.db 2>/dev/null | tail -n +"$((BACKUP_KEEP + 1))" |
+        while IFS= read -r _old; do rm -f "$_old"; done
+else
+    log "No database at $DB_FILE — skipping backup"
+fi
+
+# -------------------------------------------------------------------
+# 4. Swap and restart
+# -------------------------------------------------------------------
+log "Stopping $SERVICE"
+rc-service "$SERVICE" stop >/dev/null 2>&1 || true
+rm -rf "$PREV_DIR"
+mv "$INSTALL_DIR" "$PREV_DIR"
+mv "$NEW_DIR" "$INSTALL_DIR"
+log "Starting $SERVICE"
+rc-service "$SERVICE" start >/dev/null 2>&1 || true
+
+# -------------------------------------------------------------------
+# 5. Health check, with automatic rollback
+# -------------------------------------------------------------------
+if wait_healthy; then
+    log "Updated and healthy. Previous version kept in $PREV_DIR (topo-update.sh --rollback)."
+    [ -z "$BACKUP" ] || log "Database backup: $BACKUP"
+    exit 0
+fi
+
+log "New version did not become healthy within ${HEALTH_WAIT_S}s — rolling back"
+swap_back "${INSTALL_DIR}.failed"
+if wait_healthy; then
+    log "Rolled back to the previous version. The failed one is in ${INSTALL_DIR}.failed; see /var/log/confetti-topo.log"
+else
+    log "Previous version is not healthy either — check /var/log/confetti-topo.log"
+fi
+[ -z "$BACKUP" ] || log "Database backup: $BACKUP"
+exit 1

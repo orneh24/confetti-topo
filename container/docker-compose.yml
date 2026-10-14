@@ -1,0 +1,23 @@
+# docker compose -f container/docker-compose.yml up --build
+#
+# Dashboard on http://localhost/ .
+services:
+  topo:
+    build:
+      context: ../topo
+      dockerfile: ../container/Dockerfile
+    image: confetti-topo
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - topo-data:/var/lib/confetti-topo
+    environment:
+      # Default SSH credentials for polled devices; override per device in the UI.
+      TOPO_SSH_USERNAME: ${TOPO_SSH_USERNAME:-admin}
+      TOPO_SSH_PASSWORD: ${TOPO_SSH_PASSWORD:-}
+      TOPO_SSH_SECRET: ${TOPO_SSH_SECRET:-}
+      # TOPO_DISCOVERY_INTERVAL_S: 900
+      # TOPO_DISCOVERY_CONFETTI_URL: http://hub.example
+volumes:
+  topo-data:

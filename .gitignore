@@ -1,0 +1,9 @@
+# Local database — holds plaintext device credentials (see CLAUDE.md, Design Decisions)
+topo.db
+topo.db-*
+# Runtime config, may hold credentials
+topo.env
+__pycache__/
+*.pyc
+# Per-user Claude Code settings
+.claude/settings.local.json

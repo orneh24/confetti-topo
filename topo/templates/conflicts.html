@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Conflicts{% endblock %}
+{% block head %}
+<style>
+pre { font-size: 11px; color: var(--text-dim); background: var(--bg-code); padding: 8px; overflow-x: auto; margin-top: 6px; }
+form.inline { display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
+form.inline input[type=text] { width: 120px; }
+.msg { font-size: 11px; margin-top: 6px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container stack" id="list">
+    <div class="empty">loading...</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s === null || s === undefined ? '' : String(s);
+    return d.innerHTML;
+}
+
+function mergeConflict(conflictId, ids, btn) {
+    var form = btn.closest('form');
+    var survivor = form.survivor.value.trim();
+    var loser = form.loser.value.trim();
+    var msg = form.querySelector('.msg');
+    if (!survivor || !loser) {
+        msg.textContent = 'enter both device ids from: ' + ids;
+        msg.className = 'msg err';
+        return;
+    }
+    fetch('/api/devices/' + survivor + '/merge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ loser_id: parseInt(loser, 10) }),
+    }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+    }).then(function (result) {
+        if (result.ok) {
+            msg.textContent = 'merged ' + loser + ' into ' + survivor;
+            msg.className = 'msg ok';
+            load();
+        } else {
+            msg.textContent = result.data.error || 'failed';
+            msg.className = 'msg err';
+        }
+    });
+}
+
+function dismissConflict(conflictId, btn) {
+    var msg = btn.closest('form').querySelector('.msg');
+    fetch('/api/conflicts/' + conflictId + '/dismiss', { method: 'POST' }).then(function (r) {
+        if (r.ok) { load(); return; }
+        return r.json().then(function (data) {
+            msg.textContent = data.error || 'failed';
+            msg.className = 'msg err';
+        });
+    });
+}
+
+function render(list) {
+    var el = document.getElementById('list');
+    if (!list.length) {
+        el.innerHTML = '<div class="empty">no unresolved conflicts</div>';
+        return;
+    }
+    var html = '';
+    for (var i = 0; i < list.length; i++) {
+        var c = list[i];
+        html += '<div class="section">' +
+            '<div class="section-header"><span>conflict #' + c.id + ' — ' + esc(c.source) + '</span></div>' +
+            '<div class="section-body">' +
+            '<div class="kv"><span class="k">seen</span><span>' + esc(c.seen_at) + '</span></div>' +
+            '<div class="kv"><span class="k">matched device ids</span><span>' + esc(c.device_ids) + '</span></div>' +
+            '<div class="kv"><span class="k">detail</span><span>' + esc(c.detail) + '</span></div>' +
+            '<pre>' + esc(c.candidate) + '</pre>' +
+            '<form class="inline" onsubmit="return false;">' +
+            '<input type="text" name="survivor" placeholder="survivor id">' +
+            '<input type="text" name="loser" placeholder="loser id">' +
+            '<button type="button" onclick="mergeConflict(' + c.id + ', \'' + esc(c.device_ids) + '\', this)">Merge</button>' +
+            '<button type="button" onclick="dismissConflict(' + c.id + ', this)" title="Mark resolved without merging — e.g. a single-device conflict you have checked">Dismiss</button>' +
+            '<span class="msg"></span>' +
+            '</form>' +
+            '</div></div>';
+    }
+    el.innerHTML = html;
+}
+
+function load() {
+    fetch('/api/conflicts').then(function (r) { return r.json(); }).then(render);
+}
+
+load();
+</script>
+{% endblock %}

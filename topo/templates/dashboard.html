@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block head %}
+<style>
+.note { margin-top: 10px; }
+</style>
+{% endblock %}
+{% block kpis %}
+<!-- Modern layout only: the summary before the detail. Filled by loadKpis()
+     from data the page already polls. Hidden in the other layouts. -->
+<div class="kpi-row" id="kpi-row">
+    <div class="kpi"><div class="kpi-label">Devices</div><div class="kpi-value" id="kpi-dev">&ndash;</div><div class="kpi-sub" id="kpi-dev-sub"></div></div>
+    <div class="kpi"><div class="kpi-label">Poll failing</div><div class="kpi-value" id="kpi-fail">&ndash;</div><div class="kpi-sub" id="kpi-fail-sub"></div></div>
+    <div class="kpi"><div class="kpi-label">Not answering ping</div><div class="kpi-value" id="kpi-ping">&ndash;</div><div class="kpi-sub" id="kpi-ping-sub"></div></div>
+    <div class="kpi"><div class="kpi-label">Sessions down</div><div class="kpi-value" id="kpi-adj">&ndash;</div><div class="kpi-sub" id="kpi-adj-sub"></div></div>
+    <div class="kpi"><div class="kpi-label">Server</div><div class="kpi-value" id="kpi-srv">&ndash;</div><div class="kpi-sub" id="kpi-srv-sub"></div></div>
+</div>
+{% endblock %}
+{% block content %}
+<div class="container">
+    <div class="section">
+        <div class="section-header"><span>System</span></div>
+        <div class="section-body">
+            <div id="time-body"><div class="kv"><span class="k">loading</span></div></div>
+            <div id="system-body"><div class="kv"><span class="k">loading</span></div></div>
+        </div>
+    </div>
+    <div class="section">
+        <div class="section-header"><span>Services</span></div>
+        <div class="section-body" id="services-body"><div class="kv"><span class="k">loading</span></div></div>
+    </div>
+    <div class="section wide">
+        <div class="section-header"><span>Events — last 15</span></div>
+        <div class="section-body">
+            <table>
+                <thead><tr><th>Time</th><th>Sev</th><th>Event</th><th>Detail</th></tr></thead>
+                <tbody id="event-rows"></tbody>
+            </table>
+            <div class="empty" id="event-empty" style="display:none">no changes recorded yet</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function kv(k, v, cls) {
+    return '<div class="kv"><span class="k">' + k + '</span><span class="v' +
+        (cls ? ' ' + cls : '') + '">' + v + '</span></div>';
+}
+
+function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s === null || s === undefined ? '' : String(s);
+    return d.innerHTML;
+}
+
+function fmtBytes(n) {
+    if (n === null || n === undefined) { return 'unknown'; }
+    var units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var i = 0;
+    while (n >= 1024 && i < units.length - 1) { n = n / 1024; i++; }
+    return n.toFixed(1) + ' ' + units[i];
+}
+
+function renderTime(data) {
+    var html = kv('server utc', data.utc);
+    if (data.chrony) {
+        html += kv('synced', data.chrony.synced ? 'yes' : 'no', data.chrony.synced ? 'ok' : 'bad');
+        html += kv('stratum', data.chrony.stratum === null ? 'unknown' : data.chrony.stratum);
+        if (data.chrony.local_only) {
+            html += '<div class="note">clock is free-running (no upstream source)</div>';
+        }
+    } else {
+        html += kv('chrony', data.reason || 'unavailable', 'unknown');
+    }
+    document.getElementById('time-body').innerHTML = html;
+}
+
+// Called by theme.js's pollHealth() on every page; data is null when the
+// server is unreachable. The header dot and text are handled there.
+window.onHealth = function (data) {
+    renderKpiServer(data);
+    if (!data) { return; }
+    var services = '';
+    for (var name in data.services) {
+        if (!data.services.hasOwnProperty(name)) { continue; }
+        var s = data.services[name];
+        var cls = s.status === 'up' ? 'ok' : (s.status === 'down' ? 'bad' : 'unknown');
+        services += kv(name, s.status || 'unknown', cls);
+    }
+    services += kv('poller', data.poller_running ? 'up' : 'down', data.poller_running ? 'ok' : 'bad');
+    services += kv('ping checker', data.reach_running ? 'up' : 'down', data.reach_running ? 'ok' : 'bad');
+    document.getElementById('services-body').innerHTML = services;
+
+    var system = '';
+    if (data.load_avg) {
+        system += kv('load', data.load_avg['1m'].toFixed(2) + ' / ' + data.load_avg['5m'].toFixed(2) + ' / ' + data.load_avg['15m'].toFixed(2));
+    } else {
+        system += kv('load', 'unknown', 'unknown');
+    }
+    if (data.memory) {
+        system += kv('memory used', data.memory.used_pct + '%');
+    } else {
+        system += kv('memory', 'unknown', 'unknown');
+    }
+    if (data.disk) {
+        system += kv('disk used', data.disk.used_pct + '% (' + fmtBytes(data.disk.free_bytes) + ' free)');
+    } else {
+        system += kv('disk', 'unknown', 'unknown');
+    }
+    document.getElementById('system-body').innerHTML = system;
+};
+
+// Summary tiles, shown by the Modern layout only (hidden by CSS elsewhere).
+function setKpi(id, value, cls, sub) {
+    var v = document.getElementById('kpi-' + id);
+    v.textContent = value;
+    v.className = 'kpi-value' + (cls ? ' ' + cls : '');
+    document.getElementById('kpi-' + id + '-sub').textContent = sub || '';
+}
+
+function renderKpiServer(data) {
+    if (!data) { setKpi('srv', 'down', 'bad', 'unreachable'); return; }
+    var bad = !data.poller_running;
+    setKpi('srv', bad ? 'degraded' : 'up', bad ? 'warn' : 'good', bad ? 'poller down' : 'poller running');
+}
+
+function loadKpis() {
+    fetch('/api/devices').then(function (r) { return r.json(); }).then(function (list) {
+        var failing = list.filter(function (d) { return d.fail_count > 0; });
+        var silent = list.filter(function (d) { return d.reachable === 0; });
+        var nodes = list.filter(function (d) { return d.role === 'node'; }).length;
+        setKpi('dev', list.length, '', (list.length - nodes) + ' polled, ' + nodes + ' nodes');
+        setKpi('fail', failing.length, failing.length ? 'bad' : 'good',
+            failing.slice(0, 3).map(function (d) { return d.hostname; }).join(', '));
+        setKpi('ping', silent.length, silent.length ? 'bad' : 'good',
+            silent.slice(0, 3).map(function (d) { return d.hostname; }).join(', '));
+    });
+    fetch('/api/adjacencies').then(function (r) { return r.json(); }).then(function (list) {
+        var down = list.filter(function (a) { return a.state !== (a.proto === 'bgp' ? 'Established' : 'FULL'); });
+        setKpi('adj', down.length, down.length ? 'bad' : 'good', list.length + ' BGP/OSPF total');
+    });
+}
+
+function poll() {
+    fetch('/api/time').then(function (r) { return r.json(); }).then(renderTime).catch(function () {
+        document.getElementById('time-body').innerHTML = kv('error', 'request failed', 'bad');
+    });
+}
+
+function loadEvents() {
+    fetch('/api/events?limit=15').then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '';
+        for (var i = 0; i < list.length; i++) {
+            var e = list[i];
+            var cls = e.severity === 'info' ? 'ok' : (e.severity === 'warning' ? 'running' : 'bad');
+            var subj = e.device_id ? '<a href="/devices/' + e.device_id + '">' + esc(e.subject) + '</a>' : esc(e.subject);
+            rows += '<tr><td>' + new Date(e.at).toLocaleString() + '</td>' +
+                '<td><span class="pill ' + cls + '">' + esc(e.severity) + '</span></td>' +
+                '<td>' + subj + '</td><td>' + esc(e.detail) + '</td></tr>';
+        }
+        document.getElementById('event-rows').innerHTML = rows;
+        document.getElementById('event-empty').style.display = list.length ? 'none' : 'block';
+    });
+}
+
+function pollAll() {
+    poll();
+    loadKpis();
+    loadEvents();
+}
+
+pollAll();
+setInterval(pollAll, 15000);
+</script>
+{% endblock %}

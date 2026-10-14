@@ -1,0 +1,18 @@
+# Everything under topo/ that isn't a doc or image ends up on an Alpine VM,
+# parsed by a POSIX shell, OpenRC or Python, which do not tolerate a CRLF
+# shebang or config line. Pin these to LF regardless of the committer's local
+# core.autocrlf (same rule as confetti-traffic), so a Windows checkout can't
+# silently reintroduce CRLF into the stored blob.
+
+*.sh    text eol=lf
+*.initd text eol=lf
+*.py    text eol=lf
+
+topo/requirements.txt       text eol=lf
+topo/seed/*.sample          text eol=lf
+
+# Read by Docker, or compared byte-for-byte against parser expectations:
+# keep LF on a Windows checkout too.
+container/*                  text eol=lf
+topo/.dockerignore           text eol=lf
+dev/samples/*.txt            text eol=lf

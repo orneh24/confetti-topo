@@ -1,0 +1,225 @@
+{% extends "base.html" %}
+{% block title %}Devices{% endblock %}
+{% block head %}
+<style>
+form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.msg { font-size: 12px; margin-top: 8px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container stack">
+    <div class="section">
+        <div class="section-header"><span>Add device</span></div>
+        <div class="section-body">
+            <form class="inline" id="add-form">
+                <input type="text" name="hostname" placeholder="hostname">
+                <input type="text" name="mgmt_ip" placeholder="mgmt ip">
+                <input type="text" name="serial" placeholder="serial (optional)">
+                <input type="text" name="site" placeholder="site (optional)">
+                <button type="submit">Add</button>
+            </form>
+            <div class="msg" id="add-msg"></div>
+        </div>
+    </div>
+    <div class="section">
+        <div class="section-header"><span>Discover</span></div>
+        <div class="section-body">
+            <form class="inline" id="sweep-form" style="margin-bottom:8px">
+                <input type="text" name="cidr" placeholder="CIDR, e.g. 10.0.0.0/24" style="width:220px">
+                <button type="submit">Sweep (SSH port scan)</button>
+            </form>
+            <form class="inline" id="confetti-form" style="margin-bottom:8px">
+                <input type="text" name="hub_url" placeholder="Confetti Traffic hub URL" style="width:220px">
+                <button type="submit">Import Confetti Traffic nodes</button>
+            </form>
+            <form class="inline" id="seedfile-form">
+                <input type="text" name="path" placeholder="seed/devices.yaml" style="width:220px">
+                <button type="submit">Load seed file</button>
+            </form>
+            <div class="msg" id="discover-msg"></div>
+        </div>
+    </div>
+    <div class="section">
+        <div class="section-header"><span>Devices</span></div>
+        <div class="section-body">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Hostname</th><th>Role</th><th>Mgmt IP</th><th>Site</th>
+                        <th>Key</th><th>Ping</th><th>Poll</th><th>Last seen</th><th></th>
+                    </tr>
+                </thead>
+                <tbody id="device-rows"></tbody>
+            </table>
+            <div class="empty" id="device-empty" style="display:none">No devices yet — add one above, or POST /api/discover/seedfile.</div>
+        </div>
+    </div>
+    <div class="section" id="lldp-unknown-section" style="display:none">
+        <div class="section-header"><span>Unknown LLDP neighbors</span></div>
+        <div class="section-body">
+            <div class="hint">Neighbors that advertise a management IP no device owns. Adding one creates an inventory entry with polling off; enable it on its page once credentials are set.</div>
+            <table>
+                <thead><tr><th>Mgmt IP</th><th>Name</th><th>Seen on</th><th></th></tr></thead>
+                <tbody id="lldp-unknown-rows"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s === null || s === undefined ? '' : String(s);
+    return d.innerHTML;
+}
+
+function timeAgo(iso) {
+    if (!iso) { return 'never'; }
+    var then = new Date(iso).getTime();
+    var s = Math.floor((Date.now() - then) / 1000);
+    if (s < 60) { return s + 's ago'; }
+    if (s < 3600) { return Math.floor(s / 60) + 'm ago'; }
+    if (s < 86400) { return Math.floor(s / 3600) + 'h ago'; }
+    return Math.floor(s / 86400) + 'd ago';
+}
+
+function pingCell(r) {
+    if (r === null || r === undefined) { return '<span class="pill idle">?</span>'; }
+    return r ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>';
+}
+
+function loadUnknownNeighbors() {
+    fetch('/api/lldp/unknown').then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '';
+        for (var i = 0; i < list.length; i++) {
+            var n = list[i];
+            rows += '<tr><td>' + esc(n.ip) + '</td><td>' + esc(n.sysname || '') + '</td><td>' + esc(n.seen_on) +
+                '</td><td><button data-ip="' + attr(n.ip) + '" data-name="' + attr(n.sysname || '') +
+                '" onclick="adoptNeighbor(this)">add</button></td></tr>';
+        }
+        document.getElementById('lldp-unknown-rows').innerHTML = rows;
+        document.getElementById('lldp-unknown-section').style.display = list.length ? 'block' : 'none';
+    });
+}
+
+function attr(s) { return esc(s).replace(/"/g, '&quot;'); }
+
+function adoptNeighbor(btn) {
+    fetch('/api/lldp/adopt', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip: btn.getAttribute('data-ip'), hostname: btn.getAttribute('data-name') })
+    }).then(function () { loadDevices(); loadUnknownNeighbors(); });
+}
+
+function renderDevices(list) {
+    var rows = '';
+    for (var i = 0; i < list.length; i++) {
+        var d = list[i];
+        var pollCls = d.poll_state === 'running' ? 'running' : 'idle';
+        if (d.role === 'node') { pollCls = 'node'; }
+        rows += '<tr>' +
+            '<td><a href="/devices/' + d.id + '">' + esc(d.hostname) + '</a></td>' +
+            '<td>' + esc(d.role) + '</td>' +
+            '<td>' + esc(d.mgmt_ip || '') + '</td>' +
+            '<td>' + esc(d.site || '') + '</td>' +
+            '<td>' + esc(d.key) + '</td>' +
+            '<td>' + pingCell(d.reachable) + '</td>' +
+            '<td><span class="pill ' + pollCls + '">' + esc(d.role === 'node' ? 'not polled' : d.poll_state) + '</span></td>' +
+            '<td>' + timeAgo(d.last_seen) + '</td>' +
+            '<td><button onclick="removeDevice(' + d.id + ')">delete</button></td>' +
+            '</tr>';
+    }
+    document.getElementById('device-rows').innerHTML = rows;
+    document.getElementById('device-empty').style.display = list.length ? 'none' : 'block';
+}
+
+function loadDevices() {
+    fetch('/api/devices').then(function (r) { return r.json(); }).then(renderDevices);
+}
+
+function removeDevice(id) {
+    fetch('/api/devices/' + id, { method: 'DELETE' }).then(loadDevices);
+}
+
+document.getElementById('add-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var form = ev.target;
+    var body = {
+        hostname: form.hostname.value.trim(),
+        mgmt_ip: form.mgmt_ip.value.trim(),
+        serial: form.serial.value.trim(),
+        site: form.site.value.trim(),
+    };
+    var msg = document.getElementById('add-msg');
+    msg.textContent = '';
+    msg.className = 'msg';
+    fetch('/api/devices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+    }).then(function (result) {
+        if (result.ok) {
+            msg.textContent = 'added ' + result.data.hostname;
+            msg.className = 'msg ok';
+            form.reset();
+            loadDevices();
+        } else {
+            msg.textContent = result.data.error || 'failed';
+            msg.className = 'msg err';
+        }
+    });
+});
+
+function runDiscover(url, body, label) {
+    var msg = document.getElementById('discover-msg');
+    msg.textContent = label + ': running...';
+    msg.className = 'msg';
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+    }).then(function (result) {
+        if (result.ok) {
+            var n = (result.data.device_ids || []).length;
+            var conflicts = (result.data.conflicts || []).length;
+            msg.textContent = label + ': ' + n + ' device(s)' +
+                (conflicts ? ', ' + conflicts + ' conflict(s) — see /conflicts' : '');
+            msg.className = 'msg ok';
+            loadDevices();
+        } else {
+            msg.textContent = label + ': ' + (result.data.error || 'failed');
+            msg.className = 'msg err';
+        }
+    });
+}
+
+document.getElementById('sweep-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var cidr = ev.target.cidr.value.trim();
+    if (!cidr) { return; }
+    runDiscover('/api/discover/sweep', { cidr: cidr }, 'sweep');
+});
+
+document.getElementById('confetti-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var hubUrl = ev.target.hub_url.value.trim();
+    if (!hubUrl) { return; }
+    runDiscover('/api/discover/confetti', { hub_url: hubUrl }, 'Confetti Traffic import');
+});
+
+document.getElementById('seedfile-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var path = ev.target.path.value.trim();
+    if (!path) { return; }
+    runDiscover('/api/discover/seedfile', { path: path }, 'seed file');
+});
+
+loadDevices();
+loadUnknownNeighbors();
+</script>
+{% endblock %}

@@ -1,0 +1,37 @@
+#!/sbin/openrc-run
+
+name="confetti-topo"
+description="confetti-topo topology map: LLDP, BGP and OSPF"
+
+directory="/opt/confetti-topo"
+command="/usr/bin/python3"
+command_args="/opt/confetti-topo/serve.py"
+command_background="yes"
+pidfile="/run/confetti-topo.pid"
+output_log="/var/log/confetti-topo.log"
+error_log="/var/log/confetti-topo.log"
+
+# Load environment from topo.env.
+#
+# command_args is expanded when this script is PARSED, before start_pre
+# runs — interpolating ${TOPO_PORT} here would freeze it at parse time
+# and ignore any later edit to topo.env. serve.py reads the port itself
+# at runtime instead; see confetti-traffic's hub init script (confettid-hub) for the same note,
+# this is the identical constraint.
+start_pre() {
+    if [ -f /opt/confetti-topo/topo.env ]; then
+        while IFS= read -r line; do
+            case "$line" in
+                \#*|"") continue ;;
+                *=*) export "$line" ;;
+            esac
+        done < /opt/confetti-topo/topo.env
+    fi
+
+    checkpath --directory --mode 0700 /var/lib/confetti-topo
+}
+
+depend() {
+    need net
+    after firewall confetti-topo-firstboot
+}
