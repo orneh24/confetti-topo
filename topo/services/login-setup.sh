@@ -7,6 +7,22 @@ case "$-" in
     *i*)
         if [ -t 0 ] && [ -f /opt/confetti-topo/BUILD ]; then
             echo "  confetti-topo $(cat /opt/confetti-topo/BUILD)"
+            # Compare with the newest commit on GitHub; short timeouts so a VM without internet logs in at once.
+            _have=$(cat /opt/confetti-topo/COMMIT 2>/dev/null || true)
+            _latest=$(curl -fsL --connect-timeout 2 -m 3 -H 'Accept: application/vnd.github.sha'                 "https://api.github.com/repos/orneh24/confetti-topo/commits/main" 2>/dev/null | head -c 40 || true)
+            case "$_latest" in
+                [0-9a-f]*)
+                    if [ -z "$_have" ]; then
+                        echo "  Cannot tell if this is the newest build (installed from a local copy). To get the latest: topo-update.sh"
+                    elif [ "$_have" = "$_latest" ]; then
+                        echo "  This is the newest build."
+                    else
+                        echo "  A newer build is available. To update: topo-update.sh"
+                    fi
+                    ;;
+                *) echo "  Could not check for a newer build (no internet?)." ;;
+            esac
+            unset _have _latest
         fi
         if [ -t 0 ] && [ ! -f /etc/confetti-topo/.setup-done ]; then
             /opt/confetti-topo/topo-setup.sh || true

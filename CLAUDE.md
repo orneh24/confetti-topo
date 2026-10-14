@@ -162,7 +162,7 @@ Ambiguity is **never** auto-resolved. The operator merges via `POST /api/devices
 
 ### Updating a deployed VM, backups, first boot
 
-`topo-update.sh` with no arguments downloads the main branch tarball from GitHub (`TOPO_UPDATE_URL` overrides) and updates without asking; `topo-update.sh [-y] <topo-dir|tarball>` (also `--rollback`; with a dir/tarball and no `-y` it shows the installed build and asks,
+The login banner compares the installed `COMMIT` file (written by a no-argument update) with GitHub's newest commit and says whether a newer build exists (3 s timeout, so no internet only prints a notice). `topo-update.sh` with no arguments downloads the main branch tarball from GitHub (`TOPO_UPDATE_URL` overrides) and updates without asking; `topo-update.sh [-y] <topo-dir|tarball>` (also `--rollback`; with a dir/tarball and no `-y` it shows the installed build and asks,
 a closed stdin cancels) runs the new tree's `build-template.sh --update` (the build's own install steps, so no
 second file list: apk packages, code into `/opt/confetti-topo.new` via `TOPO_STAGE_DIR`, OpenRC/cron/login
 scripts, motd; `--update` skips the root password, `topo.env`, host-key/DB/log clean-up and zero-fill). It then
