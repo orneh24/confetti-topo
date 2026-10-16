@@ -109,6 +109,7 @@ apk_step apk add --no-cache \
     sqlite \
     curl \
     open-vm-tools \
+    open-vm-tools-guestinfo \
     chrony
 
 log "Packages installed"
