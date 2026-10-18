@@ -222,7 +222,7 @@ topo/
                          + dashboard, devices, device, topology, conflicts, each `{% extends "base.html" %}`
   static/theme.css     — the ONE place colours live (Dark, Light, Monokai, High Contrast, Terminal green,
                          Confetti Night, Neon Streamers). Pages must not define their own :root colours
-  static/layout.css    — Classic, Modern, Retro 95, Amber CRT, Neon Green CRT. Loaded AFTER theme.css
+  static/layout.css    — Classic, Modern, Retro 95, MS-DOS, Neon Green CRT. Loaded AFTER theme.css
   static/theme.js      — THEMES + LAYOUTS lists and the two header dropdowns (confetti-topo-theme,
                          confetti-topo-layout in localStorage), themeColor() for canvas colours,
                          confettiBlast(), Shuffle, the header health dot

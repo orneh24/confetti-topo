@@ -17,7 +17,7 @@ CDN.
 - Colours live **only** in `static/theme.css` (a dark `:root` plus one `:root[data-theme=NAME]` block per
   theme). A page must not define its own `:root` colours; use the CSS variables. A new theme = one block in
   `theme.css` + one entry in the `THEMES` list in `theme.js`.
-- `static/layout.css` carries the structure and the five layouts (Classic, Modern, Retro 95, Amber CRT, Neon
+- `static/layout.css` carries the structure and the five layouts (Classic, Modern, Retro 95, MS-DOS, Neon
   Green CRT). It loads **after** `theme.css` on purpose. Use `.section > .section-header + .section-body`, not
   your own card CSS.
 - localStorage keys: `confetti-topo-theme`, `confetti-topo-layout`, `confetti-topo-theme-shuffle`.

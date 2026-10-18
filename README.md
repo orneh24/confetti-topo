@@ -41,7 +41,7 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
 
 ![The dashboard in four themes: Light, Terminal green, Confetti Night and Neon Streamers](docs/img/themes.png)
 
-![The dashboard in five layouts: Classic, Modern, Retro 95, Amber CRT and Neon Green CRT](docs/img/layouts.png)
+![The dashboard in five layouts: Classic, Modern, Retro 95, MS-DOS and Neon Green CRT](docs/img/layouts.png)
 
 Built for Cisco IOS / IOS-XE. The parsers come from confetti-butler, where they were checked against CSR1000v
 routers on IOS-XE 17.3 and 15.4; confetti-topo itself has not been run on real routers yet (see
