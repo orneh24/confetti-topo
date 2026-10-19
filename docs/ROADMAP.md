@@ -6,8 +6,6 @@ Ideas only. Nothing here is built until the user picks it.
 - **Validate on real routers** (`lab-validator`) and on a fresh Alpine VM; then update HANDOFF.
 - **Alerting.** Butler's alert rules stopped seeing topology events. Port `alerts.py`, the rules page and the
   sender thread (webhook / mail), or send events to butler.
-- **Save node positions.** The layout is recomputed in the browser on every load. A saved position per device
-  (and a "reset layout" button) would make the map stable.
 
 ## Topology
 - **Device routing table** (do this first): a `show ip route` task per device (verified on a real router first,
@@ -20,8 +18,8 @@ Ideas only. Nothing here is built until the user picks it.
 - **Link state on cables:** colour an LLDP edge red when the local interface is down.
 - **Search and focus:** find a device or IP on the graph and highlight its neighbors.
 - **History:** keep the last N topologies so "what changed since yesterday" can be drawn.
-- **Label crowding:** link labels overlap each other and the vendor mark on a dense map. Try shorter labels,
-  or labels shown only on hover or selection.
+- **Label crowding:** LLDP labels show only on hover or selection now; BGP/OSPF labels and the vendor mark can
+  still overlap on a dense map.
 - **Linux detection on real hosts:** the "LLDP says Linux" rule and the System Description parser are only
   tested on sample text. Check them against a real Linux host's `show lldp neighbors detail`.
 - **Selection outline** is a wide rectangle that includes the vendor mark. A tighter outline around the icon alone

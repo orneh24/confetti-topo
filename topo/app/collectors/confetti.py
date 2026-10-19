@@ -11,10 +11,12 @@ SSH-polled with IOS show commands.
 import requests
 
 from .. import identity
+from . import base_url
 
 
 def discover(conn, hub_url):
-    resp = requests.get("{}/endpoints".format(hub_url.rstrip("/")), timeout=10)
+    hub_url = base_url(hub_url)
+    resp = requests.get("{}/endpoints".format(hub_url), timeout=10)
     resp.raise_for_status()
     endpoints = resp.json()
 

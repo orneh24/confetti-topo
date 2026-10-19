@@ -54,11 +54,14 @@ those two columns to NULL, so its neighbors become ghosts again.
   `POST /api/credentials/clear {device_ids}`
 - `POST /api/devices/<id>/merge`; `GET /api/conflicts?resolved=0|1`; `POST /api/conflicts/<id>/dismiss`
 
-**Discovery:** `POST /api/discover/{sweep,seedfile,confetti,butler}` return `{device_ids, conflicts}`.
+**Discovery:** `POST /api/discover/{sweep,seedfile,confetti,butler}` return `{device_ids, conflicts}`
+(`hub_url` / `butler_url` may be a bare IP; `http://` is added).
 `POST /api/discover/run` runs the scheduled sources now (`TOPO_DISCOVERY_*`); `GET /api/discover/status`.
 `GET /api/lldp/unknown`; `POST /api/lldp/adopt {ip, hostname?}` adds one with polling OFF (`enabled=0`).
 
 **Topology:** `GET /api/topology?layer=lldp|bgp|ospf[,..]` (vis.js `{nodes, edges}`; each edge has `details`, one report per end that saw it, default overlays all three),
+`PUT` / `DELETE /api/topology/positions` (saved node places; nodes carry `x`/`y` when saved, and the response
+also has `positions` {node_id: {x, y}}, including the page-only `group:dev:<id>`),
 `GET /api/adjacencies[?device_id=]`, `GET /api/lldp-neighbors[?device_id=]`. The last two return the
 **effective** `peer_device_id` / `remote_device_id`.
 

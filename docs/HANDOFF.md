@@ -24,6 +24,14 @@ Split the topology mapping out of confetti-butler into this project. The plan an
   `confetti-interop-checker` and the skills `alpine-appliance` and `constraint-regression` are global.
 - Local `git init`, nothing committed, no remote.
 
+## Topology page: layout, grouping, labels (2026-10-19)
+
+Saved layout (`node_positions`), "N unknown" groups, LLDP labels on hover, and the Butler/Traffic import
+accepting a bare IP (`http://` added, `collectors/__init__.py` `base_url`). Checked in a browser on the mock
+lab only; the 18-node real graph was not judged. A real mouse drag, the group's Expand menu item and the
+group tooltip rendering were not exercised. R20 covers the positions API; no check covers the grouping or
+the bare-IP import (both are page or collector behaviour).
+
 ## What is verified
 
 - The regression suite, including a real server started from a temp copy and driven over HTTP.

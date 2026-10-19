@@ -10,10 +10,12 @@ are kept, so a role='node' device is still never SSH-polled.
 import requests
 
 from .. import identity
+from . import base_url
 
 
 def discover(conn, butler_url):
-    resp = requests.get("{}/api/devices".format(butler_url.rstrip("/")), timeout=10)
+    butler_url = base_url(butler_url)
+    resp = requests.get("{}/api/devices".format(butler_url), timeout=10)
     resp.raise_for_status()
     devices = resp.json()
 

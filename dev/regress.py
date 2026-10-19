@@ -36,7 +36,7 @@ VERBOSE = "-v" in sys.argv
 STATIC_ONLY = "--static" in sys.argv
 
 results = []   # (status, id, desc, [detail lines])
-LIVE = [("R20", "live: real server answers, pages render, /metrics, topology API")]
+LIVE = [("R20", "live: real server answers, pages render, /metrics, topology API, saved node positions")]
 TMP = tempfile.mkdtemp(prefix="topo-regress-")
 
 
@@ -942,6 +942,24 @@ def run_live():
         graph = json.loads(get("/api/topology")[1])
         need(any(n["label"] == "regress1" for n in graph.get("nodes", [])), "new device missing from /api/topology", problems)
         need(get("/api/lldp-neighbors")[0] == 200 and get("/api/adjacencies")[0] == 200, "neighbor APIs do not answer", problems)
+
+        def send(method, path, body):
+            req = urllib.request.Request(base + path, method=method, data=json.dumps(body).encode() if body else None,
+                                         headers={"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=5) as r:
+                    return r.status
+            except urllib.error.HTTPError as e:
+                return e.code
+        nid = next(n["id"] for n in graph["nodes"] if n["label"] == "regress1")
+        need(send("PUT", "/api/topology/positions", {"positions": {nid: {"x": 12.5, "y": -3}}}) == 200, "saving a node position failed", problems)
+        saved = next(n for n in json.loads(get("/api/topology")[1])["nodes"] if n["id"] == nid)
+        need((saved.get("x"), saved.get("y")) == (12.5, -3), "saved position not returned by /api/topology: %r" % saved, problems)
+        need(json.loads(get("/api/topology")[1]).get("positions", {}).get(nid) == {"x": 12.5, "y": -3}, "/api/topology 'positions' lacks the saved place", problems)
+        need(send("PUT", "/api/topology/positions", {"positions": {nid: {"x": "a", "y": 1}}}) == 400, "a non-numeric position was accepted", problems)
+        need(send("DELETE", "/api/topology/positions", None) == 200, "clearing positions failed", problems)
+        cleared = next(n for n in json.loads(get("/api/topology")[1])["nodes"] if n["id"] == nid)
+        need("x" not in cleared, "position still returned after DELETE", problems)
         results.append(("FAIL" if problems else "PASS", "R20", desc, problems))
     except Exception as e:
         results.append(("FAIL", "R20", desc, ["live tier crashed: %r" % e]))

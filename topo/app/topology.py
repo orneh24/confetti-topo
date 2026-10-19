@@ -206,7 +206,15 @@ def build(conn, layer=None):
                     "details": [_session_report(x, names) for x in ends],
                 })
 
-    return {"nodes": list(nodes.values()), "edges": edges}
+    # Saved places from the topology page; a node with no row is left for the page to lay out.
+    # "positions" has every saved place, also those of nodes the page makes up itself (a group of unknown nodes).
+    positions = {}
+    for p in conn.execute("SELECT node_id, x, y FROM node_positions"):
+        positions[p["node_id"]] = {"x": p["x"], "y": p["y"]}
+        if p["node_id"] in nodes:
+            nodes[p["node_id"]].update(x=p["x"], y=p["y"])
+
+    return {"nodes": list(nodes.values()), "edges": edges, "positions": positions}
 
 
 def _as_numbers(ends, lo):

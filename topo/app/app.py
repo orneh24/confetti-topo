@@ -643,6 +643,8 @@ def api_delete_device(device_id):
                  (device_id,))
     conn.execute("UPDATE adjacencies SET peer_device_id = NULL WHERE peer_device_id = ?",
                  (device_id,))
+    conn.execute("DELETE FROM node_positions WHERE node_id IN (?, ?)",
+                 ("dev:{}".format(device_id), "group:dev:{}".format(device_id)))
     conn.commit()
     if cur.rowcount == 0:
         return jsonify({"error": "not found"}), 404
@@ -854,6 +856,39 @@ def api_topology():
     """?layer= limits the edges to one source or a comma list (lldp,bgp);
     default overlays all three on the same device nodes."""
     return jsonify(topology.build(db.get_db(), request.args.get("layer")))
+
+
+@app.route("/api/topology/positions", methods=["PUT"])
+def api_topology_positions():
+    """Body: {"positions": {"dev:5": {"x": 10, "y": -20}, ...}}. Saves where nodes sit on the page."""
+    positions = (request.get_json(silent=True) or {}).get("positions")
+    if not isinstance(positions, dict):
+        return jsonify({"error": "positions must be an object"}), 400
+    rows = []
+    for node_id, p in positions.items():
+        try:
+            x, y = float(p["x"]), float(p["y"])
+        except (TypeError, KeyError, ValueError):
+            return jsonify({"error": "bad position for {}".format(node_id)}), 400
+        if x != x or y != y or abs(x) == float("inf") or abs(y) == float("inf"):
+            return jsonify({"error": "bad position for {}".format(node_id)}), 400
+        rows.append((str(node_id)[:200], x, y, db.sqlite_now()))
+    conn = db.get_db()
+    conn.executemany(
+        "INSERT INTO node_positions (node_id, x, y, updated_at) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(node_id) DO UPDATE SET x = excluded.x, y = excluded.y, updated_at = excluded.updated_at",
+        rows)
+    conn.commit()
+    return jsonify({"status": "saved", "count": len(rows)})
+
+
+@app.route("/api/topology/positions", methods=["DELETE"])
+def api_topology_positions_clear():
+    """Forget every saved position (the page's "Re-arrange")."""
+    conn = db.get_db()
+    conn.execute("DELETE FROM node_positions")
+    conn.commit()
+    return jsonify({"status": "cleared"})
 
 
 @app.route("/api/adjacencies", methods=["GET"])

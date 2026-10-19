@@ -101,6 +101,18 @@ node: `id "ghost:lldp:<sysname|chassis>"` or `"ghost:peer:<ip>"`, `ghost: true`,
 circle. An edge to nowhere looks like a bug; a ghost reads as "something is out there". Use one
 shared ghost id per peer IP across BGP and OSPF, since the same router peering both ways is one box.
 
+**Layout is saved on the server.** The page lets physics place only the nodes that have no saved place,
+then switches physics off so the map stands still. Dragged and settled places go to the `node_positions`
+table (`PUT /api/topology/positions`, keyed by the node id above) and come back as `x`/`y` on each node in
+`GET /api/topology`, so every viewer sees the same map. Right-click the background and choose **Re-arrange**
+(`DELETE /api/topology/positions`) to start over.
+
+**Unknown nodes are grouped per router.** When two or more ghosts have links to one known device only, the
+page draws them as one `group:dev:<id>` node ("N unknown", one "N links" edge). It is not in the API
+graph; its place is stored under that id and returned in `positions`. Double-click opens the group; the
+router's menu has "Group unknown nodes". A ghost linked to two routers (a shared peer IP) is never grouped.
+An LLDP link's label (the port pair) is drawn only on hover or when the link is selected.
+
 ### 5.2 Draw each cable (and session) once
 
 When both ends are known devices, both report the same cable, so you get two LLDP rows. Key a
@@ -241,4 +253,3 @@ against them.
   parsers, each verified on a real device first.
 - LLDP only, no CDP. No L2 (MAC table / VLAN / STP) view.
 - BGP/OSPF peers outside the lab (and peers behind an address two devices share) show as ghosts.
-- Node positions are not saved; the layout is recomputed in the browser.

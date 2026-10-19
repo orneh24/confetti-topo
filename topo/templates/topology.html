@@ -180,6 +180,15 @@ document.addEventListener('themechange', fillLegendIcons);
 function toVisNodes(nodes) {
     var GROUP_COLOR = { router: themeColor('--blue'), node: themeColor('--text-dim'), unknown: themeColor('--border') };
     return nodes.map(function (n) {
+        var o = oneVisNode(n, GROUP_COLOR);
+        if (n.ghost) { o.mass = 0.5; }   // an unidentified neighbor is pushed around more than a router
+        if (n.members) { o.title = n.members.join('\n'); }   // hover on a group lists what is in it
+        if (n.x !== undefined) { o.x = n.x; o.y = n.y; }   // a place saved on the server
+        return o;
+    });
+}
+
+function oneVisNode(n, GROUP_COLOR) {
         var color = GROUP_COLOR[n.group] || themeColor('--green');
         if (iconsOn() && !hiddenIcons[n.id]) {
             // Icon above the name. A device that stopped answering ping is drawn in red.
@@ -189,7 +198,7 @@ function toVisNodes(nodes) {
                 label: n.label,
                 shape: 'image',
                 image: deviceIcon(n.device_type, line, themeColor('--bg-card'), vendorOn() ? n.vendor : '', themeColor('--text')),
-                size: 24,   // vis fixes the image height at 2 x size, so a wider vendor image keeps the same icon size
+                size: n.ghost ? 14 : 24,   // vis fixes the image height at 2 x size, so a wider vendor image keeps the same icon size
                 // vis paints a pale blue square behind an image unless the background is set: make it clear.
                 color: { background: 'rgba(0,0,0,0)', border: 'rgba(0,0,0,0)',
                          highlight: { background: 'rgba(0,0,0,0)', border: themeColor('--text') },
@@ -204,6 +213,7 @@ function toVisNodes(nodes) {
             id: n.id,
             label: n.label,
             shape: n.ghost ? 'dot' : 'box',
+            size: 8,   // only the dot (ghost) uses it
             color: {
                 background: n.ghost ? themeColor('--bg-card') : color,
                 border: n.ghost ? themeColor('--text-dim') : (n.reachable === 0 ? themeColor('--red') : color),
@@ -214,10 +224,28 @@ function toVisNodes(nodes) {
             borderWidth: n.ghost ? 1 : (n.reachable === 0 ? 3 : 0),
             shapeProperties: { borderDashes: n.ghost ? [4, 3] : false },
         };
-    });
 }
 
 function edgeKey(e) { return [e.from, e.to, e.layer, e.label].join('|'); }
+
+// An LLDP link shows its port names only while the pointer is on it or it is selected; BGP and OSPF links
+// always show theirs. A group's "N links" label is a summary, so it stays.
+var hoveredEdge = null;
+var lldpLabels = {};   // edge id -> the full label of an LLDP link
+
+function edgeLabel(e) {
+    var id = edgeKey(e);
+    if (e.layer !== 'lldp' || e.to.indexOf('group:') === 0) { return e.label; }
+    lldpLabels[id] = e.label;
+    return (id === hoveredEdge || id === selectedLink) ? e.label : '';
+}
+
+function updateLldpLabels() {
+    if (!edgeSet) { return; }
+    edgeSet.update(Object.keys(lldpLabels).filter(function (id) { return edgeSet.get(id); }).map(function (id) {
+        return { id: id, label: (id === hoveredEdge || id === selectedLink) ? lldpLabels[id] : '' };
+    }));
+}
 
 function toVisEdges(edges) {
     var LAYER_COLOR = { lldp: themeColor('--cyan'), bgp: themeColor('--yellow'), ospf: themeColor('--blue') };
@@ -227,12 +255,14 @@ function toVisEdges(edges) {
             id: edgeKey(e),
             from: e.from,
             to: e.to,
-            label: e.label,
+            label: edgeLabel(e),
             // A BGP/OSPF session that is not Established/FULL is drawn red and dashed.
             color: {
                 color: e.up === false ? themeColor('--red') : (LAYER_COLOR[e.layer] || themeColor('--gray')),
                 highlight: themeColor('--text'),   // the selected link
             },
+            // A link to an unidentified neighbor is short, so the ghost sits next to the router that sees it.
+            length: (e.to.indexOf('ghost:') === 0 || e.to.indexOf('group:') === 0) ? 110 : undefined,
             dashes: e.up === false,
             width: e.up === false ? 2 : 1,
             // Lines between the same two devices would sit on top of each other: bend BGP one way, OSPF the other.
@@ -252,6 +282,37 @@ function syncSet(set, items) {
     set.update(items);
 }
 
+// Layout: the places nodes sit are saved on the server (/api/topology/positions), the same map for everyone.
+function savePositions(ids) {
+    var positions = network.getPositions(ids);
+    fetch('/api/topology/positions', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ positions: positions }),
+    }).then(function (r) { if (!r.ok) { toast('layout not saved'); } })
+      .catch(function () { toast('layout not saved'); });
+}
+
+// Pin the nodes in ids, switch physics on for the rest, and save everything once it has settled.
+function startSettling(pinIds) {
+    nodeSet.update(pinIds.map(function (id) { return { id: id, fixed: true }; }));
+    network.setOptions({ physics: { enabled: true } });
+    network.once('stabilizationIterationsDone', settled);
+}
+
+function settled() {
+    network.setOptions({ physics: { enabled: false } });
+    nodeSet.update(nodeSet.getIds().map(function (id) { return { id: id, fixed: false }; }));
+    savePositions(nodeSet.getIds());
+    network.fit();
+}
+
+// "Re-arrange": forget the saved places and lay the map out again from scratch.
+function rearrange() {
+    fetch('/api/topology/positions', { method: 'DELETE' }).then(function () {
+        if (network) { network.destroy(); network = null; }
+        load();
+    }).catch(function () { toast('re-arrange failed'); });
+}
+
 var loadSeq = 0;
 var rawData = null;      // the last answer from the API, before the viewer's hiding
 var selectedNode = null;
@@ -264,7 +325,7 @@ function load() {
     fetch(url).then(function (r) { return r.json(); }).then(function (data) {
         if (seq !== loadSeq) { return; }   // a newer toggle already asked: drop this older answer
         rawData = data;                    // the node card reads this, so a hidden node can still be shown and un-hidden
-        data = hideFiltered(data);
+        data = groupUnknown(hideFiltered(data));
         var container = document.getElementById('net');
         if (!data.nodes.length) {
             if (network) { network.destroy(); network = null; }
@@ -272,25 +333,42 @@ function load() {
             return;
         }
         if (network) {
-            syncSet(nodeSet, toVisNodes(data.nodes));
+            var items = toVisNodes(data.nodes);
+            var newFree = items.filter(function (it) { return !nodeSet.get(it.id) && it.x === undefined; });
+            // A node already on screen keeps the place the viewer sees, not an older one from the server.
+            items.forEach(function (it) { if (nodeSet.get(it.id)) { delete it.x; delete it.y; } });
+            if (newFree.length) { startSettling(nodeSet.getIds()); }   // the old nodes stand still, the new ones find a place
+            syncSet(nodeSet, items);
             syncSet(edgeSet, toVisEdges(data.edges));
+            if (newFree.length) { network.stabilize(200); }
             return;
         }
         container.innerHTML = '';
-        nodeSet = new vis.DataSet(toVisNodes(data.nodes));
+        var items = toVisNodes(data.nodes);
+        var anyFree = false;
+        items.forEach(function (it) { if (it.x === undefined) { anyFree = true; } else { it.fixed = true; } });
+        nodeSet = new vis.DataSet(items);
         edgeSet = new vis.DataSet(toVisEdges(data.edges));
+        // Physics only places the nodes that have no saved place; then it is switched off, so the map stands still.
         var options = {
-            layout: { improvedLayout: true },
-            physics: { stabilization: true, barnesHut: { gravitationalConstant: -4000, springLength: 140 } },
+            layout: { randomSeed: 1, improvedLayout: true },
+            physics: { enabled: anyFree, solver: 'forceAtlas2Based', stabilization: { iterations: 200 },
+                       forceAtlas2Based: { springLength: 220, avoidOverlap: 1, gravitationalConstant: -200, centralGravity: 0.003 } },
             interaction: { hover: true },
             edges: { arrows: { to: false }, selectionWidth: function (width) { return width + 3; } },
         };
         network = new vis.Network(container, { nodes: nodeSet, edges: edgeSet }, options);
+        if (anyFree) { network.once('stabilizationIterationsDone', settled); }
+        network.on('dragEnd', function (params) {
+            if (params.nodes.length) { savePositions(params.nodes); }
+        });
         network.on('oncontext', function (params) {
             params.event.preventDefault();
             var id = network.getNodeAt(params.pointer.DOM);
             openContextMenu(id === undefined ? null : id, params.pointer.DOM.x, params.pointer.DOM.y);
         });
+        network.on('hoverEdge', function (params) { hoveredEdge = params.edge; updateLldpLabels(); });
+        network.on('blurEdge', function () { hoveredEdge = null; updateLldpLabels(); });
         network.on('dragStart', closeContextMenu);
         network.on('zoom', closeContextMenu);
         network.on('click', function (params) {
@@ -298,11 +376,15 @@ function load() {
             if (params.nodes.length) { showNodePanel(params.nodes[0]); }
             else if (params.edges.length) { showLinkPanel(params.edges[0]); }
             else { closeNodePanel(); closeLinkPanel(); }
+            updateLldpLabels();   // the selected LLDP link shows its ports
         });
         network.on('doubleClick', function (params) {
             if (params.nodes.length) {
                 var id = params.nodes[0];
-                if (id.indexOf('dev:') === 0) {
+                if (id.indexOf('group:') === 0) {
+                    expandedGroups[id.slice(6)] = true;
+                    load();
+                } else if (id.indexOf('dev:') === 0) {
                     window.location.href = '/devices/' + id.slice(4);
                 }
             }
@@ -403,6 +485,58 @@ function hideFiltered(data) {
         nodes = nodes.filter(function (n) { return near[n.id]; });
     }
     return { nodes: nodes, edges: edges };
+}
+
+// Unknown nodes that hang off one known device (all their links go to it) are drawn as ONE node,
+// "5 unknown", once a device has two or more. Double-click it, or "Expand" in its menu, to see them
+// separately; "Group unknown nodes" on the device puts them back. Not remembered.
+var expandedGroups = {};   // device node id -> true
+
+// {device node id: [unknown node ids]} for the unknown nodes that only touch that one device.
+function unknownByOwner(data) {
+    var ends = {};   // ghost id -> {known node id: true}
+    data.edges.forEach(function (e) {
+        [[e.from, e.to], [e.to, e.from]].forEach(function (p) {
+            if (p[0].indexOf('ghost:') === 0) { (ends[p[0]] = ends[p[0]] || {})[p[1]] = true; }
+        });
+    });
+    var owned = {};
+    data.nodes.forEach(function (n) {
+        var owners = n.ghost && ends[n.id] ? Object.keys(ends[n.id]) : [];
+        if (owners.length === 1 && owners[0].indexOf('dev:') === 0) { (owned[owners[0]] = owned[owners[0]] || []).push(n.id); }
+    });
+    return owned;
+}
+
+function groupUnknown(data) {
+    var owned = unknownByOwner(data);
+    var gone = {};   // unknown node id -> its group id
+    var groups = [];
+    Object.keys(owned).forEach(function (owner) {
+        if (owned[owner].length < 2 || expandedGroups[owner]) { return; }
+        var gid = 'group:' + owner;
+        var members = data.nodes.filter(function (n) { return owned[owner].indexOf(n.id) >= 0; });
+        owned[owner].forEach(function (id) { gone[id] = gid; });
+        var pos = (rawData && rawData.positions && rawData.positions[gid]) || {};
+        var g = { id: gid, label: members.length + ' unknown', group: 'unknown', ghost: true, device_type: 'unknown',
+                  vendor: '', owner: owner, members: members.map(function (m) { return m.label; }) };
+        if (pos.x !== undefined) { g.x = pos.x; g.y = pos.y; }
+        groups.push(g);
+    });
+    var edges = [];
+    var seen = {};
+    data.edges.forEach(function (e) {
+        var gid = gone[e.to] || gone[e.from];
+        if (!gid) { edges.push(e); return; }
+        if (!seen[gid]) {
+            seen[gid] = { from: gid.slice(6), to: gid, layer: e.layer, label: '', up: true, count: 0, details: [] };
+            edges.push(seen[gid]);
+        }
+        seen[gid].count++;
+        if (e.up === false) { seen[gid].up = false; }
+    });
+    groups.forEach(function (g) { seen[g.id].label = seen[g.id].count + (seen[g.id].count === 1 ? ' link' : ' links'); });
+    return { nodes: data.nodes.filter(function (n) { return !gone[n.id]; }).concat(groups), edges: edges };
 }
 
 // A look setting, not a filter: no FILTERED marker, and Show all leaves it alone.
@@ -661,6 +795,7 @@ function hideLinkPanel() {
 function closeLinkPanel() {
     hideLinkPanel();
     if (network) { network.unselectAll(); }
+    updateLldpLabels();
 }
 
 // ---- Right-click menu --------------------------------------------------------
@@ -721,11 +856,16 @@ function openContextMenu(id, x, y) {
     var node = id && rawData ? rawData.nodes.filter(function (n) { return n.id === id; })[0] : null;
     var title = document.createElement('div');
     title.className = 'title';
-    if (!node) {
+    if (id && id.indexOf('group:') === 0) {
+        title.textContent = 'Unknown nodes';
+        menu.appendChild(title);
+        menuItem(menu, 'Expand', function () { expandedGroups[id.slice(6)] = true; load(); });
+    } else if (!node) {
         title.textContent = 'Map';
         menu.appendChild(title);
         menuItem(menu, 'Show all', showAllLayers);
         menuItem(menu, 'Reset view', function () { network.fit(); });
+        menuItem(menu, 'Re-arrange', rearrange);
     } else {
         title.textContent = node.mgmt_ip ? node.label + ' | ' + node.mgmt_ip : node.label;   // e.g. csr-1 | 192.0.2.1
         menu.appendChild(title);
@@ -747,6 +887,9 @@ function openContextMenu(id, x, y) {
             updateFilterMarker();
             load();
         });
+        if (isDevice && expandedGroups[id]) {
+            menuItem(menu, 'Group unknown nodes', function () { delete expandedGroups[id]; load(); });
+        }
         var pollItem = menuItem(menu, 'Poll now', function () {}, true);
         if (isDevice) {
             fetch('/api/devices/' + node.device_id).then(function (r) { return r.json(); }).then(function (d) {

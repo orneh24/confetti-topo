@@ -91,6 +91,13 @@ session is down if either end says so); ghost links are never de-duplicated (con
 between the same pair of routers (loopback and link address) stay two edges, paired by position with
 Established first — a simple rule, wrong only when the two ends list them in a different order.
 
+The page keeps the map still and readable: physics places only nodes with no saved place, then stops.
+Places are stored in `node_positions` (`PUT`/`DELETE /api/topology/positions`, the same map for every viewer;
+`GET /api/topology` returns `x`/`y` per node and a `positions` dict). Unknown nodes whose links all go to one
+known device are drawn as one "N unknown" node (`group:dev:<id>`, made up by the page, so only `positions`
+knows it); double-click expands it. An LLDP link shows its port names only on hover or when selected.
+BGP/OSPF labels always show.
+
 Who is that neighbor? Two steps:
 1. **At poll time**, the apply step matches the management IP an LLDP neighbor advertises (`remote_mgmt_ip`),
    or a BGP/OSPF `peer_ip`, against the `mgmt_ip` aliases and stores `remote_device_id` / `peer_device_id`.

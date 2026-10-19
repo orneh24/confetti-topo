@@ -210,6 +210,15 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_events_at ON events(at);
         CREATE INDEX IF NOT EXISTS idx_events_device ON events(device_id, at);
+
+        -- Where each node sits on the topology page, shared by every viewer.
+        -- node_id is the graph id ('dev:5', 'ghost:lldp:sw1'), not a devices FK.
+        CREATE TABLE IF NOT EXISTS node_positions (
+            node_id    TEXT PRIMARY KEY,
+            x          REAL NOT NULL,
+            y          REAL NOT NULL,
+            updated_at TEXT NOT NULL
+        );
     """)
     # CREATE TABLE IF NOT EXISTS never adds a column to a table that exists already.
     if "remote_descr" not in [r[1] for r in db.execute("PRAGMA table_info(lldp_neighbors)")]:

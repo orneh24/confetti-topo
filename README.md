@@ -20,7 +20,10 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
   Devices are drawn as icons by type (router, switch, firewall, Linux server) with a Cisco, Palo Alto, Juniper or HPE mark; both can be switched off.
   A cable or session that both routers report is drawn once. A neighbor that is not a known device shows
   as a dashed "ghost" node, so nothing is silently dropped. A BGP/OSPF session that is not Established /
-  FULL is red and dashed.
+  FULL is red and dashed. Unknown nodes that hang off one router are grouped into a single "N unknown"
+  node (double-click to open it). The layout stands still and is saved on the server, so everyone sees the
+  same map (right-click the background and choose Re-arrange to start over). An LLDP link shows its ports
+  on hover or when selected.
 - **Peers find their router.** A BGP or OSPF peer is usually a loopback or link address, not the router's
   management IP. confetti-topo also reads each router's interface addresses, so a peer resolves to its
   router when exactly one router owns that address. Peers outside your lab stay ghosts.

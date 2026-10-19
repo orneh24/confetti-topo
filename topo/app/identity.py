@@ -380,6 +380,8 @@ def merge(conn, survivor_id, loser_id):
                  (survivor_id, loser_id))
 
     conn.execute("DELETE FROM devices WHERE id = ?", (loser_id,))
+    conn.execute("DELETE FROM node_positions WHERE node_id IN (?, ?)",
+                 ("dev:{}".format(loser_id), "group:dev:{}".format(loser_id)))
     conn.execute(
         """UPDATE merge_conflicts SET resolved = 1
            WHERE resolved = 0
