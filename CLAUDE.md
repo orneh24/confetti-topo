@@ -260,6 +260,9 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
 - Keep output minimalistic and use simple English.
 - Do not output large code snippets. Point at `file:line` and say what changed; the file itself is the record.
 - Do not display code changes in output unless asked to.
+- Always restart the dev server when a change needs it to take effect (the app
+  reads templates and Python code only at start), and check that the running
+  copy serves the change, before telling the user to look at it.
 
 ## Non-obvious constraints — do not regress these
 
