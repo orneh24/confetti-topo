@@ -20,6 +20,13 @@ Ideas only. Nothing here is built until the user picks it.
 - **Link state on cables:** colour an LLDP edge red when the local interface is down.
 - **Search and focus:** find a device or IP on the graph and highlight its neighbors.
 - **History:** keep the last N topologies so "what changed since yesterday" can be drawn.
+- **Label crowding:** link labels overlap each other and the vendor mark on a dense map. Try shorter labels,
+  or labels shown only on hover or selection.
+- **Linux detection on real hosts:** the "LLDP says Linux" rule and the System Description parser are only
+  tested on sample text. Check them against a real Linux host's `show lldp neighbors detail`.
+- **Selection outline** is a wide rectangle that includes the vendor mark. A tighter outline around the icon alone
+  would look better.
+- **More vendor marks** (Fortinet, Arista, Aruba, ...): add to `VENDOR_MARKS` and `VENDOR_NAMES` in topology.html.
 
 ## Platforms
 - **Junos**, then others. Follow the `confetti-topo-add-platform` skill: real output first.
@@ -27,5 +34,9 @@ Ideas only. Nothing here is built until the user picks it.
 
 ## Operations
 - **Authentication** for the UI and API (the siblings have none either).
+- **Placeholder address:** `topo/scripts/topo-setup.sh:61` has a non-documentation private address in a comment
+  example; change it to a documentation-range one.
+- **Theme drift:** confetti-traffic and confetti-butler still have the Terminal Green theme that was removed here.
+  Run `confetti-interop-checker`, then decide where the fix goes.
 - **Packer template** for vCenter, once one exists in butler that has actually run.
 - **vCenter discovery**, only together with a real vCenter to test against.
