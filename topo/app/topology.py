@@ -46,7 +46,9 @@ def _is_up(row):
 
 
 def build(conn, layer=None):
-    """?layer=lldp|bgp|ospf restricts edges to one source; default overlays all three."""
+    """layer limits the edges to some sources: "lldp", "bgp", "ospf", or a comma list
+    such as "lldp,bgp". None or "" overlays all three; an unknown name draws none."""
+    wanted = {"lldp", "bgp", "ospf"} if not layer else {x.strip() for x in layer.split(",")}
     owners = interface_owners(conn)
     nodes = {}
     for d in conn.execute("SELECT id, hostname, role, reachable FROM devices"):
@@ -64,7 +66,7 @@ def build(conn, layer=None):
 
     edges = []
 
-    if layer in (None, "", "lldp"):
+    if "lldp" in wanted:
         rows = conn.execute(
             """SELECT device_id, local_if, remote_chassis, remote_sysname, remote_port,
                       remote_mgmt_ip, remote_device_id
@@ -91,8 +93,8 @@ def build(conn, layer=None):
                 "label": "{} - {}".format(r["local_if"], r["remote_port"] or "?"),
             })
 
-    if layer in (None, "", "bgp", "ospf"):
-        protos = [layer] if layer in ("bgp", "ospf") else ["bgp", "ospf"]
+    protos = [p for p in ("bgp", "ospf") if p in wanted]
+    if protos:
         rows = conn.execute(
             "SELECT device_id, proto, peer_ip, peer_device_id, state FROM adjacencies "
             "WHERE proto IN ({})".format(",".join("?" * len(protos))),

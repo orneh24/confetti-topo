@@ -687,3 +687,12 @@ button.primary:hover { color: var(--bg); filter: brightness(1.15); }
 :root[data-layout="msdos"] button:active,
 :root[data-layout="msdos"] .btn-small:active { box-shadow: none; transform: translate(4px, 4px); }
 :root[data-layout="msdos"] .page-footer::after { content: "C:\\TOPO>\2588"; }
+
+/* Topology layer toggles: a lit button has a tick in every layout, and the layouts that
+   restyle every button get an "on" look of their own (pressed in / inverted). */
+.filters button.active::before { content: "\2713  "; }
+:root[data-layout="retro95"] .filters button.active {
+    background: #dfdfdf; font-weight: 700; border-color: #404040 #fff #fff #404040;
+}
+:root[data-layout="msdos"] .filters button.active { background: #FFFFFF; font-weight: 700; box-shadow: none; transform: translate(4px, 4px); }
+:root:is([data-layout="greencrt"]) .filters button.active { background: var(--crt-hi); color: var(--crt-bg); text-shadow: none; }

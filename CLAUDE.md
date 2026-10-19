@@ -83,7 +83,7 @@ unknown platform falls back to the IOS entry. Junos is planned, not started. The
 ### Topology
 
 `app/topology.py` builds `GET /api/topology`, a vis.js-shaped `{nodes, edges}` graph over LLDP neighbors and
-BGP/OSPF adjacencies (`?layer=lldp|bgp|ospf` limits it). A neighbor/peer that does not resolve to a known
+BGP/OSPF adjacencies (`?layer=lldp|bgp|ospf`, or a comma list, limits it; the page's LLDP/BGP/OSPF buttons are independent toggles). A neighbor/peer that does not resolve to a known
 device renders as a **ghost node** (`ghost:lldp:<sysname|chassis>`, or `ghost:peer:<ip>` shared by BGP and
 OSPF) rather than being dropped — an edge to nowhere reads as a bug, a distinctly styled ghost reads as
 "something is out there, unidentified". A cable or BGP/OSPF session both ends report is drawn once (a

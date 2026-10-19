@@ -833,8 +833,8 @@ def api_events():
 
 @app.route("/api/topology", methods=["GET"])
 def api_topology():
-    """?layer=lldp|bgp|ospf restricts edges to one source; default overlays
-    all three on the same device nodes."""
+    """?layer= limits the edges to one source or a comma list (lldp,bgp);
+    default overlays all three on the same device nodes."""
     return jsonify(topology.build(db.get_db(), request.args.get("layer")))
 
 

@@ -95,6 +95,20 @@ function pingCell(r) {
     return r ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>';
 }
 
+// Result of the last poll: a tick, a cross, or a dash when it was never polled.
+// fail_count is the number of polls in a row that got nothing; last_poll_ok is the last time one did.
+function pollResultIcon(d) {
+    if (d.role === 'node') { return ''; }
+    if (d.fail_count > 0) {
+        return '<span class="pill bad" title="Last poll failed (' + d.fail_count + ' in a row)' +
+            (d.last_poll_ok ? '; last success ' + esc(timeAgo(d.last_poll_ok)) : '') + '">&#10007;</span> ';
+    }
+    if (d.last_poll_ok) {
+        return '<span class="pill ok" title="Last poll succeeded ' + esc(timeAgo(d.last_poll_ok)) + '">&#10003;</span> ';
+    }
+    return '<span class="pill idle" title="Not polled yet">&ndash;</span> ';
+}
+
 function loadUnknownNeighbors() {
     fetch('/api/lldp/unknown').then(function (r) { return r.json(); }).then(function (list) {
         var rows = '';
@@ -131,7 +145,7 @@ function renderDevices(list) {
             '<td>' + esc(d.site || '') + '</td>' +
             '<td>' + esc(d.key) + '</td>' +
             '<td>' + pingCell(d.reachable) + '</td>' +
-            '<td><span class="pill ' + pollCls + '">' + esc(d.role === 'node' ? 'not polled' : d.poll_state) + '</span></td>' +
+            '<td>' + pollResultIcon(d) + '<span class="pill ' + pollCls + '">' + esc(d.role === 'node' ? 'not polled' : d.poll_state) + '</span></td>' +
             '<td>' + timeAgo(d.last_seen) + '</td>' +
             '<td>' + (d.role === 'node' || !d.enabled ? '' :
                 '<button onclick="pollDevice(' + d.id + ', this)">Poll now</button> ') +

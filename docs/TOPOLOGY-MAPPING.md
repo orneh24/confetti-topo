@@ -79,7 +79,7 @@ timestamp, one value for the whole poll).
 ## 5. Building the graph (`GET /api/topology`)
 
 Returns `{nodes: [...], edges: [...]}` in the shape vis.js wants. Optional `?layer=lldp|bgp|ospf`
-limits the edges to one source; the default overlays all three on the same nodes.
+(or a comma list such as `lldp,bgp`) limits the edges to those sources; the default overlays all three on the same nodes.
 
 **Nodes:** one per known device: `id "dev:<id>"`, `label` = hostname, `group` = role,
 `reachable` (ping state, optional), `ghost: false`.
@@ -185,7 +185,7 @@ against them.
   `remove` of ids that disappeared) instead of creating a new `vis.Network`; rebuilding resets
   layout and zoom on every refresh. Give edges a stable id (`from|to|layer|label`) so updates match.
 - Nodes: boxes for devices, dots for ghosts. Edge colour per layer (LLDP, BGP, OSPF) plus the red
-  dashed "down" style. Filter buttons All / LLDP / BGP / OSPF pass `?layer=`.
+  dashed "down" style. LLDP / BGP / OSPF toggle buttons (independent, remembered in `confetti-topo-layers`, a FILTERED marker while any is off) pass `?layer=` as a comma list.
 - Physics: `barnesHut` with `gravitationalConstant -4000`, `springLength 140` worked for a lab-size
   graph. Double-click a device node to open its detail page (ghosts have no page).
 - Empty state: show a plain message ("no devices yet") and destroy the network object.

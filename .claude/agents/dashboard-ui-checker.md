@@ -29,7 +29,7 @@ Unless told otherwise check Dark, Light and Neon Streamers, and every layout onc
 - The vis network exists (`.vis-network` canvas), the mock lab shows 3 router boxes and dashed ghost dots (`sw-access-1`, `198.51.100.7`, `198.51.100.8`, `203.0.113.9`).
 - The lab-rtr-c box has a red outline (mock ping state); the `Idle (Admin)` BGP edge is red and dashed.
 - One line per BGP/OSPF session between two routers, not two. BGP and OSPF lines bend opposite ways.
-- Filter buttons All / LLDP / BGP / OSPF change the edges; the legend is present and matches.
+- Layer toggles LLDP / BGP / OSPF (all on by default, independent, remembered in localStorage `confetti-topo-layers`): switching one off removes that layer's edges and shows the yellow FILTERED marker; its "Show all" button clears it. The legend is present and matches. Remove `confetti-topo-layers` before and after so the check leaves no state behind.
 - A theme change recolours the graph without resetting its zoom or layout. Double-clicking a router opens `/devices/<id>`.
 - Colours must be readable in each theme (canvas colours come from `themeColor()`).
 

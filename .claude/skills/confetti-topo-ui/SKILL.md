@@ -20,9 +20,14 @@ CDN.
 - `static/layout.css` carries the structure and the five layouts (Classic, Modern, Retro 95, MS-DOS, Neon
   Green CRT). It loads **after** `theme.css` on purpose. Use `.section > .section-header + .section-body`, not
   your own card CSS.
-- localStorage keys: `confetti-topo-theme`, `confetti-topo-layout`, `confetti-topo-theme-shuffle`.
+- localStorage keys: `confetti-topo-theme`, `confetti-topo-layout`, `confetti-topo-theme-shuffle`, `confetti-topo-layers` (the topology's LLDP/BGP/OSPF
+  toggles; a yellow FILTERED marker over the map shows while any layer is off).
 - Flask caches templates; restart the server after an edit. A literal `{{` in inline JS needs
   `{% raw %}...{% endraw %}` (constraint 6).
+
+## The devices page
+- A tick, cross or dash beside the poll state shows the last poll result: `fail_count > 0` is a cross, `last_poll_ok`
+  a tick, neither a dash, `role=node` none. It reuses the `pill ok/bad/idle` classes so every theme styles it.
 
 ## The topology page
 - vis.js draws on a canvas, so it needs literal colour strings. Read them with `themeColor('--blue')` each time

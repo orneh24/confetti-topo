@@ -462,6 +462,9 @@ def _():
     need(len(ospf) == 1 and ospf[0]["up"] is False and "EXSTART" in ospf[0]["label"],
          "an OSPF session with one end not FULL must be one down edge showing that state: %r" % ospf, p)
     need(all(e["from"] == "dev:%d" % a and e["to"] == "dev:%d" % b for e in sess), "session edges between a pair must all point the same way", p)
+    mixed = {e["layer"] for e in topology.build(conn, "lldp,bgp")["edges"]}
+    need("lldp" in mixed and "bgp" in mixed and "ospf" not in mixed, "?layer=lldp,bgp must show exactly those two layers: %r" % sorted(mixed), p)
+    need(not topology.build(conn, "none")["edges"], "an unknown layer name must draw no edges", p)
     conn.close()
     return p
 

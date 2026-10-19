@@ -18,17 +18,25 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
 .legend-box .ln { flex: 0 0 22px; height: 0; border-top: 3px solid; }
 .legend-box .hint { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 5px; }
 #net .empty { padding: 24px; }
+/* Shown over the map only while a layer is switched off, so a half-empty graph is never mistaken for the whole network. */
+.filter-marker { position: absolute; top: 12px; right: 12px; z-index: 5; display: none; align-items: center; gap: 10px;
+    font-size: 12px; font-weight: bold; color: var(--yellow); background: var(--yellow-bg);
+    border: 2px solid var(--yellow); border-radius: 4px; padding: 6px 10px; }
 </style>
 {% endblock %}
 {% block content %}
 <div class="filters">
-    <button class="active" data-layer="" onclick="setLayer('', this)">All</button>
-    <button data-layer="lldp" onclick="setLayer('lldp', this)">LLDP</button>
-    <button data-layer="bgp" onclick="setLayer('bgp', this)">BGP</button>
-    <button data-layer="ospf" onclick="setLayer('ospf', this)">OSPF</button>
+    <span class="hint">Show:</span>
+    <button class="active" data-layer="lldp" aria-pressed="true" onclick="toggleLayer(this)">LLDP</button>
+    <button class="active" data-layer="bgp" aria-pressed="true" onclick="toggleLayer(this)">BGP</button>
+    <button class="active" data-layer="ospf" aria-pressed="true" onclick="toggleLayer(this)">OSPF</button>
 </div>
 <div class="net-wrap">
     <div id="net"></div>
+    <div class="filter-marker" id="filter-marker" role="status">
+        <span id="filter-text"></span>
+        <button type="button" onclick="showAllLayers()">Show all</button>
+    </div>
     <details class="legend-box" open>
         <summary>Legend</summary>
         <h4>Devices</h4>
@@ -52,7 +60,6 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
 var network = null;
 var nodeSet = null;
 var edgeSet = null;
-var currentLayer = '';
 
 // vis.js draws on a canvas, so it needs literal colors rather than CSS
 // variables. Read them from the current theme each time the graph is built.
@@ -107,9 +114,13 @@ function syncSet(set, items) {
     set.update(items);
 }
 
+var loadSeq = 0;
+
 function load() {
-    var url = '/api/topology' + (currentLayer ? '?layer=' + currentLayer : '');
+    var url = '/api/topology?layer=' + (shownLayers().join(',') || 'none');
+    var seq = ++loadSeq;
     fetch(url).then(function (r) { return r.json(); }).then(function (data) {
+        if (seq !== loadSeq) { return; }   // a newer toggle already asked: drop this older answer
         var container = document.getElementById('net');
         if (!data.nodes.length) {
             if (network) { network.destroy(); network = null; }
@@ -142,14 +153,60 @@ function load() {
     });
 }
 
-function setLayer(layer, btn) {
-    currentLayer = layer;
-    var buttons = document.querySelectorAll('.filters button');
-    for (var i = 0; i < buttons.length; i++) { buttons[i].className = ''; }
-    btn.className = 'active';
+// The layer buttons are independent toggles: any mix of LLDP, BGP and OSPF can be shown.
+function shownLayers() {
+    return Array.prototype.map.call(document.querySelectorAll('.filters button.active'),
+        function (b) { return b.getAttribute('data-layer'); });
+}
+
+var LAYER_KEY = 'confetti-topo-layers';   // localStorage: JSON list of the layers that are switched on
+
+function setLayerButton(btn, on) {
+    btn.className = on ? 'active' : '';
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+}
+
+function saveLayers() {
+    try { localStorage.setItem(LAYER_KEY, JSON.stringify(shownLayers())); } catch (e) { /* private window: not remembered */ }
+}
+
+// Put the toggles back the way they were left; all on when nothing is saved.
+function restoreLayers() {
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(LAYER_KEY)); } catch (e) { saved = null; }
+    if (!Array.isArray(saved)) { return; }
+    document.querySelectorAll('.filters button').forEach(function (b) {
+        setLayerButton(b, saved.indexOf(b.getAttribute('data-layer')) !== -1);
+    });
+}
+
+// The warning over the map: which layers are hidden right now.
+function updateFilterMarker() {
+    var hidden = Array.prototype.map.call(document.querySelectorAll('.filters button:not(.active)'),
+        function (b) { return b.textContent; });
+    var marker = document.getElementById('filter-marker');
+    marker.style.display = hidden.length ? 'flex' : 'none';
+    document.getElementById('filter-text').textContent = hidden.length === 3
+        ? 'FILTERED: all connections hidden, devices only'
+        : 'FILTERED: ' + hidden.join(', ') + ' hidden';
+}
+
+function toggleLayer(btn) {
+    setLayerButton(btn, btn.className !== 'active');
+    saveLayers();
+    updateFilterMarker();
     load();
 }
 
+function showAllLayers() {
+    document.querySelectorAll('.filters button').forEach(function (b) { setLayerButton(b, true); });
+    saveLayers();
+    updateFilterMarker();
+    load();
+}
+
+restoreLayers();
+updateFilterMarker();
 load();
 setInterval(load, 20000);
 document.addEventListener('themechange', load);
