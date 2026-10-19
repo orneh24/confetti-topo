@@ -465,6 +465,13 @@ def _():
     mixed = {e["layer"] for e in topology.build(conn, "lldp,bgp")["edges"]}
     need("lldp" in mixed and "bgp" in mixed and "ospf" not in mixed, "?layer=lldp,bgp must show exactly those two layers: %r" % sorted(mixed), p)
     need(not topology.build(conn, "none")["edges"], "an unknown layer name must draw no edges", p)
+    # The BGP label carries the AS numbers: a row stores its peer's AS, so a's own AS is b's row.
+    conn.execute("UPDATE adjacencies SET remote_as = 65002 WHERE device_id = ? AND proto = 'bgp'", (a,))
+    conn.execute("UPDATE adjacencies SET remote_as = 65001 WHERE device_id = ? AND proto = 'bgp'", (b,))
+    conn.commit()
+    labels = [e["label"] for e in topology.build(conn, "bgp")["edges"]]
+    need(labels == ["bgp AS65001 - AS65002 Established"], "BGP label must name both AS numbers: %r" % labels, p)
+    need([e["label"] for e in topology.build(conn, "ospf")["edges"]] == ["ospf EXSTART"], "an OSPF label must not get an AS", p)
     conn.close()
     return p
 

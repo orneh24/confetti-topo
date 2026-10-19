@@ -86,7 +86,10 @@ Returns `{nodes: [...], edges: [...]}` in the shape vis.js wants. Optional `?lay
 
 **Edges:** `{from, to, layer, label, up?}`.
 - LLDP label: `"<local port> - <remote port>"`.
-- BGP/OSPF label: `"bgp Established"`; `up = (state == Established)` for BGP, `(state == FULL)` for OSPF.
+- OSPF label: `"ospf FULL"`; `up = (state == FULL)`.
+- BGP label: `"bgp AS65001 - AS65002 Established"`; `up = (state == Established)`. One `AS` when both ends match
+  (iBGP) or only one is known; the peer's AS for a ghost. A row stores its peer's AS, so a router's own AS is
+  read from the other end's row.
 
 ### 5.1 Ghost nodes
 
@@ -185,7 +188,9 @@ against them.
   `remove` of ids that disappeared) instead of creating a new `vis.Network`; rebuilding resets
   layout and zoom on every refresh. Give edges a stable id (`from|to|layer|label`) so updates match.
 - Nodes: boxes for devices, dots for ghosts. Edge colour per layer (LLDP, BGP, OSPF) plus the red
-  dashed "down" style. LLDP / BGP / OSPF toggle buttons (independent, remembered in `confetti-topo-layers`, a FILTERED marker while any is off) pass `?layer=` as a comma list.
+  dashed "down" style. LLDP / BGP / OSPF toggle buttons (independent, remembered in `confetti-topo-layers`, a FILTERED marker while any is off) pass `?layer=` as a comma list. An independent **Unknown nodes** toggle
+  (remembered in `confetti-topo-hide-unknown`) hides ghost nodes and their edges in the browser only; it is not
+  sent as `?layer=`, and the FILTERED marker shows while it is off too.
 - Physics: `barnesHut` with `gravitationalConstant -4000`, `springLength 140` worked for a lab-size
   graph. Double-click a device node to open its detail page (ghosts have no page).
 - Empty state: show a plain message ("no devices yet") and destroy the network object.

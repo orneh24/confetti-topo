@@ -16,7 +16,7 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
 
 ## What it does
 
-- **Topology.** LLDP cables, BGP sessions and OSPF adjacencies on one graph, with a per-protocol toggle (remembered in the browser).
+- **Topology.** LLDP cables, BGP sessions and OSPF adjacencies on one graph, with per-protocol toggles and one to hide unknown (ghost) nodes, remembered in the browser.
   A cable or session that both routers report is drawn once. A neighbor that is not a known device shows
   as a dashed "ghost" node, so nothing is silently dropped. A BGP/OSPF session that is not Established /
   FULL is red and dashed.

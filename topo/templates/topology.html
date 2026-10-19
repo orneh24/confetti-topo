@@ -30,6 +30,8 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <button class="active" data-layer="lldp" aria-pressed="true" onclick="toggleLayer(this)">LLDP</button>
     <button class="active" data-layer="bgp" aria-pressed="true" onclick="toggleLayer(this)">BGP</button>
     <button class="active" data-layer="ospf" aria-pressed="true" onclick="toggleLayer(this)">OSPF</button>
+    <span class="hint">|</span>
+    <button class="active" id="unknown-btn" aria-pressed="true" onclick="toggleUnknown(this)" title="Neighbors and peers that are not matched to a known device">Unknown nodes</button>
 </div>
 <div class="net-wrap">
     <div id="net"></div>
@@ -47,7 +49,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
         <div class="row"><span class="sw ghost"></span>unresolved neighbor or peer: seen, but not matched to a known device</div>
         <h4>Links</h4>
         <div class="row"><span class="ln" style="border-color:var(--cyan)"></span>LLDP cable: local port - remote port</div>
-        <div class="row"><span class="ln" style="border-color:var(--yellow)"></span>BGP session and its state</div>
+        <div class="row"><span class="ln" style="border-color:var(--yellow)"></span>BGP session: AS number(s) and state</div>
         <div class="row"><span class="ln" style="border-color:var(--blue)"></span>OSPF adjacency and its state</div>
         <div class="row"><span class="ln" style="border-color:var(--red);border-top-style:dashed"></span>BGP/OSPF session that is not Established / FULL</div>
         <div class="hint">Double-click a router to open its page. Drag to move, scroll to zoom.</div>
@@ -121,6 +123,7 @@ function load() {
     var seq = ++loadSeq;
     fetch(url).then(function (r) { return r.json(); }).then(function (data) {
         if (seq !== loadSeq) { return; }   // a newer toggle already asked: drop this older answer
+        if (unknownHidden()) { data = withoutUnknown(data); }
         var container = document.getElementById('net');
         if (!data.nodes.length) {
             if (network) { network.destroy(); network = null; }
@@ -155,7 +158,7 @@ function load() {
 
 // The layer buttons are independent toggles: any mix of LLDP, BGP and OSPF can be shown.
 function shownLayers() {
-    return Array.prototype.map.call(document.querySelectorAll('.filters button.active'),
+    return Array.prototype.map.call(document.querySelectorAll('.filters button[data-layer].active'),
         function (b) { return b.getAttribute('data-layer'); });
 }
 
@@ -175,20 +178,23 @@ function restoreLayers() {
     var saved = null;
     try { saved = JSON.parse(localStorage.getItem(LAYER_KEY)); } catch (e) { saved = null; }
     if (!Array.isArray(saved)) { return; }
-    document.querySelectorAll('.filters button').forEach(function (b) {
+    document.querySelectorAll('.filters button[data-layer]').forEach(function (b) {
         setLayerButton(b, saved.indexOf(b.getAttribute('data-layer')) !== -1);
     });
 }
 
 // The warning over the map: which layers are hidden right now.
 function updateFilterMarker() {
-    var hidden = Array.prototype.map.call(document.querySelectorAll('.filters button:not(.active)'),
+    var hidden = Array.prototype.map.call(document.querySelectorAll('.filters button[data-layer]:not(.active)'),
         function (b) { return b.textContent; });
     var marker = document.getElementById('filter-marker');
-    marker.style.display = hidden.length ? 'flex' : 'none';
-    document.getElementById('filter-text').textContent = hidden.length === 3
-        ? 'FILTERED: all connections hidden, devices only'
-        : 'FILTERED: ' + hidden.join(', ') + ' hidden';
+    var text = hidden.length === 3 ? 'all connections hidden, devices only' : '';
+    if (!text) {
+        if (unknownHidden()) { hidden.push('unknown nodes'); }
+        text = hidden.join(', ') + ' hidden';
+    }
+    marker.style.display = (hidden.length || unknownHidden()) ? 'flex' : 'none';
+    document.getElementById('filter-text').textContent = 'FILTERED: ' + text;
 }
 
 function toggleLayer(btn) {
@@ -198,14 +204,38 @@ function toggleLayer(btn) {
     load();
 }
 
+// "Unknown nodes" = the ghost nodes: neighbors and peers not matched to a known device.
+// Shown by default (constraint 13); hiding them is the viewer's choice, remembered in its own key.
+var UNKNOWN_KEY = 'confetti-topo-hide-unknown';
+
+function unknownHidden() {
+    return document.getElementById('unknown-btn').className !== 'active';
+}
+
+function withoutUnknown(data) {
+    var keep = {};
+    var nodes = data.nodes.filter(function (n) { if (!n.ghost) { keep[n.id] = true; } return !n.ghost; });
+    return { nodes: nodes, edges: data.edges.filter(function (e) { return keep[e.from] && keep[e.to]; }) };
+}
+
+function toggleUnknown(btn) {
+    setLayerButton(btn, btn.className !== 'active');
+    try { localStorage.setItem(UNKNOWN_KEY, unknownHidden() ? '1' : '0'); } catch (e) { /* not remembered */ }
+    updateFilterMarker();
+    load();
+}
+
 function showAllLayers() {
-    document.querySelectorAll('.filters button').forEach(function (b) { setLayerButton(b, true); });
+    document.querySelectorAll('.filters button[data-layer]').forEach(function (b) { setLayerButton(b, true); });
     saveLayers();
+    setLayerButton(document.getElementById('unknown-btn'), true);
+    try { localStorage.setItem(UNKNOWN_KEY, '0'); } catch (e) { /* not remembered */ }
     updateFilterMarker();
     load();
 }
 
 restoreLayers();
+try { setLayerButton(document.getElementById('unknown-btn'), localStorage.getItem(UNKNOWN_KEY) !== '1'); } catch (e) { /* shown */ }
 updateFilterMarker();
 load();
 setInterval(load, 20000);

@@ -96,7 +96,7 @@ def build(conn, layer=None):
     protos = [p for p in ("bgp", "ospf") if p in wanted]
     if protos:
         rows = conn.execute(
-            "SELECT device_id, proto, peer_ip, peer_device_id, state FROM adjacencies "
+            "SELECT device_id, proto, peer_ip, peer_device_id, remote_as, state FROM adjacencies "
             "WHERE proto IN ({})".format(",".join("?" * len(protos))),
             protos,
         ).fetchall()
@@ -108,7 +108,7 @@ def build(conn, layer=None):
                 # peering both ways is one box, not two.
                 edges.append({
                     "from": "dev:{}".format(r["device_id"]), "to": ghost_id("peer", r["peer_ip"]),
-                    "layer": r["proto"], "label": "{} {}".format(r["proto"], r["state"]),
+                    "layer": r["proto"], "label": _session_label(r["proto"], [r["remote_as"]], r["state"]),
                     "up": _is_up(r),
                 })
             else:
@@ -129,11 +129,32 @@ def build(conn, layer=None):
                 bad = [x for x in ends if not _is_up(x)]
                 edges.append({
                     "from": "dev:{}".format(lo), "to": "dev:{}".format(hi), "layer": proto,
-                    "label": "{} {}".format(proto, (bad or ends)[0]["state"]),
+                    "label": _session_label(proto, _as_numbers(ends, lo), (bad or ends)[0]["state"]),
                     "up": not bad,
                 })
 
     return {"nodes": list(nodes.values()), "edges": edges}
+
+
+def _as_numbers(ends, lo):
+    """The AS number of each end of a drawn session, lower device id first. A row
+    stores the AS of the peer it points at, so the lower device's own AS comes
+    from the higher device's row and the other way round. An end that did not
+    report (or a non-BGP row) leaves its AS out."""
+    own = {}
+    for x in ends:
+        if x["remote_as"] is not None:
+            own[x["device_id"] == lo] = x["remote_as"]   # True: lo's row names hi's AS
+    return [own.get(False), own.get(True)]
+
+
+def _session_label(proto, as_numbers, state):
+    """"bgp AS65001 - AS65002 Established"; one AS when both ends match (iBGP) or only one is known."""
+    known = [n for n in as_numbers if n is not None]
+    if proto != "bgp" or not known:
+        return "{} {}".format(proto, state)
+    asn = "AS{}".format(known[0]) if len(set(known)) == 1 else " - ".join("AS{}".format(n) for n in known)
+    return "{} {} {}".format(proto, asn, state)
 
 
 def adjacencies(conn, device_id=None):

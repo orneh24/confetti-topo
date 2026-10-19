@@ -21,7 +21,7 @@ CDN.
   Green CRT). It loads **after** `theme.css` on purpose. Use `.section > .section-header + .section-body`, not
   your own card CSS.
 - localStorage keys: `confetti-topo-theme`, `confetti-topo-layout`, `confetti-topo-theme-shuffle`, `confetti-topo-layers` (the topology's LLDP/BGP/OSPF
-  toggles; a yellow FILTERED marker over the map shows while any layer is off).
+  toggles) and `confetti-topo-hide-unknown` (the "Unknown nodes" toggle: hides ghost nodes and their edges in the browser only; a yellow FILTERED marker over the map shows while any layer is off or unknown nodes are hidden; its "Show all" resets both keys).
 - Flask caches templates; restart the server after an edit. A literal `{{` in inline JS needs
   `{% raw %}...{% endraw %}` (constraint 6).
 
