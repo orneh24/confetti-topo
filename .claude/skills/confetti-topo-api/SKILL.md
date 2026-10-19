@@ -24,7 +24,7 @@ Every identifier ever observed lives in `device_aliases` permanently — a histo
 only ever promotes upward.
 
 Two entry points, not interchangeable:
-- `identity.ingest(conn, candidates, fields, source, ref)` — discovery paths (manual, sweep, seedfile,
+- `identity.ingest(conn, candidates, fields, source, ref)` — discovery paths (manual, sweep, seedfile, butler,
   confetti-traffic import, LLDP adopt). Resolves the device by alias-matching from scratch.
 - `identity.observe(conn, device_id, candidates, fields, source, ref)` — the poller only. The device_id is
   already known, so it skips alias-matching and only guards `serial`/`vmuuid` disagreeing with what is on
@@ -54,11 +54,11 @@ those two columns to NULL, so its neighbors become ghosts again.
   `POST /api/credentials/clear {device_ids}`
 - `POST /api/devices/<id>/merge`; `GET /api/conflicts?resolved=0|1`; `POST /api/conflicts/<id>/dismiss`
 
-**Discovery:** `POST /api/discover/{sweep,seedfile,confetti}` return `{device_ids, conflicts}`.
+**Discovery:** `POST /api/discover/{sweep,seedfile,confetti,butler}` return `{device_ids, conflicts}`.
 `POST /api/discover/run` runs the scheduled sources now (`TOPO_DISCOVERY_*`); `GET /api/discover/status`.
 `GET /api/lldp/unknown`; `POST /api/lldp/adopt {ip, hostname?}` adds one with polling OFF (`enabled=0`).
 
-**Topology:** `GET /api/topology?layer=lldp|bgp|ospf[,..]` (vis.js `{nodes, edges}`, default overlays all three),
+**Topology:** `GET /api/topology?layer=lldp|bgp|ospf[,..]` (vis.js `{nodes, edges}`; each edge has `details`, one report per end that saw it, default overlays all three),
 `GET /api/adjacencies[?device_id=]`, `GET /api/lldp-neighbors[?device_id=]`. The last two return the
 **effective** `peer_device_id` / `remote_device_id`.
 

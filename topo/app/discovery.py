@@ -15,7 +15,7 @@ import time
 from . import config
 from . import db
 from . import events
-from .collectors import confetti
+from .collectors import butler, confetti
 from .collectors import seedfile
 from .collectors import sweep
 
@@ -49,6 +49,8 @@ def run_once():
     sources = []
     if config.DISCOVERY_CONFETTI_URL:
         sources.append(("confetti", lambda c: confetti.discover(c, config.DISCOVERY_CONFETTI_URL)))
+    if config.DISCOVERY_BUTLER_URL:
+        sources.append(("butler", lambda c: butler.discover(c, config.DISCOVERY_BUTLER_URL)))
     for cidr in config.DISCOVERY_SWEEP_CIDRS:
         sources.append(("sweep " + cidr, lambda c, cidr=cidr: sweep.sweep(c, cidr)[1:]))
     if config.DISCOVERY_SEEDFILE:

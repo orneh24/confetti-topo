@@ -115,9 +115,9 @@ are drawn red and dashed.
 
 ### Discovery on a timer, and the LLDP crawl
 
-- `app/discovery.py` runs the confetti-traffic import, subnet sweeps and the seed file every
+- `app/discovery.py` runs the confetti-traffic and confetti-butler imports, subnet sweeps and the seed file every
   `TOPO_DISCOVERY_INTERVAL_S` seconds (default 0 = never; nothing runs unless configured via
-  `TOPO_DISCOVERY_CONFETTI_URL` / `_SWEEP_CIDRS` / `_SEEDFILE`). Each source commits on its own, so one
+  `TOPO_DISCOVERY_CONFETTI_URL` / `_BUTLER_URL` / `_SWEEP_CIDRS` / `_SEEDFILE`). Each source commits on its own, so one
   failing source never discards another's work. A device that did not exist before gets a
   `device_discovered` event. `POST /api/discover/run` runs it once by hand. There is no vCenter source.
 - `app/lldp_crawl.py`: an LLDP neighbor advertising a management IP no device owns is listed by
@@ -196,6 +196,7 @@ There is no Packer template.
 | Subnet sweep | `POST /api/discover/sweep` | TCP connect to port 22 only — coarse on purpose; the poller's own `version` task does real identification next cycle |
 | YAML seed file | `POST /api/discover/seedfile` | `seed/devices.yaml.sample` shows the shape |
 | confetti-traffic import | `POST /api/discover/confetti` | `GET <hub_url>/endpoints`, imported as `role='node'`, `vendor='alpine'`, `platform='linux'` — never SSH-polled. `site` is the endpoint's `group_name`, which is confetti-traffic's *effective* group: a group set on its dashboard overrides what the node registers, so an override changes `site` on the next import |
+| confetti-butler import | `POST /api/discover/butler` | `GET <butler_url>/api/devices`; inventory only (hostname, IP, serial, vendor, platform, model, role, site), no credentials. Merged through `identity.ingest` (source `butler`), so a router already known is not duplicated; butler's role is kept, so a `role='node'` device is still never polled |
 | LLDP crawl | `POST /api/lldp/adopt` | A neighbor with an unknown management IP, added inventory-only (polling off) |
 
 ## Project Structure
@@ -218,11 +219,11 @@ topo/
     discovery.py       — scheduled discovery thread (off by default)
     lldp_crawl.py      — adopt unknown LLDP neighbors as inventory-only devices
     metrics.py         — /metrics Prometheus text
-    collectors/        — ssh.py, sweep.py, confetti.py, seedfile.py
+    collectors/        — ssh.py, sweep.py, confetti.py, butler.py, seedfile.py
     parsers/           — ios.py, regex only
   templates/           — base.html (head, header/nav, theme + layout pickers, footer, Retro taskbar)
                          + dashboard, devices, device, topology, conflicts, settings, each `{% extends "base.html" %}`
-  static/theme.css     — the ONE place colours live (Dark, Light, Monokai, High Contrast, Terminal green,
+  static/theme.css     — the ONE place colours live (Dark, Light, Monokai, High Contrast,
                          Confetti Night, Neon Streamers). Pages must not define their own :root colours
   static/layout.css    — Classic, Modern, Retro 95, MS-DOS, Neon Green CRT. Loaded AFTER theme.css
   static/theme.js      — THEMES + LAYOUTS lists and the two header dropdowns (confetti-topo-theme,
@@ -256,7 +257,7 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
   `topo.db` must be `0600` (`checkpath --directory --mode 0700` on `/var/lib/confetti-topo` in the OpenRC
   service is the current mitigation).
 - **The API is unauthenticated**, same trust model as the siblings; do not expose it. A sweep CIDR or a
-  confetti-traffic URL given to the API makes the server connect there.
+  confetti-traffic or confetti-butler URL given to the API makes the server connect there.
 - **Keep code simplistic to avoid over-engineering.** A network engineer reading this at 2am should be able
   to follow it without decoding an abstraction.
 

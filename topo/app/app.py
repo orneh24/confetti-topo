@@ -21,7 +21,7 @@ from . import metrics
 from . import poller
 from . import reach
 from . import topology
-from .collectors import confetti
+from .collectors import butler, confetti
 from .collectors import seedfile
 from .collectors import sweep as sweep_collector
 
@@ -786,6 +786,24 @@ def api_discover_confetti():
         device_ids, conflicts = confetti.discover(conn, hub_url)
     except Exception as exc:
         return jsonify({"error": "confetti-traffic hub request failed: {}".format(exc)}), 502
+    conn.commit()
+    return jsonify({"status": "ok", "device_ids": device_ids, "conflicts": conflicts})
+
+
+@app.route("/api/discover/butler", methods=["POST"])
+def api_discover_butler():
+    """Body: {"butler_url": "http://10.0.0.101"}. Imports confetti-butler's device
+    inventory (no credentials) — see collectors/butler.py."""
+    data = request.get_json(force=True, silent=True) or {}
+    butler_url = data.get("butler_url")
+    if not butler_url:
+        return jsonify({"error": "butler_url is required"}), 400
+
+    conn = db.get_db()
+    try:
+        device_ids, conflicts = butler.discover(conn, butler_url)
+    except Exception as exc:
+        return jsonify({"error": "confetti-butler request failed: {}".format(exc)}), 502
     conn.commit()
     return jsonify({"status": "ok", "device_ids": device_ids, "conflicts": conflicts})
 

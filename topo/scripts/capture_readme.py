@@ -4,12 +4,13 @@
     python scripts/capture_readme.py [output-dir]     (default: docs/img)
 
 Seeds a throwaway database with seed_mock_lab.py, starts a server on it (port
-8099), drives Chromium, then stops the server and deletes the
+a free port), drives Chromium, then stops the server and deletes the
 database. Writes themes.png, layouts.png and confetti-topo-demo.gif. Run it
 after any UI change or rename so the README never shows an old look.
 """
 
 import io
+import socket
 import os
 import subprocess
 import sys
@@ -23,11 +24,20 @@ from playwright.sync_api import sync_playwright
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOPO = os.path.dirname(HERE)
 OUT = sys.argv[1] if len(sys.argv) > 1 else os.path.join(TOPO, "..", "docs", "img")
-PORT = 8099
+
+
+def free_port():
+    """A port nothing listens on. A fixed one once let a different project's server answer and get photographed."""
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+PORT = free_port()
 BASE = "http://127.0.0.1:{}".format(PORT)
 SIZE = {"width": 1280, "height": 720}
 
-THEMES = ["light", "terminal", "confetti-night", "neon"]      # themes.png, in order
+THEMES = ["light", "monokai", "confetti-night", "neon"]      # themes.png, in order
 LAYOUTS = ["classic", "modern", "retro95", "msdos", "greencrt"]           # layouts.png, in order
 TOUR = ["/", "/devices", "/devices/1", "/topology", "/conflicts"]
 

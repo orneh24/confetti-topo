@@ -241,14 +241,15 @@ def _apply_lldp(conn, device_id, parsed, now):
                     conn, row["remote_mgmt_ip"], row.get("remote_sysname"), _hostname(conn, device_id))
         conn.execute(
             """INSERT INTO lldp_neighbors (device_id, local_if, remote_chassis, remote_sysname,
-                   remote_port, remote_mgmt_ip, remote_device_id, last_seen)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   remote_port, remote_mgmt_ip, remote_device_id, remote_descr, last_seen)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(device_id, local_if, remote_port) DO UPDATE SET
                    remote_chassis=excluded.remote_chassis, remote_sysname=excluded.remote_sysname,
                    remote_mgmt_ip=excluded.remote_mgmt_ip, remote_device_id=excluded.remote_device_id,
-                   last_seen=excluded.last_seen""",
+                   remote_descr=excluded.remote_descr, last_seen=excluded.last_seen""",
             (device_id, row["local_if"], row.get("remote_chassis"), row.get("remote_sysname"),
-             row.get("remote_port"), row.get("remote_mgmt_ip"), remote_device_id, now),
+             row.get("remote_port"), row.get("remote_mgmt_ip"), remote_device_id,
+             row.get("remote_descr"), now),
         )
     # A neighbor this poll didn't report is gone (cable moved, LLDP turned
     # off) — drop it so the topology doesn't keep a dead link. Empty is a

@@ -19,5 +19,6 @@ services:
       TOPO_SSH_SECRET: ${TOPO_SSH_SECRET:-}
       # TOPO_DISCOVERY_INTERVAL_S: 900
       # TOPO_DISCOVERY_CONFETTI_URL: http://hub.example
+      # TOPO_DISCOVERY_BUTLER_URL: http://butler.example
 volumes:
   topo-data:

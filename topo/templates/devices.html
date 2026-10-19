@@ -34,6 +34,10 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
                 <input type="text" name="hub_url" placeholder="Confetti Traffic hub URL" style="width:220px">
                 <button type="submit">Import Confetti Traffic nodes</button>
             </form>
+            <form class="inline" id="butler-form" style="margin-bottom:8px">
+                <input type="text" name="butler_url" placeholder="Confetti Butler URL" style="width:220px">
+                <button type="submit">Import Confetti Butler devices</button>
+            </form>
             <form class="inline" id="seedfile-form">
                 <input type="text" name="path" placeholder="seed/devices.yaml" style="width:220px">
                 <button type="submit">Load seed file</button>
@@ -48,11 +52,11 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
                 <button type="button" id="poll-all-btn" class="primary" onclick="pollAll()">Poll all now</button>
                 <span class="msg" id="poll-msg"></span>
             </div>
-            <table class="striped">
+            <table class="striped compact">
                 <thead>
                     <tr>
-                        <th>Hostname</th><th>Role</th><th>Mgmt IP</th><th>Site</th>
-                        <th>Key</th><th>Ping</th><th>Poll</th><th>Last seen</th><th></th>
+                        <th>Hostname</th><th>Poll</th><th>Role</th><th>Mgmt IP</th><th>Site</th>
+                        <th>Key</th><th>Ping</th><th>Last seen</th><th></th>
                     </tr>
                 </thead>
                 <tbody id="device-rows"></tbody>
@@ -140,12 +144,12 @@ function renderDevices(list) {
         if (d.role === 'node') { pollCls = 'node'; }
         rows += '<tr>' +
             '<td><a href="/devices/' + d.id + '">' + esc(d.hostname) + '</a></td>' +
+            '<td>' + pollResultIcon(d) + '<span class="pill ' + pollCls + '">' + esc(d.role === 'node' ? 'not polled' : d.poll_state) + '</span></td>' +
             '<td>' + esc(d.role) + '</td>' +
             '<td>' + esc(d.mgmt_ip || '') + '</td>' +
             '<td>' + esc(d.site || '') + '</td>' +
             '<td>' + esc(d.key) + '</td>' +
             '<td>' + pingCell(d.reachable) + '</td>' +
-            '<td>' + pollResultIcon(d) + '<span class="pill ' + pollCls + '">' + esc(d.role === 'node' ? 'not polled' : d.poll_state) + '</span></td>' +
             '<td>' + timeAgo(d.last_seen) + '</td>' +
             '<td>' + (d.role === 'node' || !d.enabled ? '' :
                 '<button onclick="pollDevice(' + d.id + ', this)">Poll now</button> ') +
@@ -284,6 +288,13 @@ document.getElementById('confetti-form').addEventListener('submit', function (ev
     var hubUrl = ev.target.hub_url.value.trim();
     if (!hubUrl) { return; }
     runDiscover('/api/discover/confetti', { hub_url: hubUrl }, 'Confetti Traffic import');
+});
+
+document.getElementById('butler-form').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var url = ev.target.butler_url.value.trim();
+    if (!url) { return; }
+    runDiscover('/api/discover/butler', { butler_url: url }, 'Confetti Butler import');
 });
 
 document.getElementById('seedfile-form').addEventListener('submit', function (ev) {

@@ -17,6 +17,7 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
 ## What it does
 
 - **Topology.** LLDP cables, BGP sessions and OSPF adjacencies on one graph, with per-protocol toggles and one to hide unknown (ghost) nodes, remembered in the browser.
+  Devices are drawn as icons by type (router, switch, firewall, Linux server) with a Cisco, Palo Alto, Juniper or HPE mark; both can be switched off.
   A cable or session that both routers report is drawn once. A neighbor that is not a known device shows
   as a dashed "ghost" node, so nothing is silently dropped. A BGP/OSPF session that is not Established /
   FULL is red and dashed.
@@ -24,7 +25,7 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
   management IP. confetti-topo also reads each router's interface addresses, so a peer resolves to its
   router when exactly one router owns that address. Peers outside your lab stay ghosts.
 - **Devices.** Add routers by hand, by a subnet sweep (SSH port scan), from a YAML seed file, or import the
-  test nodes from confetti-traffic. The same router seen by two sources lands on one device. When the
+  test nodes from confetti-traffic or the device list from confetti-butler. The same router seen by two sources lands on one device. When the
   identifiers disagree (the same IP now answers with a different serial), it raises a conflict instead of
   guessing.
 - **Polling.** Every few minutes it logs in once per router and reads version, interfaces, LLDP, BGP and
@@ -37,9 +38,9 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
 - **Events.** Neighbor, peer and interface changes, OS changes and devices going unreachable are listed on the
   dashboard and on each device page. There is no alerting; see the roadmap.
 - **Metrics.** `GET /metrics` serves Prometheus text.
-- **Look.** Seven colour themes (or Shuffle) and five layouts, picked in the header.
+- **Look.** Six colour themes (or Shuffle) and five layouts, picked in the header.
 
-![The dashboard in four themes: Light, Terminal green, Confetti Night and Neon Streamers](docs/img/themes.png)
+![The dashboard in four themes: Light, Monokai, Confetti Night and Neon Streamers](docs/img/themes.png)
 
 ![The dashboard in five layouts: Classic, Modern, Retro 95, MS-DOS and Neon Green CRT](docs/img/layouts.png)
 
@@ -86,7 +87,7 @@ butler's script, which has run on a real Alpine 3.24 VM.
 ## Security notes
 
 - Credentials are stored in plain text in `topo.db`. Keep the file private; it is gitignored.
-- The web UI and API have no login. Run it on a lab network only. A sweep range or a confetti-traffic URL
+- The web UI and API have no login. Run it on a lab network only. A sweep range or a confetti-traffic or confetti-butler URL
   given to the API makes the server connect there.
 
 ## More

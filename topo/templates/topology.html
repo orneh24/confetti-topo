@@ -18,8 +18,38 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
 .legend-box .ln { flex: 0 0 22px; height: 0; border-top: 3px solid; }
 .legend-box .hint { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 5px; }
 #net .empty { padding: 24px; }
+/* Right-click menu and the short message after an action. */
+.ctx-menu { position: absolute; z-index: 8; display: none; min-width: 190px; background: var(--bg-card); border: 1px solid var(--text-dim);
+    border-radius: 4px; padding: 4px; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.ctx-menu .title { padding: 3px 8px 5px; font-size: 11px; font-weight: bold; color: var(--text-dim); border-bottom: 1px solid var(--border); margin-bottom: 3px; word-break: break-all; }
+.ctx-menu button { display: block; width: 100%; text-align: left; margin: 1px 0; }
+.toast { position: absolute; z-index: 9; left: 50%; bottom: 16px; transform: translateX(-50%); display: none; max-width: 80%;
+    font-size: 12px; color: var(--text); background: var(--bg-card); border: 1px solid var(--text-dim); border-radius: 4px; padding: 6px 12px; }
+/* Click a node: this card shows what is known about it, with a checkbox to hide it. */
+/* Top-left: the node or link card with the FILTERED marker on its right. On a narrow map the marker wraps under the card. */
+.left-stack { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 6; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 8px; pointer-events: none; }
+.left-stack > * { pointer-events: auto; }
+.node-panel { position: relative; flex: none; width: 270px; overflow-y: auto;
+    display: none; font-size: 12px; color: var(--text); background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; }
+/* A name in the card that selects that device: plain link look in every layout. */
+:root .node-panel .kv-row button.linklike { display: inline; background: none; border: 0; box-shadow: none; transform: none; border-radius: 0;
+    padding: 0; margin: 0; font: inherit; font-weight: bold; text-transform: none; text-shadow: none; color: var(--blue); text-decoration: underline; cursor: pointer; }
+:root .node-panel .kv-row button.linklike:hover { background: none; color: var(--text); }
+.node-panel h3 { margin: 0 24px 2px 0; font-size: 14px; word-break: break-all; }
+.node-panel .close { position: absolute; top: 6px; right: 8px; padding: 0 6px; }
+.node-panel .sub { color: var(--text-dim); margin-bottom: 6px; }
+.node-panel .kv-row { display: flex; gap: 8px; padding: 1px 0; }
+.node-panel .kv-row .k { flex: 0 0 76px; color: var(--text-dim); }
+.node-panel .kv-row .v { word-break: break-all; }
+.node-panel h4 { margin: 8px 0 3px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
+.node-panel .hide-row + .hide-row { margin-top: 4px; padding-top: 0; border-top: 0; }
+.legend-box .icons { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 3px 0; }
+.legend-box .icons img { width: 18px; height: 18px; object-fit: contain; vertical-align: middle; margin-right: 3px; }
+.node-panel .hide-row { margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--border); display: flex; gap: 6px; align-items: center; cursor: pointer; }
 /* Shown over the map only while a layer is switched off, so a half-empty graph is never mistaken for the whole network. */
-.filter-marker { position: absolute; top: 12px; right: 12px; z-index: 5; display: none; align-items: center; gap: 10px;
+.layers-on { display: contents; }
+.layers-off { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.filter-marker { flex: 0 1 auto; max-width: 260px; display: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px;
     font-size: 12px; font-weight: bold; color: var(--yellow); background: var(--yellow-bg);
     border: 2px solid var(--yellow); border-radius: 4px; padding: 6px 10px; }
 </style>
@@ -27,21 +57,49 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
 {% block content %}
 <div class="filters">
     <span class="hint">Show:</span>
-    <button class="active" data-layer="lldp" aria-pressed="true" onclick="toggleLayer(this)">LLDP</button>
-    <button class="active" data-layer="bgp" aria-pressed="true" onclick="toggleLayer(this)">BGP</button>
-    <button class="active" data-layer="ospf" aria-pressed="true" onclick="toggleLayer(this)">OSPF</button>
+    <span id="layers-on" class="layers-on">
+        <button class="active" data-layer="lldp" data-name="LLDP" aria-pressed="true" onclick="toggleLayer(this)">LLDP</button>
+        <button class="active" data-layer="bgp" data-name="BGP" aria-pressed="true" onclick="toggleLayer(this)">BGP</button>
+        <button class="active" data-layer="ospf" data-name="OSPF" aria-pressed="true" onclick="toggleLayer(this)">OSPF</button>
+    </span>
     <span class="hint">|</span>
     <button class="active" id="unknown-btn" aria-pressed="true" onclick="toggleUnknown(this)" title="Neighbors and peers that are not matched to a known device">Unknown nodes</button>
+    <button class="active" id="icons-btn" aria-pressed="true" onclick="toggleIcons(this)" title="Draw devices as icons with a vendor mark. Off: plain boxes for every device">Device icons</button>
+    <button class="active" id="vendor-btn" aria-pressed="true" onclick="toggleVendor(this)" title="Show the vendor mark and name beside each device icon">Vendor icons</button>
+    <!-- A layer that is switched off moves here, to the right, and is renamed "<name> (Not shown)". -->
+    <span id="layers-off" class="layers-off"></span>
 </div>
 <div class="net-wrap">
     <div id="net"></div>
+    <div class="left-stack" id="left-stack">
+    <div class="node-panel" id="node-panel" role="dialog" aria-label="Node details">
+        <button type="button" class="close" onclick="dismissNodePanel()" aria-label="Close">&times;</button>
+        <h3 id="np-title"></h3>
+        <div class="sub" id="np-sub"></div>
+        <div id="np-info"></div>
+        <h4>Links</h4>
+        <div id="np-links"></div>
+        <label class="hide-row"><input type="checkbox" id="np-hide" onchange="hideNode(this.checked)"> Hide this node</label>
+        <label class="hide-row"><input type="checkbox" id="np-hide-icon" onchange="hideIcon(this.checked)"> Hide icon</label>
+    </div>
+    <div class="node-panel" id="link-panel" role="dialog" aria-label="Link details">
+        <button type="button" class="close" onclick="closeLinkPanel()" aria-label="Close">&times;</button>
+        <h3 id="lp-title"></h3>
+        <div class="sub" id="lp-sub"></div>
+        <div id="lp-info"></div>
+        <div id="lp-reports"></div>
+    </div>
     <div class="filter-marker" id="filter-marker" role="status">
         <span id="filter-text"></span>
         <button type="button" onclick="showAllLayers()">Show all</button>
     </div>
+    </div>
+    <div class="ctx-menu" id="ctx-menu" role="menu"></div>
+    <div class="toast" id="toast" role="status"></div>
     <details class="legend-box" open>
         <summary>Legend</summary>
         <h4>Devices</h4>
+        <div class="icons" id="legend-icons"></div>
         <div class="row"><span class="sw" style="background:var(--blue)"></span>router (polled over SSH)</div>
         <div class="row"><span class="sw" style="background:var(--text-dim)"></span>Confetti Traffic node (never polled)</div>
         <div class="row"><span class="sw" style="background:var(--green)"></span>other device role</div>
@@ -65,10 +123,83 @@ var edgeSet = null;
 
 // vis.js draws on a canvas, so it needs literal colors rather than CSS
 // variables. Read them from the current theme each time the graph is built.
+// One 48x48 line icon per device type, as an SVG data URI (a canvas cannot use CSS variables).
+var ICON_SHAPES = {
+    router: '<circle cx="24" cy="24" r="16"/><path d="M24 11v26M11 24h26M24 11l-4 4M24 11l4 4M24 37l-4-4M24 37l4-4M11 24l4-4M11 24l4 4M37 24l-4-4M37 24l-4 4"/>',
+    switch: '<rect x="6" y="14" width="36" height="20" rx="3"/><path d="M13 22h22M31 18l4 4-4 4M35 28H13M17 24l-4 4 4 4" transform="translate(0 -1)"/>',
+    firewall: '<rect x="8" y="9" width="32" height="30" rx="2"/><path d="M8 19h32M8 29h32M24 9v10M16 19v10M32 19v10M24 29v10"/>',
+    host: '<rect x="8" y="8" width="32" height="12" rx="2"/><rect x="8" y="28" width="32" height="12" rx="2"/><path d="M14 14h2M14 34h2M24 20v8"/>',
+    linux: '<path d="M24 6c-5 0-7 5-7 10 0 4-4 8-5 14-1 6 3 10 12 10s13-4 12-10c-1-6-5-10-5-14 0-5-2-10-7-10z"/><path d="M19 22c0 8 2 13 5 13s5-5 5-13M22 17l2 2 2-2M20 13h.5M27.5 13h.5M13 41l-3 2h7M35 41l3 2h-7"/>',
+    unknown: '<circle cx="24" cy="24" r="16" stroke-dasharray="4 3"/><path d="M18 19c0-4 3-6 6-6s6 2 6 5c0 4-6 4-6 9M24 33v2"/>'
+};
+
+// Simplified vendor marks in brand colours, drawn at y 50-62 and moved to the right of the icon by deviceIcon.
+// To add a vendor: a key here and in VENDOR_NAMES (lower case, as devices.vendor is stored) and a name in VENDOR_ALIASES if spelled another way.
+var VENDOR_MARKS = {
+    cisco: '<g fill="#1ba0d7"><rect x="9" y="56" width="3" height="5" rx="1.5"/><rect x="15" y="53" width="3" height="8" rx="1.5"/>' +
+           '<rect x="21" y="51" width="3" height="10" rx="1.5"/><rect x="27" y="53" width="3" height="8" rx="1.5"/>' +
+           '<rect x="33" y="56" width="3" height="5" rx="1.5"/></g>',
+    paloalto: '<rect x="18" y="50" width="12" height="12" rx="2" fill="#fa582d"/><text x="24" y="60" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold" font-size="10" fill="#fff">P</text>',
+    juniper: '<rect x="18" y="50" width="12" height="12" rx="2" fill="#84b135"/><text x="24" y="60" text-anchor="middle" font-family="Arial,sans-serif" font-weight="bold" font-size="10" fill="#fff">J</text>',
+    hpe: '<rect x="9" y="52" width="30" height="9" fill="none" stroke="#01a982" stroke-width="2.5"/>'
+};
+var VENDOR_NAMES = { cisco: 'Cisco', paloalto: 'Palo Alto', juniper: 'Juniper', hpe: 'HPE' };   // shown under the mark
+var VENDOR_ALIASES = { 'palo alto': 'paloalto', 'palo alto networks': 'paloalto', pan: 'paloalto', hp: 'hpe', 'hewlett packard enterprise': 'hpe', junos: 'juniper' };
+
+function vendorKey(vendor) {
+    var v = (vendor || '').toLowerCase();
+    v = VENDOR_ALIASES[v] || v;
+    return VENDOR_MARKS[v] ? v : '';
+}
+
+// text: colour of the vendor name; the page text colour, so it reads on every theme.
+function deviceIcon(type, stroke, fill, vendor, text) {
+    var mark = vendorKey(vendor);
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + (mark ? 152 : 48) + '" height="48" viewBox="0 0 ' + (mark ? 152 : 48) + ' 48">' +
+        // With a vendor the image is 152 wide and the icon sits in the middle, so links and the name stay centred on the icon.
+        '<g transform="translate(' + (mark ? 52 : 0) + ' 0)" fill="' + fill + '" stroke="' + stroke + '" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+        (ICON_SHAPES[type] || ICON_SHAPES.unknown) + '</g>' + (mark ? '<g transform="translate(104 -40)">' + VENDOR_MARKS[mark] + '</g><text x="128" y="37" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" fill="' + (text || stroke) + '" stroke="none">' + VENDOR_NAMES[mark] + '</text>' : '') + '</svg>';
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
+function fillLegendIcons() {
+    var box = document.getElementById('legend-icons');
+    box.textContent = '';
+    ['router', 'switch', 'firewall', 'linux', 'host', 'unknown'].forEach(function (t) {
+        var item = document.createElement('span');
+        var img = document.createElement('img');
+        img.src = deviceIcon(t, themeColor('--text'), 'none');
+        img.alt = '';
+        item.appendChild(img);
+        item.appendChild(document.createTextNode(t === 'host' ? 'other host' : (t === 'linux' ? 'linux server' : t)));
+        box.appendChild(item);
+    });
+}
+document.addEventListener('themechange', fillLegendIcons);
+
 function toVisNodes(nodes) {
     var GROUP_COLOR = { router: themeColor('--blue'), node: themeColor('--text-dim'), unknown: themeColor('--border') };
     return nodes.map(function (n) {
         var color = GROUP_COLOR[n.group] || themeColor('--green');
+        if (iconsOn() && !hiddenIcons[n.id]) {
+            // Icon above the name. A device that stopped answering ping is drawn in red.
+            var line = n.ghost ? themeColor('--text-dim') : (n.reachable === 0 ? themeColor('--red') : color);
+            return {
+                id: n.id,
+                label: n.label,
+                shape: 'image',
+                image: deviceIcon(n.device_type, line, themeColor('--bg-card'), vendorOn() ? n.vendor : '', themeColor('--text')),
+                size: 24,   // vis fixes the image height at 2 x size, so a wider vendor image keeps the same icon size
+                // vis paints a pale blue square behind an image unless the background is set: make it clear.
+                color: { background: 'rgba(0,0,0,0)', border: 'rgba(0,0,0,0)',
+                         highlight: { background: 'rgba(0,0,0,0)', border: themeColor('--text') },
+                         hover: { background: 'rgba(0,0,0,0)', border: themeColor('--text') } },
+                borderWidth: 0,
+                borderWidthSelected: 2,
+                shapeProperties: { useBorderWithImage: true },
+                font: { color: themeColor('--text'), face: 'monospace' },
+            };
+        }
         return {
             id: n.id,
             label: n.label,
@@ -86,17 +217,22 @@ function toVisNodes(nodes) {
     });
 }
 
+function edgeKey(e) { return [e.from, e.to, e.layer, e.label].join('|'); }
+
 function toVisEdges(edges) {
     var LAYER_COLOR = { lldp: themeColor('--cyan'), bgp: themeColor('--yellow'), ospf: themeColor('--blue') };
     return edges.map(function (e) {
         return {
             // Stable id, so a refresh updates this edge instead of replacing it.
-            id: [e.from, e.to, e.layer, e.label].join('|'),
+            id: edgeKey(e),
             from: e.from,
             to: e.to,
             label: e.label,
             // A BGP/OSPF session that is not Established/FULL is drawn red and dashed.
-            color: { color: e.up === false ? themeColor('--red') : (LAYER_COLOR[e.layer] || themeColor('--gray')) },
+            color: {
+                color: e.up === false ? themeColor('--red') : (LAYER_COLOR[e.layer] || themeColor('--gray')),
+                highlight: themeColor('--text'),   // the selected link
+            },
             dashes: e.up === false,
             width: e.up === false ? 2 : 1,
             // Lines between the same two devices would sit on top of each other: bend BGP one way, OSPF the other.
@@ -117,13 +253,18 @@ function syncSet(set, items) {
 }
 
 var loadSeq = 0;
+var rawData = null;      // the last answer from the API, before the viewer's hiding
+var selectedNode = null;
+var selectedLink = null;
+var focusNode = null;     // right-click "show only this node's links" (not remembered)
 
 function load() {
     var url = '/api/topology?layer=' + (shownLayers().join(',') || 'none');
     var seq = ++loadSeq;
     fetch(url).then(function (r) { return r.json(); }).then(function (data) {
         if (seq !== loadSeq) { return; }   // a newer toggle already asked: drop this older answer
-        if (unknownHidden()) { data = withoutUnknown(data); }
+        rawData = data;                    // the node card reads this, so a hidden node can still be shown and un-hidden
+        data = hideFiltered(data);
         var container = document.getElementById('net');
         if (!data.nodes.length) {
             if (network) { network.destroy(); network = null; }
@@ -142,9 +283,22 @@ function load() {
             layout: { improvedLayout: true },
             physics: { stabilization: true, barnesHut: { gravitationalConstant: -4000, springLength: 140 } },
             interaction: { hover: true },
-            edges: { arrows: { to: false } },
+            edges: { arrows: { to: false }, selectionWidth: function (width) { return width + 3; } },
         };
         network = new vis.Network(container, { nodes: nodeSet, edges: edgeSet }, options);
+        network.on('oncontext', function (params) {
+            params.event.preventDefault();
+            var id = network.getNodeAt(params.pointer.DOM);
+            openContextMenu(id === undefined ? null : id, params.pointer.DOM.x, params.pointer.DOM.y);
+        });
+        network.on('dragStart', closeContextMenu);
+        network.on('zoom', closeContextMenu);
+        network.on('click', function (params) {
+            closeContextMenu();
+            if (params.nodes.length) { showNodePanel(params.nodes[0]); }
+            else if (params.edges.length) { showLinkPanel(params.edges[0]); }
+            else { closeNodePanel(); closeLinkPanel(); }
+        });
         network.on('doubleClick', function (params) {
             if (params.nodes.length) {
                 var id = params.nodes[0];
@@ -167,6 +321,20 @@ var LAYER_KEY = 'confetti-topo-layers';   // localStorage: JSON list of the laye
 function setLayerButton(btn, on) {
     btn.className = on ? 'active' : '';
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    if (btn.getAttribute('data-layer')) {
+        btn.textContent = btn.getAttribute('data-name') + (on ? '' : ' (Not shown)');
+        placeLayerButtons();
+    }
+}
+
+// Lit layers stay on the left; the ones switched off go to the right, in the same order as before.
+function placeLayerButtons() {
+    var focused = document.activeElement;
+    ['lldp', 'bgp', 'ospf'].forEach(function (name) {
+        var b = document.querySelector('.filters button[data-layer="' + name + '"]');
+        document.getElementById(b.className === 'active' ? 'layers-on' : 'layers-off').appendChild(b);
+    });
+    if (focused && focused.tagName === 'BUTTON') { focused.focus(); }   // moving a button drops keyboard focus
 }
 
 function saveLayers() {
@@ -183,18 +351,24 @@ function restoreLayers() {
     });
 }
 
-// The warning over the map: which layers are hidden right now.
+// The warning over the map: what is hidden right now.
 function updateFilterMarker() {
     var hidden = Array.prototype.map.call(document.querySelectorAll('.filters button[data-layer]:not(.active)'),
-        function (b) { return b.textContent; });
-    var marker = document.getElementById('filter-marker');
+        function (b) { return b.getAttribute('data-name'); });
+    var nodes = Object.keys(hiddenNodes).length;
     var text = hidden.length === 3 ? 'all connections hidden, devices only' : '';
     if (!text) {
         if (unknownHidden()) { hidden.push('unknown nodes'); }
-        text = hidden.join(', ') + ' hidden';
+        if (nodes) { hidden.push(nodes + (nodes === 1 ? ' node' : ' nodes')); }
+        text = hidden.length ? hidden.join(', ') + ' hidden' : '';
     }
-    marker.style.display = (hidden.length || unknownHidden()) ? 'flex' : 'none';
+    if (focusNode) {
+        var f = rawData && rawData.nodes.filter(function (n) { return n.id === focusNode; })[0];
+        text = (text ? text + '; ' : '') + 'only ' + (f ? f.label : 'one node') + "'s links";
+    }
+    document.getElementById('filter-marker').style.display = text ? 'flex' : 'none';
     document.getElementById('filter-text').textContent = 'FILTERED: ' + text;
+    fitNodePanel();
 }
 
 function toggleLayer(btn) {
@@ -212,10 +386,48 @@ function unknownHidden() {
     return document.getElementById('unknown-btn').className !== 'active';
 }
 
-function withoutUnknown(data) {
+// Drop the nodes the viewer hid (unknown nodes, or nodes picked in the node card) and every edge that touched one.
+function hideFiltered(data) {
     var keep = {};
-    var nodes = data.nodes.filter(function (n) { if (!n.ghost) { keep[n.id] = true; } return !n.ghost; });
-    return { nodes: nodes, edges: data.edges.filter(function (e) { return keep[e.from] && keep[e.to]; }) };
+    var nodes = data.nodes.filter(function (n) {
+        var drop = (unknownHidden() && n.ghost) || hiddenNodes[n.id];
+        if (!drop) { keep[n.id] = true; }
+        return !drop;
+    });
+    var edges = data.edges.filter(function (e) { return keep[e.from] && keep[e.to]; });
+    if (focusNode && keep[focusNode]) {
+        edges = edges.filter(function (e) { return e.from === focusNode || e.to === focusNode; });
+        var near = {};
+        near[focusNode] = true;
+        edges.forEach(function (e) { near[e.from] = true; near[e.to] = true; });
+        nodes = nodes.filter(function (n) { return near[n.id]; });
+    }
+    return { nodes: nodes, edges: edges };
+}
+
+// A look setting, not a filter: no FILTERED marker, and Show all leaves it alone.
+var ICONS_ON_KEY = 'confetti-topo-device-icons';
+
+function iconsOn() {
+    return document.getElementById('icons-btn').className === 'active';
+}
+
+var VENDOR_ON_KEY = 'confetti-topo-vendor-icons';
+
+function vendorOn() {
+    return document.getElementById('vendor-btn').className === 'active';
+}
+
+function toggleVendor(btn) {
+    setLayerButton(btn, btn.className !== 'active');
+    try { localStorage.setItem(VENDOR_ON_KEY, vendorOn() ? '1' : '0'); } catch (e) { /* not remembered */ }
+    load();
+}
+
+function toggleIcons(btn) {
+    setLayerButton(btn, btn.className !== 'active');
+    try { localStorage.setItem(ICONS_ON_KEY, iconsOn() ? '1' : '0'); } catch (e) { /* not remembered */ }
+    load();
 }
 
 function toggleUnknown(btn) {
@@ -230,11 +442,341 @@ function showAllLayers() {
     saveLayers();
     setLayerButton(document.getElementById('unknown-btn'), true);
     try { localStorage.setItem(UNKNOWN_KEY, '0'); } catch (e) { /* not remembered */ }
+    hiddenNodes = {};
+    focusNode = null;
+    saveHiddenNodes();
+    document.getElementById('np-hide').checked = false;
     updateFilterMarker();
     load();
 }
 
+// ---- Node card: click a node ------------------------------------------------
+var HIDDEN_KEY = 'confetti-topo-hidden-nodes';   // localStorage: JSON list of node ids the viewer hid
+var hiddenNodes = {};
+
+function saveHiddenNodes() {
+    try { localStorage.setItem(HIDDEN_KEY, JSON.stringify(Object.keys(hiddenNodes))); } catch (e) { /* not remembered */ }
+}
+
+function restoreHiddenNodes() {
+    try {
+        (JSON.parse(localStorage.getItem(HIDDEN_KEY)) || []).forEach(function (id) { hiddenNodes[id] = true; });
+    } catch (e) { hiddenNodes = {}; }
+}
+
+var ICONS_KEY = 'confetti-topo-hidden-icons';   // localStorage: JSON list of node ids drawn as plain boxes
+var hiddenIcons = {};
+
+function restoreHiddenIcons() {
+    try {
+        (JSON.parse(localStorage.getItem(ICONS_KEY)) || []).forEach(function (id) { hiddenIcons[id] = true; });
+    } catch (e) { hiddenIcons = {}; }
+}
+
+function hideIcon(hide) {
+    if (!selectedNode) { return; }
+    if (hide) { hiddenIcons[selectedNode] = true; } else { delete hiddenIcons[selectedNode]; }
+    try { localStorage.setItem(ICONS_KEY, JSON.stringify(Object.keys(hiddenIcons))); } catch (e) { /* not remembered */ }
+    load();
+}
+
+function addRow(parent, key, value) {
+    var row = document.createElement('div');
+    row.className = 'kv-row';
+    var k = document.createElement('span'); k.className = 'k'; k.textContent = key;
+    var v = document.createElement('span'); v.className = 'v'; v.textContent = value;
+    row.appendChild(k); row.appendChild(v);
+    parent.appendChild(row);
+    return v;
+}
+
+function ago(iso) {
+    if (!iso) { return 'never'; }
+    var s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) { return s + 's ago'; }
+    if (s < 3600) { return Math.floor(s / 60) + 'm ago'; }
+    if (s < 86400) { return Math.floor(s / 3600) + 'h ago'; }
+    return Math.floor(s / 86400) + 'd ago';
+}
+
+function fillDeviceInfo(info, d) {
+    addRow(info, 'role', d.role);
+    addRow(info, 'mgmt ip', d.mgmt_ip || '-');
+    addRow(info, 'platform', [d.vendor, d.platform, d.model].filter(Boolean).join(' / ') || '-');
+    addRow(info, 'os', d.os_version || '-');
+    addRow(info, 'serial', d.serial || '-');
+    addRow(info, 'ping', d.reachable === null || d.reachable === undefined ? 'not checked' : (d.reachable ? 'up' : 'down'));
+    if (d.role !== 'node') {
+        addRow(info, 'last poll', d.fail_count > 0 ? 'failing (' + d.fail_count + ' in a row)'
+            : (d.last_poll_ok ? 'ok, ' + ago(d.last_poll_ok) : 'not polled yet'));
+    }
+}
+
+function goToNode(id) {
+    if (!nodeSet || !nodeSet.get(id)) { return; }
+    showNodePanel(id);
+    network.selectNodes([id]);
+    network.focus(id, { scale: network.getScale(), animation: { duration: 400, easingFunction: 'easeInOutQuad' } });
+}
+
+function showNodePanel(id) {
+    hideLinkPanel();
+    selectedNode = id;
+    var node = rawData && rawData.nodes.filter(function (n) { return n.id === id; })[0];
+    if (!node) { return; }
+    var label = {};
+    rawData.nodes.forEach(function (n) { label[n.id] = n.label; });
+    document.getElementById('np-title').textContent = node.label;
+    document.getElementById('np-sub').textContent = node.ghost
+        ? 'Unknown node: seen by a neighbor or peer, not matched to a known device'
+        : 'Known device, ' + node.device_type + ' (double-click it on the map to open its page)';
+    var info = document.getElementById('np-info');
+    info.textContent = '';
+    if (node.ghost) {
+        addRow(info, 'address', node.label);
+    } else {
+        fetch('/api/devices/' + node.device_id).then(function (r) { return r.json(); }).then(function (d) {
+            if (selectedNode === id && !d.error) { info.textContent = ''; fillDeviceInfo(info, d); }
+        });
+    }
+    var links = document.getElementById('np-links');
+    links.textContent = '';
+    var mine = rawData.edges.filter(function (e) { return e.from === id || e.to === id; });
+    mine.forEach(function (e) {
+        var other = e.from === id ? e.to : e.from;
+        var otherNode = rawData.nodes.filter(function (n) { return n.id === other; })[0];
+        var cell = addRow(links, e.layer, '');
+        // The other end of a link to a known device (and still on the map) is a link: click it to move the selection there.
+        if (otherNode && !otherNode.ghost && nodeSet && nodeSet.get(other)) {
+            var go = document.createElement('button');
+            go.type = 'button';
+            go.className = 'linklike';
+            go.textContent = label[other];
+            go.title = 'Select ' + label[other];
+            go.onclick = function () { goToNode(other); };
+            cell.appendChild(go);
+            cell.appendChild(document.createTextNode('  (' + e.label + ')'));
+        } else {
+            cell.textContent = (label[other] || '?') + '  (' + e.label + ')';
+        }
+    });
+    if (!mine.length) { addRow(links, '', 'none shown'); }
+    document.getElementById('np-hide').checked = !!hiddenNodes[id];
+    document.getElementById('np-hide-icon').checked = !!hiddenIcons[id];
+    var panel = document.getElementById('node-panel');
+    panel.style.display = 'block';
+    fitNodePanel();
+}
+
+// Keep the card above the legend: it scrolls inside the space that is left.
+function fitNodePanel() {
+    var legend = document.querySelector('.legend-box');
+    var marker = document.getElementById('filter-marker');
+    ['node-panel', 'link-panel'].forEach(function (name) {
+        var panel = document.getElementById(name);
+        var room = panel.parentNode.parentNode.clientHeight - 24 - (legend ? legend.offsetHeight + 12 : 0);
+        // On a narrow map the FILTERED box wraps under the card: leave room for it too.
+        if (marker.style.display !== 'none' && panel.style.display !== 'none' && marker.offsetTop > panel.offsetTop + 4) {
+            room -= marker.offsetHeight + 8;
+        }
+        panel.style.maxHeight = Math.max(room, 120) + 'px';
+    });
+}
+
+function closeNodePanel() {
+    selectedNode = null;
+    document.getElementById('node-panel').style.display = 'none';
+}
+
+// The card's x button: close it and drop the node's selection on the map.
+function dismissNodePanel() {
+    closeNodePanel();
+    if (network) { network.unselectAll(); }
+}
+
+function hideNode(hide) {
+    if (!selectedNode) { return; }
+    if (hide) { hiddenNodes[selectedNode] = true; } else { delete hiddenNodes[selectedNode]; }
+    saveHiddenNodes();
+    updateFilterMarker();
+    load();
+}
+
+document.querySelector('.legend-box').addEventListener('toggle', fitNodePanel);
+window.addEventListener('resize', fitNodePanel);
+document.addEventListener('themechange', fitNodePanel);   // the layout picker fires this too: the legend changes height
+fitNodePanel();
+// ---- Link card: click a link ---------------------------------------------------
+var LINK_KIND = { lldp: 'LLDP link (cable)', bgp: 'BGP session', ospf: 'OSPF adjacency' };
+
+// The fields each protocol reports, in the order they are shown: [key in the report, label shown].
+var LINK_FIELDS = {
+    lldp: [['local_port', 'local port'], ['remote_port', 'remote port'], ['remote_name', 'remote name'],
+           ['remote_chassis', 'chassis id'], ['remote_mgmt_ip', 'mgmt ip'], ['remote_descr', 'description']],
+    bgp: [['peer_ip', 'neighbor'], ['remote_as', 'neighbor AS'], ['state', 'state'], ['uptime', 'up for'],
+          ['prefixes', 'prefixes'], ['local_if', 'local interface']],
+    ospf: [['peer_ip', 'neighbor'], ['area', 'area'], ['state', 'state'], ['uptime', 'up for'], ['local_if', 'local interface']],
+};
+
+function showLinkPanel(edgeId) {
+    var edge = rawData && rawData.edges.filter(function (e) { return edgeKey(e) === edgeId; })[0];
+    if (!edge) { return; }
+    closeNodePanel();
+    selectedLink = edgeId;
+    var label = {};
+    rawData.nodes.forEach(function (n) { label[n.id] = n.label; });
+    document.getElementById('lp-title').textContent = LINK_KIND[edge.layer] || edge.layer;
+    document.getElementById('lp-sub').textContent = (label[edge.from] || '?') + '  <->  ' + (label[edge.to] || '?');
+    var info = document.getElementById('lp-info');
+    info.textContent = '';
+    addRow(info, 'status', edge.layer === 'lldp' ? 'cable seen' : (edge.up === false ? 'DOWN' : 'up'));
+    addRow(info, 'label', edge.label);
+    var reports = document.getElementById('lp-reports');
+    reports.textContent = '';
+    var details = edge.details || [];
+    details.forEach(function (d) {
+        var h = document.createElement('h4');
+        h.textContent = 'Reported by ' + (d.reported_by || 'a device');
+        reports.appendChild(h);
+        (LINK_FIELDS[edge.layer] || []).forEach(function (f) {
+            if (d[f[0]] !== null && d[f[0]] !== undefined && d[f[0]] !== '') { addRow(reports, f[1], String(d[f[0]])); }
+        });
+    });
+    if (details.length === 1 && edge.to.indexOf('dev:') === 0) {
+        var note = document.createElement('div');
+        note.className = 'sub';
+        note.textContent = 'Only one end reports this link.';
+        reports.appendChild(note);
+    }
+    document.getElementById('link-panel').style.display = 'block';
+    fitNodePanel();
+}
+
+// Hide the link card only; the selection is left alone (a node was just selected).
+function hideLinkPanel() {
+    selectedLink = null;
+    document.getElementById('link-panel').style.display = 'none';
+}
+
+function closeLinkPanel() {
+    hideLinkPanel();
+    if (network) { network.unselectAll(); }
+}
+
+// ---- Right-click menu --------------------------------------------------------
+function toast(text) {
+    var t = document.getElementById('toast');
+    t.textContent = text;
+    t.style.display = 'block';
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(function () { t.style.display = 'none'; }, 4500);
+}
+
+// navigator.clipboard only exists on https and localhost; the VM is plain http, so fall back to a hidden textarea.
+function copyText(text) {
+    var done = function () { toast('Copied: ' + text); };
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () { toast('Copy failed'); });
+        return;
+    }
+    var box = document.createElement('textarea');
+    box.value = text;
+    document.body.appendChild(box);
+    box.select();
+    try { document.execCommand('copy'); done(); } catch (e) { toast('Copy failed'); }
+    document.body.removeChild(box);
+}
+
+function closeContextMenu() {
+    document.getElementById('ctx-menu').style.display = 'none';
+}
+
+function menuItem(menu, text, onclick, disabled) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    b.textContent = text;
+    b.disabled = !!disabled;
+    b.onclick = function () { closeContextMenu(); onclick(); };
+    menu.appendChild(b);
+    return b;
+}
+
+function pollFromMenu(deviceId, name) {
+    if (!confirm('Poll ' + name + ' now? This connects to the device over SSH (show commands only).')) { return; }
+    toast('Polling ' + name + '...');
+    fetch('/api/devices/' + deviceId + '/poll', { method: 'POST' }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+    }).then(function (res) {
+        if (!res.ok) { toast(name + ': ' + (res.data.error || 'poll failed')); return; }
+        var failed = Object.keys(res.data.results || {}).filter(function (t) { return !res.data.results[t].ok; });
+        toast(name + ': ' + (failed.length ? 'failed: ' + failed.join(', ') : 'poll ok'));
+        load();
+    }).catch(function () { toast(name + ': poll failed'); });
+}
+
+function openContextMenu(id, x, y) {
+    var menu = document.getElementById('ctx-menu');
+    menu.textContent = '';
+    var node = id && rawData ? rawData.nodes.filter(function (n) { return n.id === id; })[0] : null;
+    var title = document.createElement('div');
+    title.className = 'title';
+    if (!node) {
+        title.textContent = 'Map';
+        menu.appendChild(title);
+        menuItem(menu, 'Show all', showAllLayers);
+        menuItem(menu, 'Reset view', function () { network.fit(); });
+    } else {
+        title.textContent = node.mgmt_ip ? node.label + ' | ' + node.mgmt_ip : node.label;   // e.g. csr-1 | 192.0.2.1
+        menu.appendChild(title);
+        var isDevice = !node.ghost;
+        menuItem(menu, 'Open device page', function () { window.location.href = '/devices/' + node.device_id; }, !isDevice);
+        menuItem(menu, 'Hide this node', function () {
+            hiddenNodes[id] = true;
+            saveHiddenNodes();
+            if (selectedNode === id) { document.getElementById('np-hide').checked = true; }
+            updateFilterMarker();
+            load();
+        });
+        menuItem(menu, 'Copy name', function () { copyText(node.label); });
+        // A device carries its management IP; a peer ghost is labelled with its IP.
+        var ip = node.mgmt_ip || (id.indexOf('ghost:peer:') === 0 ? node.label : '');
+        menuItem(menu, 'Copy IP', function () { copyText(ip); }, !ip);
+        menuItem(menu, focusNode === id ? 'Show all links' : "Show only this node's links", function () {
+            focusNode = focusNode === id ? null : id;
+            updateFilterMarker();
+            load();
+        });
+        var pollItem = menuItem(menu, 'Poll now', function () {}, true);
+        if (isDevice) {
+            fetch('/api/devices/' + node.device_id).then(function (r) { return r.json(); }).then(function (d) {
+                if (d.error || menu.style.display === 'none') { return; }
+                if (d.role !== 'node' && d.enabled) {
+                    pollItem.disabled = false;
+                    pollItem.onclick = function () { closeContextMenu(); pollFromMenu(d.id, node.label); };
+                }
+            });
+        }
+    }
+    menu.style.display = 'block';
+    // Keep the menu inside the map.
+    var box = menu.parentNode;
+    menu.style.left = Math.max(0, Math.min(x, box.clientWidth - menu.offsetWidth - 4)) + 'px';
+    menu.style.top = Math.max(0, Math.min(y, box.clientHeight - menu.offsetHeight - 4)) + 'px';
+    var first = menu.querySelector('button:not(:disabled)');
+    if (first) { first.focus(); }
+}
+
+document.getElementById('net').addEventListener('contextmenu', function (ev) { ev.preventDefault(); });
+document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') { closeContextMenu(); } });
+document.addEventListener('click', function (ev) { if (!ev.target.closest('#ctx-menu')) { closeContextMenu(); } });
+
+restoreHiddenNodes();
+restoreHiddenIcons();
+fillLegendIcons();
 restoreLayers();
+try { setLayerButton(document.getElementById('vendor-btn'), localStorage.getItem(VENDOR_ON_KEY) !== '0'); } catch (e) { /* shown */ }
+try { setLayerButton(document.getElementById('icons-btn'), localStorage.getItem(ICONS_ON_KEY) !== '0'); } catch (e) { /* shown */ }
 try { setLayerButton(document.getElementById('unknown-btn'), localStorage.getItem(UNKNOWN_KEY) !== '1'); } catch (e) { /* shown */ }
 updateFilterMarker();
 load();

@@ -151,6 +151,8 @@ _LLDP_LOCAL_IF_RE = re.compile(r"^Local Intf:\s*(\S+)", re.MULTILINE)
 _LLDP_CHASSIS_RE = re.compile(r"^Chassis id:\s*(\S+)", re.MULTILINE)
 _LLDP_PORT_RE = re.compile(r"^Port id:\s*(\S+)", re.MULTILINE)
 _LLDP_SYSNAME_RE = re.compile(r"^System Name:\s*(\S+)", re.MULTILINE)
+# The description is on the line after the label on IOS; take the first non-empty line.
+_LLDP_DESCR_RE = re.compile(r"^System Description:[ \t]*\n?[ \t]*(\S[^\n]*)", re.MULTILINE)
 _LLDP_MGMT_IP_RE = re.compile(r"IP:\s*(\d{1,3}(?:\.\d{1,3}){3})")
 
 
@@ -171,12 +173,14 @@ def parse_lldp_neighbors(text):
         port = _LLDP_PORT_RE.search(block)
         sysname = _LLDP_SYSNAME_RE.search(block)
         mgmt_ip = _LLDP_MGMT_IP_RE.search(block)
+        descr = _LLDP_DESCR_RE.search(block)
         out.append({
             "local_if": local_if.group(1) if local_if else None,
             "remote_chassis": chassis.group(1),
             "remote_port": port.group(1) if port else None,
             "remote_sysname": sysname.group(1) if sysname else None,
             "remote_mgmt_ip": mgmt_ip.group(1) if mgmt_ip else None,
+            "remote_descr": descr.group(1).strip()[:200] if descr else None,
         })
     return out
 

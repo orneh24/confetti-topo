@@ -359,7 +359,7 @@ def merge(conn, survivor_id, loser_id):
         ("interfaces", "name, description, ip, prefix_len, network, vrf, admin_status, "
                        "oper_status, speed, duplex, mtu, last_seen"),
         ("lldp_neighbors", "local_if, remote_chassis, remote_sysname, remote_port, "
-                           "remote_mgmt_ip, remote_device_id, last_seen"),
+                           "remote_mgmt_ip, remote_device_id, remote_descr, last_seen"),
         ("adjacencies", "proto, peer_ip, peer_device_id, remote_as, area, state, "
                         "uptime, prefixes, local_if, last_seen"),
     ):

@@ -157,6 +157,7 @@ def init_db():
             remote_port      TEXT,
             remote_mgmt_ip   TEXT,
             remote_device_id INTEGER,
+            remote_descr     TEXT,
             last_seen        TEXT NOT NULL,
             UNIQUE(device_id, local_if, remote_port)
         );
@@ -210,6 +211,9 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_events_at ON events(at);
         CREATE INDEX IF NOT EXISTS idx_events_device ON events(device_id, at);
     """)
+    # CREATE TABLE IF NOT EXISTS never adds a column to a table that exists already.
+    if "remote_descr" not in [r[1] for r in db.execute("PRAGMA table_info(lldp_neighbors)")]:
+        db.execute("ALTER TABLE lldp_neighbors ADD COLUMN remote_descr TEXT")
     db.commit()
     db.close()
 

@@ -43,6 +43,7 @@ PING_FAILS_TO_DOWN = int(os.environ.get("TOPO_PING_FAILS_TO_DOWN", "2"))
 # ---------------------------------------------------------------------------
 DISCOVERY_INTERVAL_S = int(os.environ.get("TOPO_DISCOVERY_INTERVAL_S", "0"))
 DISCOVERY_CONFETTI_URL = os.environ.get("TOPO_DISCOVERY_CONFETTI_URL", "").strip()
+DISCOVERY_BUTLER_URL = os.environ.get("TOPO_DISCOVERY_BUTLER_URL", "").strip()
 DISCOVERY_SWEEP_CIDRS = [c.strip() for c in os.environ.get("TOPO_DISCOVERY_SWEEP_CIDRS", "").split(",") if c.strip()]
 DISCOVERY_SEEDFILE = os.environ.get("TOPO_DISCOVERY_SEEDFILE", "").strip()
 # Add LLDP neighbors that advertise an unknown management IP as devices

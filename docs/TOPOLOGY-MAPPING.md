@@ -36,6 +36,7 @@ check it on a real device first (see 6.1).
 lldp_neighbors (
   id, device_id -> devices ON DELETE CASCADE,
   local_if, remote_chassis, remote_sysname, remote_port, remote_mgmt_ip,
+  remote_descr,              -- the LLDP system description (up to 200 characters)
   remote_device_id,          -- NULL = neighbor not matched to a known device
   last_seen,
   UNIQUE(device_id, local_if, remote_port))
@@ -84,7 +85,9 @@ Returns `{nodes: [...], edges: [...]}` in the shape vis.js wants. Optional `?lay
 **Nodes:** one per known device: `id "dev:<id>"`, `label` = hostname, `group` = role,
 `reachable` (ping state, optional), `ghost: false`.
 
-**Edges:** `{from, to, layer, label, up?}`.
+**Edges:** `{from, to, layer, label, up?, details}`. `details` is a list with one report per end that saw the
+link (`reported_by` plus the fields that end stored: LLDP ports, chassis, mgmt IP; BGP/OSPF neighbor, state, uptime,
+prefixes, area, AS). The page shows it in a card when you click a link.
 - LLDP label: `"<local port> - <remote port>"`.
 - OSPF label: `"ospf FULL"`; `up = (state == FULL)`.
 - BGP label: `"bgp AS65001 - AS65002 Established"`; `up = (state == Established)`. One `AS` when both ends match
@@ -191,6 +194,15 @@ against them.
   dashed "down" style. LLDP / BGP / OSPF toggle buttons (independent, remembered in `confetti-topo-layers`, a FILTERED marker while any is off) pass `?layer=` as a comma list. An independent **Unknown nodes** toggle
   (remembered in `confetti-topo-hide-unknown`) hides ghost nodes and their edges in the browser only; it is not
   sent as `?layer=`, and the FILTERED marker shows while it is off too.
+  Each known device is drawn as an icon above its name by type (`topology.device_type`: router, switch, firewall,
+  linux for `platform='linux'` (the penguin), host for another non-router role; a `router` role is read as switch or firewall from model/hostname words; ghosts get a "?", unless the LLDP system description (`lldp_neighbors.remote_descr`) says Linux and names no network vendor: then a ghost or known device is drawn as a Linux server). A small vendor mark sits to the right of the icon for Cisco, Palo Alto, Juniper and HPE
+  and its name (`devices.vendor`; `VENDOR_MARKS` and `VENDOR_NAMES` in topology.html, add a vendor to both).
+  Clicking a node opens a card (device details from `GET /api/devices/<id>`, its links) with a **Hide this node**
+  checkbox: the node and its edges leave the map in the browser only, remembered in `confetti-topo-hidden-nodes`. The **Device icons** toggle in the Show: bar (`confetti-topo-device-icons`, a look setting, not a filter) turns all icons off, and the **Vendor icons** toggle (`confetti-topo-vendor-icons`) turns only the vendor mark and name off. A **Hide icon** checkbox under it draws that node as the old plain
+  box/dot instead (`confetti-topo-hidden-icons`).
+  Right-clicking a node opens a menu: open device page, hide this node, copy name, copy IP, show only this node's links
+  (a FILTERED marker, not remembered), and poll now (asks first; SSH `show` commands only). Right-clicking empty
+  canvas offers Show all and Reset view.
 - Physics: `barnesHut` with `gravitationalConstant -4000`, `springLength 140` worked for a lab-size
   graph. Double-click a device node to open its detail page (ghosts have no page).
 - Empty state: show a plain message ("no devices yet") and destroy the network object.

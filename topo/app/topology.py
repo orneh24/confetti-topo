@@ -15,7 +15,46 @@ back as an identity alias (CLAUDE.md constraints 1 and 2): a re-addressed
 interface must not become a permanent claim on a device.
 """
 
+import re
+
 from . import db
+
+# Words in a model or hostname that say what a router-role device really is.
+# A word matches a whole name part with its digits dropped ("sw1", "asa5506"), or sits inside the text.
+SWITCH_WORDS = ("switch", "nexus", "c2960", "c3560", "c3750", "c3850", "c9200", "c9300", "c9500", "n9k", "n7k", "n5k")
+SWITCH_PARTS = ("sw",)
+FIREWALL_WORDS = ("firewall", "firepower", "fortigate", "fortinet", "paloalto")
+FIREWALL_PARTS = ("fw", "asa", "ftd")
+
+
+# A neighbor whose LLDP system description says Linux and names none of these is a plain Linux server.
+NETWORK_VENDOR_WORDS = ("cisco", "juniper", "junos", "palo alto", "pan-os", "hewlett", "hpe", "aruba", "procurve")
+
+
+def lldp_says_linux(descr):
+    """True for an LLDP system description like "Ubuntu 22.04 Linux 5.15" that names no network vendor."""
+    text = (descr or "").lower()
+    return "linux" in text and not any(w in text for w in NETWORK_VENDOR_WORDS)
+
+
+def device_type(role, model, hostname, platform=None):
+    """router / switch / firewall / linux / host for a known device (the page draws an icon from it).
+
+    The role decides unless it is 'router', the default: then the model and
+    hostname are searched for switch / firewall words.
+    """
+    if role in ("switch", "firewall"):
+        return role
+    if platform == "linux":
+        return "linux"
+    if role not in ("router", None, ""):
+        return "host"
+    text = "{} {}".format(model or "", hostname or "").lower()
+    parts = [x.rstrip("0123456789") for x in re.split(r"[^a-z0-9]+", text)]
+    for kind, words, short in (("firewall", FIREWALL_WORDS, FIREWALL_PARTS), ("switch", SWITCH_WORDS, SWITCH_PARTS)):
+        if any(w in text for w in words) or any(x in short for x in parts):
+            return kind
+    return "router"
 
 
 def interface_owners(conn):
@@ -41,6 +80,20 @@ def resolve(owners, device_id, stored_id, ip):
     return None if found == device_id else found
 
 
+def _lldp_report(r, names):
+    """What one end of a cable says about it, for the link details."""
+    return {"reported_by": names.get(r["device_id"]), "local_port": r["local_if"], "remote_port": r["remote_port"],
+            "remote_name": r["remote_sysname"], "remote_chassis": r["remote_chassis"], "remote_mgmt_ip": r["remote_mgmt_ip"],
+            "remote_descr": r["remote_descr"]}
+
+
+def _session_report(r, names):
+    """What one router says about a BGP/OSPF session (remote_as is the peer's AS)."""
+    return {"reported_by": names.get(r["device_id"]), "peer_ip": r["peer_ip"], "state": r["state"],
+            "remote_as": r["remote_as"], "uptime": r["uptime"], "prefixes": r["prefixes"],
+            "area": r["area"], "local_if": r["local_if"]}
+
+
 def _is_up(row):
     return row["state"] == ("Established" if row["proto"] == "bgp" else "FULL")
 
@@ -51,25 +104,38 @@ def build(conn, layer=None):
     wanted = {"lldp", "bgp", "ospf"} if not layer else {x.strip() for x in layer.split(",")}
     owners = interface_owners(conn)
     nodes = {}
-    for d in conn.execute("SELECT id, hostname, role, reachable FROM devices"):
+    names = {}
+    for d in conn.execute("SELECT id, hostname, role, model, vendor, platform, reachable, mgmt_ip FROM devices"):
         nid = "dev:{}".format(d["id"])
+        names[d["id"]] = d["hostname"]
         nodes[nid] = {
             "id": nid, "label": d["hostname"], "group": d["role"],
-            "device_id": d["id"], "ghost": False, "reachable": d["reachable"],
+            "device_id": d["id"], "ghost": False, "reachable": d["reachable"], "mgmt_ip": d["mgmt_ip"],
+            "device_type": device_type(d["role"], d["model"], d["hostname"], d["platform"]),
+            "vendor": (d["vendor"] or "").lower(),
         }
 
-    def ghost_id(kind, key):
+    def ghost_id(kind, key, linux=False):
         gid = "ghost:{}:{}".format(kind, key)
         if gid not in nodes:
-            nodes[gid] = {"id": gid, "label": key, "group": "unknown", "device_id": None, "ghost": True}
+            nodes[gid] = {"id": gid, "label": key, "group": "unknown", "device_id": None, "ghost": True,
+                          "device_type": "linux" if linux else "unknown", "vendor": ""}
         return gid
+
+    # A known device that a neighbor sees as plain Linux is a Linux server, whatever vendor it was added with
+    # (an LLDP-adopted device starts with the Cisco defaults).
+    for r in conn.execute("SELECT device_id, remote_device_id, remote_mgmt_ip, remote_descr FROM lldp_neighbors "
+                          "WHERE remote_descr LIKE '%inux%'"):
+        remote = resolve(owners, r["device_id"], r["remote_device_id"], r["remote_mgmt_ip"])
+        if remote and lldp_says_linux(r["remote_descr"]) and "dev:{}".format(remote) in nodes:
+            nodes["dev:{}".format(remote)].update(device_type="linux", vendor="")
 
     edges = []
 
     if "lldp" in wanted:
         rows = conn.execute(
             """SELECT device_id, local_if, remote_chassis, remote_sysname, remote_port,
-                      remote_mgmt_ip, remote_device_id
+                      remote_mgmt_ip, remote_device_id, remote_descr
                FROM lldp_neighbors"""
         ).fetchall()
         # Two known devices each report the other, so the same cable shows up
@@ -78,25 +144,30 @@ def build(conn, layer=None):
         # vs "GigabitEthernet1") the keys differ and both edges stay — a
         # duplicate line is safer than hiding a real parallel link. Ghost
         # links are never de-duplicated.
-        seen = set()
+        seen = {}   # cable (both ends) -> the edge already drawn for it
         for r in rows:
             remote = resolve(owners, r["device_id"], r["remote_device_id"], r["remote_mgmt_ip"])
             if remote:
                 link = frozenset([(r["device_id"], r["local_if"]), (remote, r["remote_port"])])
                 if link in seen:
+                    seen[link]["details"].append(_lldp_report(r, names))   # the other end's view of the same cable
                     continue
-                seen.add(link)
             target = ("dev:{}".format(remote) if remote
-                      else ghost_id("lldp", r["remote_sysname"] or r["remote_chassis"] or "unknown"))
-            edges.append({
+                      else ghost_id("lldp", r["remote_sysname"] or r["remote_chassis"] or "unknown",
+                                  lldp_says_linux(r["remote_descr"])))
+            edge = {
                 "from": "dev:{}".format(r["device_id"]), "to": target, "layer": "lldp",
                 "label": "{} - {}".format(r["local_if"], r["remote_port"] or "?"),
-            })
+                "details": [_lldp_report(r, names)],
+            }
+            edges.append(edge)
+            if remote:
+                seen[link] = edge
 
     protos = [p for p in ("bgp", "ospf") if p in wanted]
     if protos:
         rows = conn.execute(
-            "SELECT device_id, proto, peer_ip, peer_device_id, remote_as, state FROM adjacencies "
+            "SELECT device_id, proto, peer_ip, peer_device_id, remote_as, state, uptime, prefixes, area, local_if FROM adjacencies "
             "WHERE proto IN ({})".format(",".join("?" * len(protos))),
             protos,
         ).fetchall()
@@ -110,6 +181,7 @@ def build(conn, layer=None):
                     "from": "dev:{}".format(r["device_id"]), "to": ghost_id("peer", r["peer_ip"]),
                     "layer": r["proto"], "label": _session_label(r["proto"], [r["remote_as"]], r["state"]),
                     "up": _is_up(r),
+                    "details": [_session_report(r, names)],
                 })
             else:
                 key = (r["proto"], frozenset([r["device_id"], remote]))
@@ -131,6 +203,7 @@ def build(conn, layer=None):
                     "from": "dev:{}".format(lo), "to": "dev:{}".format(hi), "layer": proto,
                     "label": _session_label(proto, _as_numbers(ends, lo), (bad or ends)[0]["state"]),
                     "up": not bad,
+                    "details": [_session_report(x, names) for x in ends],
                 })
 
     return {"nodes": list(nodes.values()), "edges": edges}
@@ -181,7 +254,7 @@ def lldp_neighbors(conn, device_id=None):
     """LLDP rows for the API, with the effective remote_device_id."""
     owners = interface_owners(conn)
     sql = """SELECT l.device_id, d.hostname, l.local_if, l.remote_chassis, l.remote_sysname,
-                    l.remote_port, l.remote_mgmt_ip, l.remote_device_id, l.last_seen
+                    l.remote_port, l.remote_mgmt_ip, l.remote_device_id, l.remote_descr, l.last_seen
              FROM lldp_neighbors l JOIN devices d ON d.id = l.device_id"""
     params = []
     if device_id:

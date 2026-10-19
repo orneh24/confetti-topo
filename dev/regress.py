@@ -121,13 +121,13 @@ def app_modules():
     try:
         from app import config, db, identity, poller, events
         from app import app as app_pkg_app            # the Flask module
-        from app.collectors import ssh, sweep, confetti
+        from app.collectors import ssh, sweep, confetti, butler
         from app.parsers import ios
     except ImportError as e:
         raise Skip("app not importable here (%s)" % e)
     _mods.update(config=config, db=db, identity=identity,
                  poller=poller, events=events,
-                 appmod=app_pkg_app, ssh=ssh, sweep=sweep, confetti=confetti, ios=ios)
+                 appmod=app_pkg_app, ssh=ssh, sweep=sweep, confetti=confetti, butler=butler, ios=ios)
     return _mods
 
 
@@ -462,6 +462,10 @@ def _():
     need(len(ospf) == 1 and ospf[0]["up"] is False and "EXSTART" in ospf[0]["label"],
          "an OSPF session with one end not FULL must be one down edge showing that state: %r" % ospf, p)
     need(all(e["from"] == "dev:%d" % a and e["to"] == "dev:%d" % b for e in sess), "session edges between a pair must all point the same way", p)
+    need(len(bgp[0]["details"]) == 2 and {d["reported_by"] for d in bgp[0]["details"]} == {"a", "b"},
+         "a session both ends report must carry both reports in details: %r" % bgp[0].get("details"), p)
+    need(all(len(e["details"]) == 1 for e in topology.build(conn, "lldp")["edges"] if e["to"].startswith("ghost:")),
+         "a ghost link carries exactly the one report that saw it", p)
     mixed = {e["layer"] for e in topology.build(conn, "lldp,bgp")["edges"]}
     need("lldp" in mixed and "bgp" in mixed and "ospf" not in mixed, "?layer=lldp,bgp must show exactly those two layers: %r" % sorted(mixed), p)
     need(not topology.build(conn, "none")["edges"], "an unknown layer name must draw no edges", p)
@@ -472,6 +476,25 @@ def _():
     labels = [e["label"] for e in topology.build(conn, "bgp")["edges"]]
     need(labels == ["bgp AS65001 - AS65002 Established"], "BGP label must name both AS numbers: %r" % labels, p)
     need([e["label"] for e in topology.build(conn, "ospf")["edges"]] == ["ospf EXSTART"], "an OSPF label must not get an AS", p)
+    # LLDP says "Linux" and names no network vendor: a Linux server (ghost or known device); a Cisco description is not
+    did = conn.execute("SELECT id FROM devices ORDER BY id LIMIT 1").fetchone()[0]
+    conn.execute("INSERT INTO lldp_neighbors (device_id, local_if, remote_chassis, remote_sysname, remote_port, remote_descr, last_seen)"
+                 " VALUES (?, 'Gi9', 'c1', 'web1', 'eth0', 'Ubuntu 22.04 Linux 5.15', '2000-01-01 00:00:00')", (did,))
+    conn.execute("INSERT INTO lldp_neighbors (device_id, local_if, remote_chassis, remote_sysname, remote_port, remote_descr, last_seen)"
+                 " VALUES (?, 'Gi8', 'c2', 'rtr9', 'Gi1', 'Cisco IOS Software, Linux-based', '2000-01-01 00:00:00')", (did,))
+    conn.commit()
+    ghosts = {n["label"]: n for n in topology.build(conn, "lldp")["nodes"] if n["ghost"]}
+    need(ghosts.get("web1", {}).get("device_type") == "linux", "an LLDP neighbor described as Linux must be a linux ghost", p)
+    need(ghosts.get("rtr9", {}).get("device_type") == "unknown", "a Cisco description that mentions Linux must not become a Linux server", p)
+    # node icons: the type and vendor the page draws come from here
+    dt = topology.device_type
+    need(dt("router", "", "core-sw-01") == "switch" and dt("router", "ASA5506", "e1") == "firewall"
+         and dt("router", "CSR1000V", "r1") == "router" and dt("node", "", "a", "linux") == "linux"
+         and dt("router", "", "answer") == "router", "device_type words/platform rules are off", p)
+    conn.execute("UPDATE devices SET vendor = 'Juniper'")
+    conn.commit()
+    nodes = [n for n in topology.build(conn)["nodes"] if not n["ghost"]]
+    need(nodes and all(n["vendor"] == "juniper" and n["device_type"] for n in nodes), "topology nodes must carry vendor (lower case) and device_type", p)
     conn.close()
     return p
 
@@ -744,6 +767,29 @@ def _():
     need(c.execute("SELECT COUNT(*) FROM devices WHERE hostname = 'found1'").fetchone()[0] == 1,
          "the confetti device was lost when the seedfile source failed", p)
     c.close()
+
+    # confetti-butler import: merges by IP/serial, keeps role, a repeat run adds nothing.
+    m2, conn2 = fresh_db()
+    add_device(conn2, "192.0.2.10", "r-old")
+    class FakeResp:
+        def raise_for_status(self): pass
+        def json(self):
+            return [{"hostname": "r-new", "mgmt_ip": "192.0.2.10", "serial": "SN1", "role": "router", "site": "lab"},
+                    {"hostname": "n1", "mgmt_ip": "192.0.2.11", "role": "node", "vendor": "alpine", "platform": "linux"},
+                    {"hostname": "", "mgmt_ip": ""}]
+    real_get = m2["butler"].requests.get
+    m2["butler"].requests.get = lambda url, timeout=10: FakeResp()
+    try:
+        ids1, _c1 = m2["butler"].discover(conn2, "http://butler.invalid/")
+        ids2, _c2 = m2["butler"].discover(conn2, "http://butler.invalid")
+    finally:
+        m2["butler"].requests.get = real_get
+    n = conn2.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
+    need(len(ids1) == 2 and n == 2, "butler import: %d imported, %d devices (expected 2 and 2)" % (len(ids1), n), p)
+    need(ids1 == ids2, "butler import: a repeat run made different devices", p)
+    role = conn2.execute("SELECT role FROM devices WHERE hostname = 'n1'").fetchone()
+    need(role and role[0] == "node", "butler import lost role='node' (it would be SSH-polled)", p)
+    conn2.close()
     return p
 
 

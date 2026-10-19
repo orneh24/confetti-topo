@@ -20,7 +20,7 @@ You check how confetti-topo's pages look and behave in a real browser, and repor
 
 Pages: `/`, `/devices`, `/devices/1`, `/topology`, `/conflicts`.
 
-Themes: `setTheme('<name>')` in `javascript_tool`; names are in the `THEMES` list in `static/theme.js` (dark, light, monokai, contrast, terminal, confetti-night, neon). Layouts: `setLayout('<name>')` (classic, modern, retro95, amber, greencrt). **Both save to the browser's localStorage** (`confetti-topo-theme`, `confetti-topo-layout`), the user's own choice: read them first and put them back before you finish.
+Themes: `setTheme('<name>')` in `javascript_tool`; names are in the `THEMES` list in `static/theme.js` (dark, light, monokai, contrast, confetti-night, neon). Layouts: `setLayout('<name>')` (classic, modern, retro95, amber, greencrt). **Both save to the browser's localStorage** (`confetti-topo-theme`, `confetti-topo-layout`), the user's own choice: read them first and put them back before you finish.
 
 Unless told otherwise check Dark, Light and Neon Streamers, and every layout once on the dashboard. Classic must show no `.side-nav`, `.kpi-row` or `.taskbar`. Modern: side menu and five summary tiles; below 1100 px the menu hides. Retro 95: open the Start menu (a `<details>`). The CRT layouts disable the theme picker.
 
