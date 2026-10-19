@@ -94,6 +94,7 @@ def main():
             collage([shot(browser, "/", layout=l) for l in LAYOUTS], os.path.join(OUT, "layouts.png"))
 
             frames = [shot(browser, path) for path in TOUR]
+            frames[TOUR.index("/topology")].save(os.path.join(OUT, "topology.png"), optimize=True)
             frames += [shot(browser, "/", theme=t) for t in THEMES]
             frames += [shot(browser, "/", layout=l) for l in LAYOUTS[1:]]
             browser.close()

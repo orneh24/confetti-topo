@@ -702,6 +702,6 @@ button.primary:hover { color: var(--bg); filter: brightness(1.15); }
 }
 :root[data-layout="msdos"] .filters button.active { background: #FFFFFF; font-weight: 700; box-shadow: none; transform: translate(4px, 4px); }
 :root:is([data-layout="greencrt"]) .filters button.active { background: var(--crt-hi); color: var(--crt-bg); text-shadow: none; }
-/* Topology: a layer switched off sits on the right, dashed and dimmed. Written with extra specificity so the
+/* Topology: a layer switched off stays in place, dashed and dimmed. Written with extra specificity so the
    layouts that restyle every button (Retro 95, MS-DOS, CRT) do not hide it. */
-:root .filters .layers-off button { border-style: dashed; opacity: 0.65; }
+:root .filters button[data-layer]:not(.active) { border-style: dashed; opacity: 0.65; }

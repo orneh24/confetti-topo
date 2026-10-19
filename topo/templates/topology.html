@@ -47,8 +47,6 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
 .legend-box .icons img { width: 18px; height: 18px; object-fit: contain; vertical-align: middle; margin-right: 3px; }
 .node-panel .hide-row { margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--border); display: flex; gap: 6px; align-items: center; cursor: pointer; }
 /* Shown over the map only while a layer is switched off, so a half-empty graph is never mistaken for the whole network. */
-.layers-on { display: contents; }
-.layers-off { margin-left: auto; display: flex; gap: 8px; align-items: center; }
 .filter-marker { flex: 0 1 auto; max-width: 260px; display: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px;
     font-size: 12px; font-weight: bold; color: var(--yellow); background: var(--yellow-bg);
     border: 2px solid var(--yellow); border-radius: 4px; padding: 6px 10px; }
@@ -57,17 +55,13 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
 {% block content %}
 <div class="filters">
     <span class="hint">Show:</span>
-    <span id="layers-on" class="layers-on">
-        <button class="active" data-layer="lldp" data-name="LLDP" aria-pressed="true" onclick="toggleLayer(this)">LLDP</button>
-        <button class="active" data-layer="bgp" data-name="BGP" aria-pressed="true" onclick="toggleLayer(this)">BGP</button>
-        <button class="active" data-layer="ospf" data-name="OSPF" aria-pressed="true" onclick="toggleLayer(this)">OSPF</button>
-    </span>
+    <button class="active" data-layer="lldp" data-name="LLDP" aria-pressed="true" onclick="toggleLayer(this)">LLDP</button>
+    <button class="active" data-layer="bgp" data-name="BGP" aria-pressed="true" onclick="toggleLayer(this)">BGP</button>
+    <button class="active" data-layer="ospf" data-name="OSPF" aria-pressed="true" onclick="toggleLayer(this)">OSPF</button>
     <span class="hint">|</span>
     <button class="active" id="unknown-btn" aria-pressed="true" onclick="toggleUnknown(this)" title="Neighbors and peers that are not matched to a known device">Unknown nodes</button>
     <button class="active" id="icons-btn" aria-pressed="true" onclick="toggleIcons(this)" title="Draw devices as icons with a vendor mark. Off: plain boxes for every device">Device icons</button>
     <button class="active" id="vendor-btn" aria-pressed="true" onclick="toggleVendor(this)" title="Show the vendor mark and name beside each device icon">Vendor icons</button>
-    <!-- A layer that is switched off moves here, to the right, and is renamed "<name> (Not shown)". -->
-    <span id="layers-off" class="layers-off"></span>
 </div>
 <div class="net-wrap">
     <div id="net"></div>
@@ -262,7 +256,9 @@ function toVisEdges(edges) {
                 highlight: themeColor('--text'),   // the selected link
             },
             // A link to an unidentified neighbor is short, so the ghost sits next to the router that sees it.
-            length: (e.to.indexOf('ghost:') === 0 || e.to.indexOf('group:') === 0) ? 110 : undefined,
+            // A BGP/OSPF label is about 150px wide and always shown: that link is long enough for the label to sit
+            // between the router and the ghost. LLDP labels are hidden until hover, and a group's label is short.
+            length: e.to.indexOf('group:') === 0 ? 170 : (e.to.indexOf('ghost:') === 0 ? (e.layer === 'lldp' ? 110 : 230) : undefined),
             dashes: e.up === false,
             width: e.up === false ? 2 : 1,
             // Lines between the same two devices would sit on top of each other: bend BGP one way, OSPF the other.
@@ -303,6 +299,11 @@ function settled() {
     nodeSet.update(nodeSet.getIds().map(function (id) { return { id: id, fixed: false }; }));
     savePositions(nodeSet.getIds());
     network.fit();
+    // The legend sits over the left of the map: move the fitted picture right by half its width.
+    var legend = document.querySelector('.legend-box');
+    if (legend && legend.offsetWidth) {
+        network.moveTo({ position: network.getViewPosition(), scale: network.getScale(), offset: { x: legend.offsetWidth / 2, y: 0 } });
+    }
 }
 
 // "Re-arrange": forget the saved places and lay the map out again from scratch.
@@ -404,19 +405,8 @@ function setLayerButton(btn, on) {
     btn.className = on ? 'active' : '';
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
     if (btn.getAttribute('data-layer')) {
-        btn.textContent = btn.getAttribute('data-name') + (on ? '' : ' (Not shown)');
-        placeLayerButtons();
+        btn.textContent = btn.getAttribute('data-name') + (on ? '' : ' (Not shown)');   // stays where it is
     }
-}
-
-// Lit layers stay on the left; the ones switched off go to the right, in the same order as before.
-function placeLayerButtons() {
-    var focused = document.activeElement;
-    ['lldp', 'bgp', 'ospf'].forEach(function (name) {
-        var b = document.querySelector('.filters button[data-layer="' + name + '"]');
-        document.getElementById(b.className === 'active' ? 'layers-on' : 'layers-off').appendChild(b);
-    });
-    if (focused && focused.tagName === 'BUTTON') { focused.focus(); }   // moving a button drops keyboard focus
 }
 
 function saveLayers() {
