@@ -45,7 +45,7 @@ Prefer `javascript_tool` (computed styles, element counts, bounding boxes) over 
 ## Known traps
 
 - Animations look frozen in a background tab (`requestAnimationFrame` is paused); don't report the Confetti effect as broken from a screenshot.
-- The mock lab's devices are fake: do not click "Poll now", "delete", or the Sweep/Import/Seed buttons.
+- The mock lab's devices are fake: do not click "Poll now", "Poll all now", "delete", the Sweep/Import/Seed buttons, or any Save/Apply/Remove button on the Settings page.
 - Do not trigger `alert`/`confirm` dialogs; they block the browser tools.
 
 ## Report

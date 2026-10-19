@@ -70,7 +70,7 @@
                     <label for="c-enable_secret">enable secret</label><input id="c-enable_secret" name="enable_secret" type="password" autocomplete="new-password">
                 </div>
                 <div class="hint">A blank secret field keeps the stored value. Stored in plaintext in topo.db.</div>
-                <button type="submit">Save</button>
+                <button type="submit" class="primary">Save</button>
                 <button type="button" onclick="clearSecrets()">Clear secrets</button>
                 <span class="msg" id="cred-msg"></span>
             </form>
@@ -225,7 +225,7 @@ function loadCredentials() {
         });
         document.getElementById('cred-status').textContent = c.updated_at
             ? 'Per-device credentials, last changed ' + c.updated_at + '. Unset fields use the server defaults.'
-            : 'No per-device credentials — polling uses the server defaults (TOPO_SSH_*).';
+            : 'No per-device credentials — polling uses the defaults from the Settings page or the TOPO_SSH_* environment.';
     });
 }
 

@@ -12,7 +12,7 @@
 </head>
 {# The page list lives here once. The current page is picked from the URL, so
    /devices/5 counts as Devices. #}
-{% set pages = [('/', 'Dashboard'), ('/devices', 'Devices'), ('/topology', 'Topology'), ('/conflicts', 'Conflicts')] %}
+{% set pages = [('/', 'Dashboard'), ('/devices', 'Devices'), ('/topology', 'Topology'), ('/conflicts', 'Conflicts'), ('/settings', 'Settings')] %}
 {% set here = '/' if request.path == '/' else '/' + request.path.strip('/').split('/')[0] %}
 <body class="{% block body_class %}{% endblock %}">
 

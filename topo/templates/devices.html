@@ -4,6 +4,8 @@
 <style>
 form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .msg { font-size: 12px; margin-top: 8px; }
+.bulk-row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
+.bulk-row .msg { margin-top: 0; }
 </style>
 {% endblock %}
 {% block content %}
@@ -42,6 +44,10 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
     <div class="section">
         <div class="section-header"><span>Devices</span></div>
         <div class="section-body">
+            <div class="bulk-row">
+                <button type="button" id="poll-all-btn" class="primary" onclick="pollAll()">Poll all now</button>
+                <span class="msg" id="poll-msg"></span>
+            </div>
             <table>
                 <thead>
                     <tr>
@@ -127,7 +133,9 @@ function renderDevices(list) {
             '<td>' + pingCell(d.reachable) + '</td>' +
             '<td><span class="pill ' + pollCls + '">' + esc(d.role === 'node' ? 'not polled' : d.poll_state) + '</span></td>' +
             '<td>' + timeAgo(d.last_seen) + '</td>' +
-            '<td><button onclick="removeDevice(' + d.id + ')">delete</button></td>' +
+            '<td>' + (d.role === 'node' || !d.enabled ? '' :
+                '<button onclick="pollDevice(' + d.id + ', this)">Poll now</button> ') +
+                '<button onclick="removeDevice(' + d.id + ')">delete</button></td>' +
             '</tr>';
     }
     document.getElementById('device-rows').innerHTML = rows;
@@ -136,6 +144,58 @@ function renderDevices(list) {
 
 function loadDevices() {
     fetch('/api/devices').then(function (r) { return r.json(); }).then(renderDevices);
+}
+
+// Polls run inline on the request, so one device can take several seconds.
+function pollSummary(data) {
+    var failed = [];
+    for (var task in data.results || {}) {
+        if (!data.results[task].ok) { failed.push(task); }
+    }
+    return failed.length ? 'failed: ' + failed.join(', ') : 'ok';
+}
+
+function pollRequest(id) {
+    return fetch('/api/devices/' + id + '/poll', { method: 'POST' }).then(function (r) {
+        return r.json().then(function (data) { return r.ok ? pollSummary(data) : (data.error || 'failed'); });
+    }).catch(function () { return 'request failed'; });
+}
+
+function pollDevice(id, btn) {
+    var msg = document.getElementById('poll-msg');
+    btn.disabled = true;
+    msg.className = 'msg';
+    msg.textContent = 'polling device ' + id + '...';
+    pollRequest(id).then(function (result) {
+        msg.textContent = 'device ' + id + ': ' + result;
+        msg.className = result === 'ok' ? 'msg ok' : 'msg err';
+        loadDevices();
+    });
+}
+
+function pollAll() {
+    var msg = document.getElementById('poll-msg');
+    var btn = document.getElementById('poll-all-btn');
+    fetch('/api/devices').then(function (r) { return r.json(); }).then(function (list) {
+        var ids = list.filter(function (d) { return d.role !== 'node' && d.enabled; })
+                      .map(function (d) { return d.id; });
+        if (!ids.length) { msg.textContent = 'no pollable devices'; msg.className = 'msg'; return; }
+        btn.disabled = true;
+        var done = 0, bad = 0;
+        // One at a time: each poll holds an SSH session open.
+        return ids.reduce(function (chain, id) {
+            return chain.then(function () {
+                msg.className = 'msg';
+                msg.textContent = 'polling ' + (done + 1) + ' of ' + ids.length + '...';
+                return pollRequest(id).then(function (result) { done++; if (result !== 'ok') { bad++; } });
+            });
+        }, Promise.resolve()).then(function () {
+            msg.textContent = 'polled ' + done + ' device(s), ' + bad + ' with failures';
+            msg.className = bad ? 'msg err' : 'msg ok';
+            btn.disabled = false;
+            loadDevices();
+        });
+    });
 }
 
 function removeDevice(id) {

@@ -40,7 +40,13 @@ Split the topology mapping out of confetti-butler into this project. The plan an
 - **`build-template.sh`, the OpenRC scripts, `topo-update.sh`, the nightly backup and the guestinfo first
   boot have not run on an Alpine VM.** They are renamed copies of butler's, which have. The user plans a new
   Alpine VM on port 80.
-- **The container image has not been built.**
+- **Settings page (2026-10-19):** `/settings` sets the default SSH credentials (DB) and applies or removes
+  per-device credentials in bulk; R28 covers it. Checked over HTTP in the mock container and with the Flask test
+  client; the page was not yet looked at in a browser, and no real router has used these credentials.
+- **Container (2026-10-19):** the image builds from `container/Dockerfile` and `docker-compose.dev.yml` (mock
+  profile) runs healthy on Docker 29.8; topology API, `/metrics` and a restart that keeps the DB were checked. The
+  production `docker-compose.yml` (port 80) was not run, and the lab profile was only checked for health and an
+  empty device list.
 - **Butler's alert rules on BGP/OSPF/LLDP events no longer fire** once butler drops those tasks; topo has no
   alerting.
 - Pairing of two sessions between the same pair of routers is by position (Established first). Wrong only if

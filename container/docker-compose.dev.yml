@@ -1,0 +1,53 @@
+# Dev containers: live code from ../topo, no rebuild per change.
+#
+#   docker compose -f container/docker-compose.dev.yml --profile mock up --build   # http://localhost:8080
+#   docker compose -f container/docker-compose.dev.yml --profile lab up --build    # http://localhost:8081
+#
+# mock: the fake 3-router lab (scripts/seed_mock_lab.py), seeded on first start; nothing dials out.
+#       `down -v` wipes it and the next `up` reseeds.
+# lab:  an empty database for real routers. SSH credentials come from the environment or a .env file.
+#
+# The app reads code only at start: after a change run `docker compose -f container/docker-compose.dev.yml restart <service>`.
+services:
+  topo-mock:
+    profiles: ["mock"]
+    build:
+      context: ../topo
+      dockerfile: ../container/Dockerfile
+    image: confetti-topo
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../topo:/opt/confetti-topo
+      - topo-mock-data:/var/lib/confetti-topo
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      TOPO_PORT: "8080"
+      # The mock devices have fake 192.0.2.x addresses; pinging them would turn every one red.
+      TOPO_PING_ENABLED: "false"
+    command:
+      - sh
+      - -c
+      - "[ -f /var/lib/confetti-topo/topo.db ] || python3 scripts/seed_mock_lab.py /var/lib/confetti-topo/topo.db; exec python3 serve.py"
+
+  topo-lab:
+    profiles: ["lab"]
+    build:
+      context: ../topo
+      dockerfile: ../container/Dockerfile
+    image: confetti-topo
+    ports:
+      - "8081:8081"
+    volumes:
+      - ../topo:/opt/confetti-topo
+      - topo-lab-data:/var/lib/confetti-topo
+    environment:
+      PYTHONDONTWRITEBYTECODE: "1"
+      TOPO_PORT: "8081"
+      TOPO_SSH_USERNAME: ${TOPO_SSH_USERNAME:-admin}
+      TOPO_SSH_PASSWORD: ${TOPO_SSH_PASSWORD:-}
+      TOPO_SSH_SECRET: ${TOPO_SSH_SECRET:-}
+
+volumes:
+  topo-mock-data:
+  topo-lab-data:

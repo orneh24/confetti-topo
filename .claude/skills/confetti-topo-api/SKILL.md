@@ -38,7 +38,7 @@ those two columns to NULL, so its neighbors become ghosts again.
 
 ## Routes
 
-**Pages:** `/` `/devices` `/devices/<id>` `/topology` `/conflicts`
+**Pages:** `/` `/devices` `/devices/<id>` `/topology` `/conflicts` `/settings`
 
 **Devices:**
 - `GET|POST /api/devices` — POST goes through `identity.ingest`
@@ -47,6 +47,11 @@ those two columns to NULL, so its neighbors become ghosts again.
 - `POST /api/devices/<id>/poll` — synchronous, inline on the request thread
 - `GET /api/devices/<id>/interfaces`; `GET|PUT /api/devices/<id>/credentials` (GET never returns a secret,
   only `*_set` booleans; PUT is partial, `""` clears one)
+- `GET|PUT /api/settings/credentials` — server-wide defaults (the `settings` table; GET shows `*_source`:
+  settings/env/none). Order per field: device row > settings > `TOPO_SSH_*` env, empty falls through
+- `GET /api/credentials` (every non-node device with `has_override`, `username`, `password_set`, `enable_secret_set`, `updated_at`; no secrets); `POST /api/credentials/bulk`
+  `{device_ids, username?, password?, enable_secret?}` (one transaction, an unknown id applies nothing);
+  `POST /api/credentials/clear {device_ids}`
 - `POST /api/devices/<id>/merge`; `GET /api/conflicts?resolved=0|1`; `POST /api/conflicts/<id>/dismiss`
 
 **Discovery:** `POST /api/discover/{sweep,seedfile,confetti}` return `{device_ids, conflicts}`.

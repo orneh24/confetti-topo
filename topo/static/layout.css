@@ -160,18 +160,21 @@ input[type=text], input[type=number], input[type=password], input:not([type]), s
 }
 button, .btn-small {
     display: inline-block;
-    background: var(--bg-hover);
-    border: 1px solid var(--border);
-    color: var(--text-dim);
+    background: var(--bg-muted);
+    border: 1px solid var(--text-dim);
+    color: var(--text);
     font-family: inherit;
-    font-size: 11px;
-    padding: 3px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 12px;
     border-radius: 0;
     cursor: pointer;
 }
-button:hover, .btn-small:hover { color: var(--text); border-color: var(--blue); text-decoration: none; }
+button:hover, .btn-small:hover { border-color: var(--blue); color: var(--blue); text-decoration: none; }
 button:disabled { opacity: 0.5; cursor: default; }
-button.primary { border-color: var(--blue); color: var(--blue); }
+/* The main action of a form: filled. */
+button.primary { background: var(--blue); border-color: var(--blue); color: var(--bg); }
+button.primary:hover { color: var(--bg); filter: brightness(1.15); }
 
 /* ------------------------------------------------------------------
    Layouts

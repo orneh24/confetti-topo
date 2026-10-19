@@ -257,7 +257,8 @@ TOPO_DISCOVERY_INTERVAL_S=0
 # TOPO_DISCOVERY_SEEDFILE=/opt/confetti-topo/seed/devices.yaml
 
 # --- Default device credentials -----------------------------------------
-# Shared lab defaults; override per device via PUT /api/devices/<id>/credentials.
+# Shared lab defaults; the Settings page overrides them for all devices, and
+# PUT /api/devices/<id>/credentials per device.
 # Never put a real password here outside an isolated lab.
 TOPO_SSH_USERNAME=admin
 TOPO_SSH_PASSWORD=

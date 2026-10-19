@@ -56,8 +56,8 @@ cd topo
 TOPO_PORT=8080 python serve.py
 ```
 
-Open http://localhost:8080 and add a device on the Devices page. Set its SSH login on the device page
-(Credentials), then click **Poll now**. The database is `topo.db` in the working folder.
+Open http://localhost:8080 and add a device on the Devices page. Set the SSH login for all devices on the
+Settings page (or for one device on its page, under Credentials), then click **Poll now** (Devices page or device page) or **Poll all now**. The database is `topo.db` in the working folder.
 
 To look around without a router, fill a new database with a fake lab:
 
@@ -79,7 +79,9 @@ butler's script, which has run on a real Alpine 3.24 VM.
 - **Clone settings:** `guestinfo.topo.ip` / `gateway` set a static IP; `ssh_username`, `ssh_password`,
   `ssh_secret` and `poll_interval_s` set the polling defaults.
 - **Container:** `container/` has a Dockerfile and compose file for trying it without ESXi:
-  `docker compose -f container/docker-compose.yml up --build`.
+  `docker compose -f container/docker-compose.yml up --build`. For development,
+  `container/docker-compose.dev.yml` mounts `topo/` live: `--profile mock` (fake lab, port 8080) or
+  `--profile lab` (empty DB for real routers, port 8081).
 
 ## Security notes
 

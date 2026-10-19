@@ -277,6 +277,11 @@ def conflicts_page():
     return render_template("conflicts.html")
 
 
+@app.route("/settings")
+def settings_page():
+    return render_template("settings.html")
+
+
 @app.route("/topology")
 def topology_page():
     return render_template("topology.html")
@@ -426,9 +431,18 @@ def api_device_credentials(device_id):
 
     # Only fields present in the body change: saving a new password must not
     # wipe the stored enable secret. Send "" to clear one.
+    if not _set_credentials(conn, device_id, data):
+        return jsonify({"error": "no credential fields in body", "fields": list(CREDENTIAL_FIELDS)}), 400
+    conn.commit()
+    return jsonify({"status": "ok", "device_id": device_id})
+
+
+def _set_credentials(conn, device_id, data):
+    """Write the credential fields present in data to one device's row.
+    Returns False when there are none. Does not commit."""
     fields = [k for k in CREDENTIAL_FIELDS if k in data]
     if not fields:
-        return jsonify({"error": "no credential fields in body", "fields": list(CREDENTIAL_FIELDS)}), 400
+        return False
     now = db.sqlite_now()
     conn.execute(
         "INSERT OR IGNORE INTO credentials (device_id, updated_at) VALUES (?, ?)",
@@ -439,8 +453,124 @@ def api_device_credentials(device_id):
             ", ".join("{} = ?".format(k) for k in fields)),
         [data[k] for k in fields] + [now, device_id],
     )
+    return True
+
+
+# Settings-page defaults: body field -> settings key -> env fallback in config.py.
+SETTING_KEYS = {"username": "ssh_username", "password": "ssh_password", "enable_secret": "ssh_enable_secret"}
+ENV_DEFAULTS = {"username": "DEFAULT_SSH_USERNAME", "password": "DEFAULT_SSH_PASSWORD",
+                "enable_secret": "DEFAULT_SSH_SECRET"}
+
+
+@app.route("/api/settings/credentials", methods=["GET"])
+def api_get_default_credentials():
+    """The server-wide default credentials. Never returns a secret, only
+    whether each is set and where the value in use comes from."""
+    conn = db.get_db()
+    saved = {r["key"]: r for r in conn.execute("SELECT key, value, updated_at FROM settings")}
+    out = {"updated_at": None}
+    for field, key in SETTING_KEYS.items():
+        row = saved.get(key)
+        from_db = bool(row and row["value"])
+        from_env = bool(getattr(config, ENV_DEFAULTS[field]))
+        out[field + "_source"] = "settings" if from_db else ("env" if from_env else "none")
+        if row and row["updated_at"] and (out["updated_at"] is None or row["updated_at"] > out["updated_at"]):
+            out["updated_at"] = row["updated_at"]
+    out["updated_at"] = db.iso(out["updated_at"]) if out["updated_at"] else None
+    out["username"] = (saved.get("ssh_username") or {"value": None})["value"]
+    out["username_env"] = config.DEFAULT_SSH_USERNAME
+    for k in CREDENTIAL_SECRETS:
+        out[k + "_set"] = out[k + "_source"] != "none"
+    return jsonify(out)
+
+
+@app.route("/api/settings/credentials", methods=["PUT"])
+def api_put_default_credentials():
+    """Partial update, like the per-device PUT: only fields in the body
+    change, "" clears one (it then falls back to the environment)."""
+    data = request.get_json(force=True, silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Body must be a JSON object"}), 400
+    fields = [k for k in CREDENTIAL_FIELDS if k in data]
+    if not fields:
+        return jsonify({"error": "no credential fields in body", "fields": list(CREDENTIAL_FIELDS)}), 400
+    conn = db.get_db()
+    now = db.sqlite_now()
+    for k in fields:
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            (SETTING_KEYS[k], str(data[k]), now),
+        )
     conn.commit()
-    return jsonify({"status": "ok", "device_id": device_id})
+    return jsonify({"status": "ok"})
+
+
+@app.route("/api/credentials", methods=["GET"])
+def api_list_device_credentials():
+    """Which devices have their own credentials row. No secrets."""
+    rows = db.get_db().execute(
+        """SELECT d.id, d.hostname, d.mgmt_ip, d.role, c.username, c.password, c.enable_secret, c.updated_at
+           FROM devices d LEFT JOIN credentials c ON c.device_id = d.id
+           WHERE d.role != 'node' ORDER BY d.hostname"""
+    ).fetchall()
+    return jsonify([{
+        "device_id": r["id"], "hostname": r["hostname"], "mgmt_ip": r["mgmt_ip"],
+        "has_override": r["updated_at"] is not None,
+        "username": r["username"],
+        "password_set": bool(r["password"]), "enable_secret_set": bool(r["enable_secret"]),
+        "updated_at": db.iso(r["updated_at"]) if r["updated_at"] else None,
+    } for r in rows])
+
+
+def _bulk_ids(data):
+    """device_ids from a bulk body, or None when it is not a non-empty list of ints."""
+    ids = data.get("device_ids") if isinstance(data, dict) else None
+    if not isinstance(ids, list) or not ids or not all(isinstance(i, int) for i in ids):
+        return None
+    return sorted(set(ids))
+
+
+def _missing_devices(conn, ids):
+    found = {r["id"] for r in conn.execute(
+        "SELECT id FROM devices WHERE id IN ({})".format(",".join("?" * len(ids))), ids)}
+    return [i for i in ids if i not in found]
+
+
+@app.route("/api/credentials/bulk", methods=["POST"])
+def api_bulk_credentials():
+    """Set the same credential fields on several devices in one transaction.
+    An unknown device id applies nothing."""
+    data = request.get_json(force=True, silent=True)
+    ids = _bulk_ids(data)
+    if ids is None:
+        return jsonify({"error": "device_ids must be a non-empty list of device ids"}), 400
+    if not any(k in data for k in CREDENTIAL_FIELDS):
+        return jsonify({"error": "no credential fields in body", "fields": list(CREDENTIAL_FIELDS)}), 400
+    conn = db.get_db()
+    missing = _missing_devices(conn, ids)
+    if missing:
+        return jsonify({"error": "not found", "device_ids": missing}), 404
+    for device_id in ids:
+        _set_credentials(conn, device_id, data)
+    conn.commit()
+    return jsonify({"status": "ok", "updated": len(ids)})
+
+
+@app.route("/api/credentials/clear", methods=["POST"])
+def api_bulk_clear_credentials():
+    """Remove the per-device override from several devices, so they use the defaults."""
+    data = request.get_json(force=True, silent=True)
+    ids = _bulk_ids(data)
+    if ids is None:
+        return jsonify({"error": "device_ids must be a non-empty list of device ids"}), 400
+    conn = db.get_db()
+    missing = _missing_devices(conn, ids)
+    if missing:
+        return jsonify({"error": "not found", "device_ids": missing}), 404
+    conn.execute("DELETE FROM credentials WHERE device_id IN ({})".format(",".join("?" * len(ids))), ids)
+    conn.commit()
+    return jsonify({"status": "ok", "cleared": len(ids)})
 
 
 @app.route("/api/devices/<int:device_id>/poll", methods=["POST"])

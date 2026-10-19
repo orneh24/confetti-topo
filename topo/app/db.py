@@ -119,6 +119,14 @@ def init_db():
             updated_at     TEXT NOT NULL
         );
 
+        -- Server-wide settings set from the UI (default SSH credentials). Plaintext in v1,
+        -- same as credentials. Sits between a device's own row and the TOPO_SSH_* env.
+        CREATE TABLE IF NOT EXISTS settings (
+            key         TEXT PRIMARY KEY,
+            value       TEXT,
+            updated_at  TEXT NOT NULL
+        );
+
         -- What each device reports about its own interfaces. The topology
         -- uses the addresses to resolve a BGP/OSPF peer IP to a device.
         CREATE TABLE IF NOT EXISTS interfaces (

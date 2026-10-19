@@ -28,15 +28,17 @@ TASKS = platforms.tasks(platforms.IOS)
 
 
 def resolve_credentials(conn, device_id):
-    """Per-device credentials row overrides the environment's lab default —
-    see config.py's DEFAULT_SSH_*."""
+    """Per field: the device's own credentials row, then the Settings page
+    (settings table), then the environment's lab default (config.py's
+    DEFAULT_SSH_*). An empty value falls through to the next level."""
     row = conn.execute(
         "SELECT username, password, enable_secret FROM credentials WHERE device_id = ?", (device_id,)
     ).fetchone()
+    saved = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings")}
     return {
-        "username": (row["username"] if row and row["username"] else config.DEFAULT_SSH_USERNAME),
-        "password": (row["password"] if row and row["password"] else config.DEFAULT_SSH_PASSWORD),
-        "secret": (row["enable_secret"] if row and row["enable_secret"] else config.DEFAULT_SSH_SECRET),
+        "username": (row and row["username"]) or saved.get("ssh_username") or config.DEFAULT_SSH_USERNAME,
+        "password": (row and row["password"]) or saved.get("ssh_password") or config.DEFAULT_SSH_PASSWORD,
+        "secret": (row and row["enable_secret"]) or saved.get("ssh_enable_secret") or config.DEFAULT_SSH_SECRET,
     }
 
 

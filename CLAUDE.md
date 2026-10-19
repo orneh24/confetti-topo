@@ -184,7 +184,9 @@ two) guestinfo and, once per clone, `topo.ssh_username`,
 the VM's advanced settings in vCenter. `topo.env` is 0600.
 
 **Container:** `container/Dockerfile` + `docker-compose.yml` (context `topo/`): same Alpine packages and
-pinned pip packages as the VM, `TOPO_HEALTH_SERVICES` emptied (no OpenRC). There is no Packer template.
+pinned pip packages as the VM, `TOPO_HEALTH_SERVICES` emptied (no OpenRC). `container/docker-compose.dev.yml` is the dev setup: `topo/` mounted live (restart the
+service after a change, no rebuild), `--profile mock` = seeded fake lab on 8080, `--profile lab` = empty DB on 8081.
+There is no Packer template.
 
 ## Seeding paths (device discovery)
 
@@ -219,7 +221,7 @@ topo/
     collectors/        — ssh.py, sweep.py, confetti.py, seedfile.py
     parsers/           — ios.py, regex only
   templates/           — base.html (head, header/nav, theme + layout pickers, footer, Retro taskbar)
-                         + dashboard, devices, device, topology, conflicts, each `{% extends "base.html" %}`
+                         + dashboard, devices, device, topology, conflicts, settings, each `{% extends "base.html" %}`
   static/theme.css     — the ONE place colours live (Dark, Light, Monokai, High Contrast, Terminal green,
                          Confetti Night, Neon Streamers). Pages must not define their own :root colours
   static/layout.css    — Classic, Modern, Retro 95, MS-DOS, Neon Green CRT. Loaded AFTER theme.css
@@ -248,7 +250,9 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
 - **Mirror the sibling stack exactly**: Flask + SQLite (WAL) + waitress, vanilla JS with no build step, Alpine
   golden image, OpenRC.
 - **Read-only SSH.** No Netmiko config-push path.
-- **Credentials**: env defaults (`TOPO_SSH_*`) + a per-device `credentials` table override. Plaintext in v1 —
+- **Credentials**: per field, a device's own `credentials` row, then the Settings page (`settings` table), then
+  the env defaults (`TOPO_SSH_*`); an empty value falls through (`ssh.resolve_credentials`, R28). The Settings
+  page also applies or removes per-device credentials on several devices at once. Plaintext in v1 —
   `topo.db` must be `0600` (`checkpath --directory --mode 0700` on `/var/lib/confetti-topo` in the OpenRC
   service is the current mitigation).
 - **The API is unauthenticated**, same trust model as the siblings; do not expose it. A sweep CIDR or a
@@ -322,7 +326,8 @@ cross-file checks (docs vs code task count, shell/Alpine hygiene, poller lock, f
 platform registry and read-only commands); `R20` starts the real server from a temp copy and drives it over
 HTTP; `R21`..`R26` cover the ICMP state machine, `/metrics` format, LLDP crawl, scheduled discovery, the
 container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R27` checks the OpenSSH
-(not Dropbear) setup. Output is one line per check
+(not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
+that a bulk apply is all-or-nothing. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

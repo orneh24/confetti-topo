@@ -255,7 +255,7 @@ def _():
     did = add_device(conn, "192.0.2.1")
     conn.close()
     client = m["appmod"].app.test_client()
-    for url in ("/", "/devices", "/devices/%d" % did, "/conflicts", "/topology"):
+    for url in ("/", "/devices", "/devices/%d" % did, "/conflicts", "/topology", "/settings"):
         code = client.get(url).status_code
         need(code == 200, "GET %s -> %s" % (url, code), p)
     return p
@@ -749,6 +749,13 @@ def _():
         need("'^%s=='" % pin in df, "Dockerfile does not install %s from the requirements.txt pin" % pin, p)
     dc = read("container/docker-compose.yml")
     need("context: ../topo" in dc and "dockerfile: ../container/Dockerfile" in dc, "docker-compose.yml build paths are off", p)
+    dev = read("container/docker-compose.dev.yml")
+    need(dev.count("context: ../topo") == 2 and dev.count("dockerfile: ../container/Dockerfile") == 2,
+         "docker-compose.dev.yml build paths are off", p)
+    need(re.search(r'TOPO_PING_ENABLED: "false"', dev) is not None, "dev mock service must switch ping off (fake IPs)", p)
+    need(not re.search(r"^\s*TOPO_SSH_(PASSWORD|SECRET):[ \t]*[^$\s]", dev, re.M), "docker-compose.dev.yml hardcodes an SSH secret", p)
+    need("scripts/seed_mock_lab.py" in dev and os.path.exists("topo/scripts/seed_mock_lab.py"),
+         "dev mock service seeds from scripts/seed_mock_lab.py, which is missing", p)
     di = read("topo/.dockerignore")
     need("topo.env" in di and "topo.db" in di, "topo/.dockerignore must keep topo.env and topo.db* out of the image", p)
     return p
@@ -775,6 +782,45 @@ def _():
     need("dropbear" not in read("topo/app/config.py").split("HEALTH_SERVICES")[1].split(")")[0],
          "config.py health default still lists dropbear", p)
     need(re.search(r"HEALTH_SERVICES=[^\n]*\bsshd\b", bt), "topo.env health list must name sshd", p)
+    return p
+
+
+@check("R28", "credentials: device row > Settings page > TOPO_SSH_* env, empty falls through, no secret in any GET, bulk is all-or-nothing")
+def _():
+    p = []
+    m, conn = fresh_db()
+    config, ssh = m["config"], m["ssh"]
+    a = add_device(conn, "192.0.2.1", "a")
+    b = add_device(conn, "192.0.2.2", "b")
+    conn.close()
+    config.DEFAULT_SSH_USERNAME, config.DEFAULT_SSH_PASSWORD, config.DEFAULT_SSH_SECRET = "envuser", "envpw", "envsecret"
+    client = m["appmod"].app.test_client()
+
+    def creds(did):
+        c = m["db"].connect()
+        try:
+            return ssh.resolve_credentials(c, did)
+        finally:
+            c.close()
+    need(creds(a) == {"username": "envuser", "password": "envpw", "secret": "envsecret"}, "env defaults not used: %r" % creds(a), p)
+    client.put("/api/settings/credentials", json={"username": "setuser", "password": "setpw", "enable_secret": "SETSECRET"})
+    need(creds(a) == {"username": "setuser", "password": "setpw", "secret": "SETSECRET"}, "Settings page does not beat env: %r" % creds(a), p)
+    client.put("/api/settings/credentials", json={"enable_secret": ""})
+    need(creds(a)["secret"] == "envsecret", "an emptied Settings value must fall back to env: %r" % creds(a), p)
+    client.put("/api/devices/%d/credentials" % a, json={"username": "devuser", "password": "DEVPW"})
+    need(creds(a) == {"username": "devuser", "password": "DEVPW", "secret": "envsecret"}, "device row does not beat Settings: %r" % creds(a), p)
+    need(creds(b)["username"] == "setuser", "another device must keep using the Settings default: %r" % creds(b), p)
+    for url in ("/api/settings/credentials", "/api/credentials", "/api/devices/%d/credentials" % a):
+        body = client.get(url).get_data(as_text=True)
+        for secret in ("DEVPW", "setpw", "SETSECRET"):
+            need(secret not in body, "GET %s returns a secret" % url, p)
+    r = client.post("/api/credentials/bulk", json={"device_ids": [a, 9999], "username": "bulk"})
+    need(r.status_code == 404, "bulk with an unknown id should be 404, got %s" % r.status_code, p)
+    need(creds(a)["username"] == "devuser", "a failed bulk apply changed a device", p)
+    r = client.post("/api/credentials/bulk", json={"device_ids": [a, b], "username": "bulk"})
+    need(r.status_code == 200 and creds(a)["username"] == creds(b)["username"] == "bulk", "bulk apply did not reach both devices", p)
+    client.post("/api/credentials/clear", json={"device_ids": [a, b]})
+    need(creds(a)["username"] == "setuser" and creds(a)["password"] == "setpw", "clearing own credentials should fall back to Settings: %r" % creds(a), p)
     return p
 
 
@@ -828,7 +874,7 @@ def run_live():
         need(health.get("poller_running") is True, "poller is not running", problems)
         need(health.get("reach_running") is True, "ICMP checker is not running", problems)
         need(b"topo_up 1" in get("/metrics")[1], "/metrics does not answer", problems)
-        for url in ("/", "/devices", "/topology", "/conflicts"):
+        for url in ("/", "/devices", "/topology", "/conflicts", "/settings"):
             code = get(url)[0]
             need(code == 200, "GET %s -> %s" % (url, code), problems)
         req = urllib.request.Request(base + "/api/devices", method="POST",

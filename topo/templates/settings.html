@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block head %}
+<style>
+.msg { font-size: 12px; margin-top: 8px; }
+.bulk { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container stack">
+    <div class="section">
+        <div class="section-header"><span>Default credentials</span></div>
+        <div class="section-body">
+            <div class="hint" id="def-status">loading</div>
+            <form id="def-form" onsubmit="saveDefaults(); return false;" autocomplete="off">
+                <div class="form-grid">
+                    <label for="d-username">ssh username</label><input id="d-username" name="username" autocomplete="off">
+                    <label for="d-password">ssh password</label><input id="d-password" name="password" type="password" autocomplete="new-password">
+                    <label for="d-enable_secret">enable secret</label><input id="d-enable_secret" name="enable_secret" type="password" autocomplete="new-password">
+                </div>
+                <div class="hint">Used by every device without its own credentials. Per field, a device's own value wins, then this page, then the TOPO_SSH_* environment. A blank secret field keeps the stored value. Stored in plaintext in topo.db.</div>
+                <button type="submit" class="primary">Save</button>
+                <button type="button" onclick="clearDefaults()">Clear secrets</button>
+                <span class="msg" id="def-msg"></span>
+            </form>
+        </div>
+    </div>
+    <div class="section">
+        <div class="section-header"><span>Device credentials</span></div>
+        <div class="section-body">
+            <div class="hint">Set the same credentials on several devices, or remove their own credentials so they use the defaults. Nodes imported from Confetti Traffic are never polled and are not listed.</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" id="sel-all" onchange="selectAll(this.checked)" aria-label="Select all"></th>
+                        <th>Hostname</th><th>Mgmt IP</th><th>Own credentials</th><th>Changed</th>
+                    </tr>
+                </thead>
+                <tbody id="dev-rows"></tbody>
+            </table>
+            <div class="empty" id="dev-empty" style="display:none">No pollable devices yet.</div>
+            <form class="bulk" id="bulk-form" onsubmit="return false;" autocomplete="off">
+                <input type="text" name="username" placeholder="ssh username" autocomplete="off">
+                <input type="password" name="password" placeholder="ssh password" autocomplete="new-password">
+                <input type="password" name="enable_secret" placeholder="enable secret" autocomplete="new-password">
+                <button type="button" class="primary" onclick="applySelected()">Apply to selected</button>
+                <button type="button" onclick="removeSelected()">Remove own credentials from selected</button>
+                <span class="msg" id="bulk-msg"></span>
+            </form>
+            <div class="hint">Apply only changes the fields you fill in.</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+{% raw %}
+<script>
+function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s === null || s === undefined ? '' : String(s);
+    return d.innerHTML;
+}
+
+function say(id, ok, text) {
+    var m = document.getElementById(id);
+    m.textContent = text;
+    m.className = ok ? 'msg ok' : 'msg err';
+}
+
+var SOURCE_TEXT = { settings: 'this page', env: 'the TOPO_SSH_* environment', none: 'nothing (not set)' };
+
+function loadDefaults() {
+    fetch('/api/settings/credentials').then(function (r) { return r.json(); }).then(function (c) {
+        var f = document.getElementById('def-form');
+        f.username.value = c.username || '';
+        f.username.placeholder = c.username_env ? 'environment: ' + c.username_env : '';
+        ['password', 'enable_secret'].forEach(function (k) {
+            f[k].value = '';
+            f[k].placeholder = c[k + '_source'] === 'settings' ? 'stored'
+                : (c[k + '_source'] === 'env' ? 'from the environment' : 'not set');
+        });
+        document.getElementById('def-status').textContent =
+            'In use now: username from ' + SOURCE_TEXT[c.username_source] +
+            ', password from ' + SOURCE_TEXT[c.password_source] +
+            ', enable secret from ' + SOURCE_TEXT[c.enable_secret_source] +
+            (c.updated_at ? '. Last changed ' + c.updated_at + '.' : '.');
+    });
+}
+
+function saveDefaults() {
+    var f = document.getElementById('def-form');
+    var body = { username: f.username.value.trim() };
+    ['password', 'enable_secret'].forEach(function (k) {
+        if (f[k].value) { body[k] = f[k].value; }   // blank keeps the stored secret
+    });
+    sendDefaults(body, 'saved');
+}
+
+function clearDefaults() {
+    sendDefaults({ password: '', enable_secret: '' }, 'secrets cleared');
+}
+
+function sendDefaults(body, okText) {
+    fetch('/api/settings/credentials', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+    }).then(function (res) {
+        say('def-msg', res.ok, res.ok ? okText : (res.data.error || 'save failed'));
+        if (res.ok) { loadDefaults(); }
+    });
+}
+
+function loadDevices() {
+    fetch('/api/credentials').then(function (r) { return r.json(); }).then(function (list) {
+        var checked = {};
+        document.querySelectorAll('#dev-rows input:checked').forEach(function (b) { checked[b.value] = true; });
+        var html = '';
+        list.forEach(function (d) {
+            var own = d.has_override
+                ? esc(d.username || 'default user') + ', password ' + (d.password_set ? 'set' : 'not set') +
+                  ', enable ' + (d.enable_secret_set ? 'set' : 'not set')
+                : 'none (uses the defaults)';
+            html += '<tr><td><input type="checkbox" value="' + d.device_id + '"' +
+                (checked[d.device_id] ? ' checked' : '') + ' aria-label="Select ' + esc(d.hostname) + '"></td>' +
+                '<td><a href="/devices/' + d.device_id + '">' + esc(d.hostname) + '</a></td>' +
+                '<td>' + esc(d.mgmt_ip) + '</td><td>' + own + '</td><td>' + esc(d.updated_at || '') + '</td></tr>';
+        });
+        document.getElementById('dev-rows').innerHTML = html;
+        document.getElementById('dev-empty').style.display = list.length ? 'none' : 'block';
+        document.getElementById('sel-all').checked = false;
+    });
+}
+
+function selectAll(on) {
+    document.querySelectorAll('#dev-rows input[type=checkbox]').forEach(function (b) { b.checked = on; });
+}
+
+function selectedIds() {
+    return Array.prototype.map.call(document.querySelectorAll('#dev-rows input:checked'),
+        function (b) { return parseInt(b.value, 10); });
+}
+
+function bulk(url, body, okText) {
+    fetch(url, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+    }).then(function (res) {
+        say('bulk-msg', res.ok, res.ok ? okText : (res.data.error || 'failed'));
+        if (res.ok) { document.getElementById('bulk-form').reset(); loadDevices(); }
+    });
+}
+
+function applySelected() {
+    var ids = selectedIds();
+    var f = document.getElementById('bulk-form');
+    var body = { device_ids: ids };
+    ['username', 'password', 'enable_secret'].forEach(function (k) {
+        if (f[k].value.trim()) { body[k] = k === 'username' ? f[k].value.trim() : f[k].value; }
+    });
+    if (!ids.length) { say('bulk-msg', false, 'select at least one device'); return; }
+    if (Object.keys(body).length === 1) { say('bulk-msg', false, 'fill in at least one field'); return; }
+    if (!confirm('Set these credentials on ' + ids.length + ' device(s)?')) { return; }
+    bulk('/api/credentials/bulk', body, 'applied to ' + ids.length + ' device(s) — use Poll now on a device to test');
+}
+
+function removeSelected() {
+    var ids = selectedIds();
+    if (!ids.length) { say('bulk-msg', false, 'select at least one device'); return; }
+    if (!confirm('Remove the own credentials of ' + ids.length + ' device(s)?')) { return; }
+    bulk('/api/credentials/clear', { device_ids: ids }, 'removed from ' + ids.length + ' device(s)');
+}
+
+loadDefaults();
+loadDevices();
+</script>
+{% endraw %}
+{% endblock %}
