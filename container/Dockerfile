@@ -1,5 +1,5 @@
 # confetti-topo as a container, for development, demos and trying it out
-# without an ESXi VM. The supported deployment is still the Alpine VM template
+# without an ESXi VM. The supported deployment is still the Alpine VM
 # (topo/build-topo.sh); this image uses the same Alpine packages and the
 # same pinned pip packages.
 #

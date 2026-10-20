@@ -167,7 +167,7 @@ Two entry points:
 Ambiguity is **never** auto-resolved. The operator merges via `POST /api/devices/<id>/merge` (see the
 `/conflicts` page), which re-points every child table at the survivor and deletes the loser.
 
-### Updating a deployed VM, backups, first boot
+### Updating a deployed VM, backups
 
 The login banner compares the installed `COMMIT` file (written by a no-argument update) with GitHub's newest commit and says whether a newer build exists (3 s timeout, so no internet only prints a notice). `topo-update.sh` with no arguments downloads the main branch tarball from GitHub (`TOPO_UPDATE_URL` overrides) and updates without asking; `topo-update.sh [-y] <topo-dir|tarball>` (also `--rollback`; with a dir/tarball and no `-y` it shows the installed build and asks,
 a closed stdin cancels) runs the new tree's `build-topo.sh --update` (the build's own install steps, so no
@@ -184,16 +184,13 @@ VM, how to re-run setup and re-configure the static IP. `requirements.txt` holds
 
 `services/topo-backup.sh` is installed as `/etc/periodic/daily/topo-backup` (no dot in the name — run-parts
 skips those; `crond` is enabled by the build): `sqlite3 .backup` nightly, newest `TOPO_BACKUP_KEEP` (7) kept.
-`firstboot.initd` applies `topo.ip`/`topo.gateway` (and optional `topo.dns`/`topo.hostname`; the hostname is
-re-applied on every boot; `set-static-ip <ip/cidr> <gateway> [dns] [hostname]` and the wizard take the same
-two) guestinfo and, once per clone, `topo.ssh_username`,
-`ssh_password`, `ssh_secret` and `poll_interval_s` to `topo.env`. Guestinfo is visible to anyone who can see
-the VM's advanced settings in vCenter. `topo.env` is 0600.
+The network is set with `set-static-ip <ip/cidr> <gateway> [dns] [hostname]` or the login wizard; defaults for the
+poller go in `topo.env` (0600).
 
 **Container:** `container/Dockerfile` + `docker-compose.yml` (context `topo/`): same Alpine packages and
 pinned pip packages as the VM, `TOPO_HEALTH_SERVICES` emptied (no OpenRC). `container/docker-compose.dev.yml` is the dev setup: `topo/` mounted live (restart the
 service after a change, no rebuild), `--profile mock` = seeded fake lab on 8080, `--profile lab` = empty DB on 8081.
-There is no Packer template.
+There is no Packer template: topo is installed once per environment, so the build does not prepare a VM for cloning (it keeps host keys, DB and machine-id).
 
 ## Seeding paths (device discovery)
 
@@ -209,7 +206,7 @@ There is no Packer template.
 ## Project Structure
 ```
 topo/
-  build-topo.sh   — builds the golden template
+  build-topo.sh   — installs the app on a fresh Alpine VM (one install per environment, no template)
   serve.py            — production entrypoint (reads TOPO_PORT at runtime)
   run.sh              — foreground launcher for debugging
   app/
@@ -241,7 +238,7 @@ topo/
                          confettiBlast(), Shuffle, the header health dot
   static/vendor/       — vis-network/ (vendored pinned version, no CDN)
   seed/devices.yaml.sample
-  services/ — confetti-topo.initd, firstboot.initd, login-setup.sh, topo-backup.sh
+  services/ — confetti-topo.initd, login-setup.sh, topo-backup.sh
   scripts/  — topo-setup.sh, topo-update.sh, seed_mock_lab.py (fake lab in a new scratch DB),
               capture_readme.py (re-records docs/img/ from that mock lab; run after any UI change)
 container/ — Dockerfile + compose

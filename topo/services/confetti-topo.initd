@@ -33,5 +33,5 @@ start_pre() {
 
 depend() {
     need net
-    after firewall confetti-topo-firstboot
+    after firewall
 }

@@ -1,9 +1,8 @@
 #!/bin/sh
-# build-topo.sh — Build the confetti-topo golden template on a fresh Alpine
+# build-topo.sh — Install confetti-topo on a fresh Alpine
 # install. Run as root after booting the Alpine ISO and completing
 # setup-alpine. Mirrors confetti-traffic/hub/confettictl-build-topo.sh closely — same
-# infra (chrony, open-vm-tools, sshd, OpenRC, guestinfo
-# first-boot), same structure. See that file's comments for the reasoning
+# infra (chrony, open-vm-tools, sshd, OpenRC), same structure. See that file's comments for the reasoning
 # behind each infra choice; this file only calls out what's different here.
 #
 # This script:
@@ -11,24 +10,20 @@
 #   2. Installs all required packages (Python, Flask, Netmiko's deps, etc.)
 #   3. Copies the app into place
 #   4. Creates an OpenRC service
-#   5. Cleans up for template conversion
 #
 # Usage:
 #   1. SCP the entire topo/ directory to the Alpine VM
 #   2. Run: sh /root/topo/build-topo.sh
-#   3. Shutdown and convert to template in vCenter
+#   3. Log in; topo-setup.sh asks for the static IP
 #
 # Updating an already-deployed VM (backup, health check and rollback):
 #   topo-update.sh   (latest build; or <topo-dir | topo.tar.gz>)     (see scripts/topo-update.sh)
 # runs this script with --update. That mode installs everything the build
 # does (packages, code, OpenRC and cron scripts, motd) but leaves the root
-# password, topo.env, the database, host keys and the template clean-up
-# alone. TOPO_STAGE_DIR (set by topo-update.sh) is where the app code
+# password, topo.env, the database and host keys alone. TOPO_STAGE_DIR (set by topo-update.sh) is where the app code
 # is copied instead of /opt/confetti-topo.
 #
-# After cloning:
-#   1. Set a static IP (or a DHCP reservation)
-#   2. Boot — the dashboard starts automatically on port 80
+# After the install, the dashboard runs on port 80 and starts at every boot.
 
 set -eu
 
@@ -61,7 +56,7 @@ case "${1:-}" in
 esac
 [ "$(id -u)" -eq 0 ] || die "Must run as root"
 
-log "=== confetti-topo template builder ==="
+log "=== confetti-topo installer ==="
 
 # -------------------------------------------------------------------
 # 1. Enable community repository
@@ -109,7 +104,6 @@ apk_step apk add --no-cache \
     sqlite \
     curl \
     open-vm-tools \
-    open-vm-tools-guestinfo \
     chrony
 
 log "Packages installed"
@@ -269,7 +263,7 @@ TOPO_SSH_SECRET=
 TOPO_HEALTH_SERVICES=confetti-topo,chronyd,sshd,open-vm-tools
 TOPO_HEALTH_SERVICE_TIMEOUT_S=3
 ENVEOF
-# Holds the default SSH password (and anything guestinfo adds): root only.
+# Holds the default SSH password: root only.
 chmod 600 "$INSTALL_DIR/topo.env"
 fi
 
@@ -287,11 +281,9 @@ mkdir -p /etc/periodic/daily
 cp -f "${SCRIPT_DIR}/services/topo-backup.sh" /etc/periodic/daily/topo-backup
 chmod +x /etc/periodic/daily/topo-backup
 
-# First-boot autoconfiguration from guestinfo — same pattern as the hub's
-# confettid-hub-firstboot: stands down without both required keys rather
-# than blocking boot on a prompt nobody can answer from an OpenRC start().
-cp -f "${SCRIPT_DIR}/services/firstboot.initd" /etc/init.d/confetti-topo-firstboot
-chmod +x /etc/init.d/confetti-topo-firstboot
+# Remove the first-boot service that earlier builds installed.
+rc-update del confetti-topo-firstboot default >/dev/null 2>&1 || true
+rm -f /etc/init.d/confetti-topo-firstboot
 
 # Invite an unconfigured VM to run topo-setup.sh at first interactive
 # login, where a real tty is guaranteed.
@@ -303,7 +295,6 @@ cp -f "${SCRIPT_DIR}/services/login-setup.sh" /etc/profile.d/confetti-topo-setup
 log "Enabling services"
 
 rc-update add confetti-topo default
-rc-update add confetti-topo-firstboot default
 rc-update add crond default
 
 # SSH server: OpenSSH sshd (it was Dropbear until 2026-10-14). Dropbear has no
@@ -342,7 +333,7 @@ SSHEOF
     else
         mv -f "$_conf.new" "$_conf"
     fi
-    # ed25519 only: RSA key generation is slow on a small clone's first boot.
+    # ed25519 only: RSA key generation is slow on a small VM's first start.
     if grep -q '^key_types_to_generate=' /etc/conf.d/sshd 2>/dev/null; then
         sed -i 's/^key_types_to_generate=.*/key_types_to_generate="ed25519"/' /etc/conf.d/sshd
     else
@@ -402,9 +393,9 @@ SSHEOF
 log "Services enabled"
 
 # -------------------------------------------------------------------
-# 9. First-boot instructions
+# 9. Login banner
 # -------------------------------------------------------------------
-log "Creating first-boot instructions"
+log "Creating login banner"
 cat > /etc/motd <<'MOTDEOF'
 
   +-----------------------------------------------+
@@ -488,8 +479,7 @@ SIPEOF
 chmod +x /usr/local/bin/set-static-ip
 
 # -------------------------------------------------------------------
-# 11. Clean up for template conversion (not on --update: this would delete
-# the database and the host keys of a VM in use)
+# 11. Switch SSH server, finish
 # -------------------------------------------------------------------
 # SSH last: everything else is installed, so a problem here leaves a complete VM.
 switch_ssh_server
@@ -499,53 +489,12 @@ if [ -n "$UPDATE" ]; then
     exit 0
 fi
 
-log "Cleaning up for template conversion"
-
-rm -f /etc/ssh/ssh_host_* /etc/dropbear/dropbear_*_host_key
-: > /etc/machine-id 2>/dev/null || true
-# DHCP wrote resolv.conf during the build's internet access. Once the VM goes
-# static nothing refreshes it, so a clone would keep resolving through the
-# build network's DNS server. Empty it (set-static-ip / the wizard set DNS).
-: > /etc/resolv.conf 2>/dev/null || true
-find /var/log -type f -exec truncate -s 0 {} \; 2>/dev/null || true
-: > /root/.ash_history 2>/dev/null || true
-apk cache clean 2>/dev/null || true
-rm -rf /var/cache/apk/*
-
-# Remove the DB and its backups if they were created during testing.
-rm -f "$DB_DIR/topo.db"
-rm -rf "$DB_DIR/backups"
-
-# Remove any setup stamp left from build-time testing, or every clone would
-# consider itself already configured and skip topo-setup.sh.
-rm -f /etc/confetti-topo/.setup-done /etc/confetti-topo/.env-done
-
-rm -f "${SCRIPT_DIR}/build-topo.sh"
-
-log "Zeroing free space for thin provisioning (this may take a minute)..."
-dd if=/dev/zero of=/zero.fill bs=1M 2>/dev/null || true
-rm -f /zero.fill
-sync
-
 log ""
-log "=== Template build complete ==="
+log "=== Install complete ==="
 log ""
 log "Next steps:"
-log "  1. Shutdown:   poweroff"
-log "  2. In vCenter: right-click VM -> Template -> Convert to Template"
+log "  1. Log in as root (password: ${LAB_ROOT_PASSWORD}); topo-setup.sh runs at login and prompts"
+log "     for the static IP -- or run it by hand any time. Change the root password."
+log "  2. rc-service confetti-topo start   (it also starts at every boot)"
+log "  3. The dashboard is on port 80"
 log ""
-log "To deploy a clone (guestinfo, zero-touch):"
-log "  1. Clone from template"
-log "  2. Set these guestinfo keys on the clone in vCenter, then boot:"
-log "     guestinfo.topo.ip       10.0.0.101/24"
-log "     guestinfo.topo.gateway  10.0.0.1"
-log "     optional: guestinfo.topo.dns 10.0.0.53, guestinfo.topo.hostname"
-log "               guestinfo.topo.ssh_username / ssh_password / ssh_secret /"
-log "               poll_interval_s  (written into topo.env on first boot)"
-log "  3. The dashboard starts automatically on port 80"
-log ""
-log "To deploy a clone (manual):"
-log "  1. Clone from template, boot, log in (root / ${LAB_ROOT_PASSWORD})"
-log "  2. topo-setup.sh runs automatically at login and prompts for the"
-log "     static IP -- or run it by hand any time"
-log "  3. The dashboard starts automatically on port 80"

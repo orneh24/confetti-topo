@@ -8,7 +8,7 @@ Split the topology mapping out of confetti-butler into this project. The plan an
   crawl, events and graph UI. No runtime link to butler.
 - **Copied from butler, then trimmed:** `identity.py`, `poller.py`, `reach.py`, `discovery.py`,
   `lldp_crawl.py`, `events.py`, `metrics.py`, `collectors/{ssh,sweep,seedfile,confetti}.py`,
-  `parsers/ios.py`, the base page, themes and layouts, the build, update, backup and first-boot scripts, the
+  `parsers/ios.py`, the base page, themes and layouts, the build, update, backup and setup scripts, the
   container files, and the regression harness. Left behind: IPAM, config templates and drift, running-config
   backup, syslog, alerting, SNMP, vCenter discovery, interface error history, Packer, the lab-butler migration.
 - **New:** `app/topology.py` (the graph moved out of `app.py`), interface-IP peer resolution
@@ -45,8 +45,8 @@ the bare-IP import (both are page or collector behaviour).
 
 - **No real router has been polled by confetti-topo.** Run the `lab-validator` agent: TOPOLOGY-MAPPING.md
   section 11, plus peers resolving through interface IPs and a one-edge session on `/topology`.
-- **`build-topo.sh`, the OpenRC scripts, `topo-update.sh`, the nightly backup and the guestinfo first
-  boot have not run on an Alpine VM.** They are renamed copies of butler's, which have. The user plans a new
+- **`build-topo.sh`, the OpenRC scripts, `topo-update.sh`, the nightly backup
+  have not run on an Alpine VM.** They are renamed copies of butler's, which have. The user plans a new
   Alpine VM on port 80.
 - **Settings page (2026-10-19):** `/settings` sets the default SSH credentials (DB) and applies or removes
   per-device credentials in bulk; R28 covers it. Checked over HTTP in the mock container and with the Flask test
@@ -65,8 +65,7 @@ the bare-IP import (both are page or collector behaviour).
 ## Aligned with confetti-butler and confetti-traffic (2026-10-14)
 
 Ported butler's update flow (`topo-update.sh [-y]` runs `build-topo.sh --update`, `TOPO_STAGE_DIR`), the
-`BUILD` id and login hints, `set-static-ip` with DNS/hostname, the setup wizard, guestinfo `topo.dns` /
-`topo.hostname`, apk-warning-on-update, the sysctl pin, `resolv.conf` clean-up and the "Make it rain!" label.
+`BUILD` id and login hints, `set-static-ip` with DNS/hostname, the setup wizard, apk-warning-on-update, the sysctl pin, `resolv.conf` clean-up and the "Make it rain!" label.
 **Not run on a VM yet** (`sh -n` and the regression gate only).
 
 ## SSH server switched from Dropbear to OpenSSH (2026-10-14)
