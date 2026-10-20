@@ -4,4 +4,4 @@ topo.env
 *.pyc
 scripts
 services
-build-template.sh
+build-topo.sh

@@ -1,6 +1,6 @@
 # confetti-topo as a container, for development, demos and trying it out
 # without an ESXi VM. The supported deployment is still the Alpine VM template
-# (topo/build-template.sh); this image uses the same Alpine packages and the
+# (topo/build-topo.sh); this image uses the same Alpine packages and the
 # same pinned pip packages.
 #
 # Build (from the repo root):
@@ -9,7 +9,7 @@
 
 FROM alpine:3.24
 
-# Same package set as build-template.sh, minus what only makes sense on a VM
+# Same package set as build-topo.sh, minus what only makes sense on a VM
 # (open-vm-tools, chrony, sshd, OpenRC services). curl is for the
 # HEALTHCHECK, sqlite for the backup tool.
 RUN apk add --no-cache \

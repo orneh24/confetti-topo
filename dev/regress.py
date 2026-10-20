@@ -595,13 +595,13 @@ def _():
 @check("R18", "every repo file the build/update/migrate scripts copy exists")
 def _():
     p = []
-    for script in ("topo/build-template.sh", "topo/scripts/topo-update.sh"):
+    for script in ("topo/build-topo.sh", "topo/scripts/topo-update.sh"):
         for ref in sorted(set(re.findall(r'\$\{(?:SCRIPT_DIR|SRC_DIR|SRC)\}/([\w./-]+?)["\s]', read(script)))):
             if ref.endswith("/") or "*" in ref:
                 continue
             need(os.path.exists(os.path.join("topo", ref)) or os.path.exists(ref),
                  "%s copies '%s' which does not exist" % (script, ref), p)
-    bt = read("topo/build-template.sh")
+    bt = read("topo/build-topo.sh")
     need("/etc/periodic/daily/topo-backup" in bt, "nightly backup must be installed without a dot in its name", p)
     return p
 
@@ -824,8 +824,8 @@ def _():
     # confirmed running. The switch must sit above the --update exit, or a deployed VM
     # would never get it.
     p = []
-    bt = read("topo/build-template.sh")
-    need(re.search(r"^switch_ssh_server\(\) \{", bt, re.M), "build-template.sh lost switch_ssh_server()", p)
+    bt = read("topo/build-topo.sh")
+    need(re.search(r"^switch_ssh_server\(\) \{", bt, re.M), "build-topo.sh lost switch_ssh_server()", p)
     need("openssh-server openssh-sftp-server" in bt, "build must install openssh-server and openssh-sftp-server", p)
     need("PermitRootLogin yes" in bt, "sshd drop-in must keep root password login on (the lab logins depend on it)", p)
     need(not re.search(r"^[^#\n]*apk add[^\n]*\bdropbear\b(?!-convert)", bt, re.M), "build installs dropbear again", p)

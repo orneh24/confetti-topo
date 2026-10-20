@@ -15,7 +15,7 @@ The user prefers real routers over mocks. Real addresses are in the auto-memory 
    SSH session may not have `/usr/local/bin` in PATH). The SSH server is OpenSSH since 2026-10-14, so `scp`/`sftp` work;
    a VM still on Dropbear is switched by its first `--update` (snapshot it first). After a fresh build the SSH host
    keys are gone until reboot. A first
-   deployment uses `build-template.sh` instead.
+   deployment uses `build-topo.sh` instead.
 3. **Add the devices** through the API, set credentials per device, wait for a poll, read results from the API.
 4. **Compare with the router itself** (`show lldp neighbors detail`, `show bgp summary`,
    `show ip ospf neighbor` over SSH), not only with confetti-topo's own view.

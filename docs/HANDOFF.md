@@ -45,7 +45,7 @@ the bare-IP import (both are page or collector behaviour).
 
 - **No real router has been polled by confetti-topo.** Run the `lab-validator` agent: TOPOLOGY-MAPPING.md
   section 11, plus peers resolving through interface IPs and a one-edge session on `/topology`.
-- **`build-template.sh`, the OpenRC scripts, `topo-update.sh`, the nightly backup and the guestinfo first
+- **`build-topo.sh`, the OpenRC scripts, `topo-update.sh`, the nightly backup and the guestinfo first
   boot have not run on an Alpine VM.** They are renamed copies of butler's, which have. The user plans a new
   Alpine VM on port 80.
 - **Settings page (2026-10-19):** `/settings` sets the default SSH credentials (DB) and applies or removes
@@ -64,14 +64,14 @@ the bare-IP import (both are page or collector behaviour).
 
 ## Aligned with confetti-butler and confetti-traffic (2026-10-14)
 
-Ported butler's update flow (`topo-update.sh [-y]` runs `build-template.sh --update`, `TOPO_STAGE_DIR`), the
+Ported butler's update flow (`topo-update.sh [-y]` runs `build-topo.sh --update`, `TOPO_STAGE_DIR`), the
 `BUILD` id and login hints, `set-static-ip` with DNS/hostname, the setup wizard, guestinfo `topo.dns` /
 `topo.hostname`, apk-warning-on-update, the sysctl pin, `resolv.conf` clean-up and the "Make it rain!" label.
 **Not run on a VM yet** (`sh -n` and the regression gate only).
 
 ## SSH server switched from Dropbear to OpenSSH (2026-10-14)
 
-Same change as confetti-butler (see its HANDOFF): `build-template.sh` `switch_ssh_server()` installs `sshd` +
+Same change as confetti-butler (see its HANDOFF): `build-topo.sh` `switch_ssh_server()` installs `sshd` +
 `openssh-sftp-server`, keeps root password login, converts the Dropbear ed25519 host key and removes Dropbear only
 after sshd runs. R27 checks it. Logic tested in an `alpine:3.24` container with real `dropbear` / `sshd` binaries and
 a fake `rc-service`. **Not run on a VM** (the topo build and update scripts have not run on one at all yet).

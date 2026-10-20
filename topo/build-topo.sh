@@ -1,7 +1,7 @@
 #!/bin/sh
-# build-template.sh — Build the confetti-topo golden template on a fresh Alpine
+# build-topo.sh — Build the confetti-topo golden template on a fresh Alpine
 # install. Run as root after booting the Alpine ISO and completing
-# setup-alpine. Mirrors confetti-traffic/hub/confettictl-build-template.sh closely — same
+# setup-alpine. Mirrors confetti-traffic/hub/confettictl-build-topo.sh closely — same
 # infra (chrony, open-vm-tools, sshd, OpenRC, guestinfo
 # first-boot), same structure. See that file's comments for the reasoning
 # behind each infra choice; this file only calls out what's different here.
@@ -15,7 +15,7 @@
 #
 # Usage:
 #   1. SCP the entire topo/ directory to the Alpine VM
-#   2. Run: sh /root/topo/build-template.sh
+#   2. Run: sh /root/topo/build-topo.sh
 #   3. Shutdown and convert to template in vCenter
 #
 # Updating an already-deployed VM (backup, health check and rollback):
@@ -42,11 +42,11 @@ LAB_ROOT_PASSWORD="${LAB_ROOT_PASSWORD:-confetti}"
 # Helpers
 # -------------------------------------------------------------------
 log() {
-    printf '[build-template] %s\n' "$1"
+    printf '[build-topo] %s\n' "$1"
 }
 
 die() {
-    printf '[build-template] FATAL: %s\n' "$1" >&2
+    printf '[build-topo] FATAL: %s\n' "$1" >&2
     exit 1
 }
 
@@ -57,7 +57,7 @@ UPDATE=""
 case "${1:-}" in
     "") ;;
     --update) UPDATE=1 ;;
-    *) die "Usage: build-template.sh [--update]" ;;
+    *) die "Usage: build-topo.sh [--update]" ;;
 esac
 [ "$(id -u)" -eq 0 ] || die "Must run as root"
 
@@ -330,7 +330,7 @@ switch_ssh_server() {
     mkdir -p /etc/ssh/sshd_config.d
     _conf=/etc/ssh/sshd_config.d/10-confetti.conf
     cat > "$_conf.new" <<'SSHEOF'
-# written by build-template.sh, replaced on every build and update
+# written by build-topo.sh, replaced on every build and update
 PermitRootLogin yes
 PasswordAuthentication yes
 MaxStartups 100:30:200
@@ -520,7 +520,7 @@ rm -rf "$DB_DIR/backups"
 # consider itself already configured and skip topo-setup.sh.
 rm -f /etc/confetti-topo/.setup-done /etc/confetti-topo/.env-done
 
-rm -f "${SCRIPT_DIR}/build-template.sh"
+rm -f "${SCRIPT_DIR}/build-topo.sh"
 
 log "Zeroing free space for thin provisioning (this may take a minute)..."
 dd if=/dev/zero of=/zero.fill bs=1M 2>/dev/null || true

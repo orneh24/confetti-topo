@@ -1,7 +1,7 @@
 # Exact versions confetti-topo was developed and tested with (Python 3.12).
 #
 # Dev machine:  pip install -r requirements.txt
-# Alpine VM:    build-template.sh takes flask, jinja2, pyyaml and requests from apk
+# Alpine VM:    build-topo.sh takes flask, jinja2, pyyaml and requests from apk
 #               (py3-*) and pip-installs only what apk lacks, using the pins below
 #               for netmiko and waitress. Do not pin the apk-provided ones to
 #               something Alpine does not ship.

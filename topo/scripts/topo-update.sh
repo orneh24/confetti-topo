@@ -11,7 +11,7 @@
 # tarball it shows the installed build and the source and asks first (a closed
 # stdin counts as "no"); pass -y from scripts and over a non-tty SSH.
 #
-# What it does: runs the new tree's build-template.sh --update (the same
+# What it does: runs the new tree's build-topo.sh --update (the same
 # install steps as the build, so there is no second file list here): apk
 # packages, the app code into /opt/confetti-topo.new, the OpenRC, cron and
 # login scripts, the motd. Then it checks the new code imports, backs up the
@@ -101,7 +101,7 @@ if [ "${1:-}" = "--rollback" ]; then
 fi
 
 SRC="${1:-}"
-[ -d "$INSTALL_DIR" ] || die "$INSTALL_DIR not found — run build-template.sh first"
+[ -d "$INSTALL_DIR" ] || die "$INSTALL_DIR not found — run build-topo.sh first"
 
 # -------------------------------------------------------------------
 # 1. Locate the new code
@@ -129,10 +129,10 @@ else
     die "$SRC is neither a directory nor a file"
 fi
 
-for _f in serve.py app/app.py templates static requirements.txt build-template.sh; do
+for _f in serve.py app/app.py templates static requirements.txt build-topo.sh; do
     [ -e "${SRC_DIR}/${_f}" ] || die "${SRC_DIR} does not look like topo/: missing ${_f}"
 done
-sh -n "${SRC_DIR}/build-template.sh" || die "${SRC_DIR}/build-template.sh does not parse — nothing was changed"
+sh -n "${SRC_DIR}/build-topo.sh" || die "${SRC_DIR}/build-topo.sh does not parse — nothing was changed"
 
 if [ -z "$AUTO_YES" ]; then
     log "Installed: $(cat "${INSTALL_DIR}/BUILD" 2>/dev/null || echo 'no build id')"
@@ -154,10 +154,10 @@ fi
 # -------------------------------------------------------------------
 # 2. Install the new tree into a staging dir and check it before stopping anything
 # -------------------------------------------------------------------
-log "Running build-template.sh --update (new code goes to $NEW_DIR)"
+log "Running build-topo.sh --update (new code goes to $NEW_DIR)"
 rm -rf "$NEW_DIR"
-TOPO_STAGE_DIR="$NEW_DIR" sh "${SRC_DIR}/build-template.sh" --update ||
-    { rm -rf "$NEW_DIR"; die "build-template.sh --update failed (see above) — the running version was not swapped"; }
+TOPO_STAGE_DIR="$NEW_DIR" sh "${SRC_DIR}/build-topo.sh" --update ||
+    { rm -rf "$NEW_DIR"; die "build-topo.sh --update failed (see above) — the running version was not swapped"; }
 # Settings and credentials stay as they are.
 case "${COMMIT_ID:-}" in
     [0-9a-f]*) printf '%s\n' "$COMMIT_ID" > "$NEW_DIR/COMMIT" ;;

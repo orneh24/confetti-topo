@@ -75,12 +75,12 @@ TOPO_DB_PATH=mock.db TOPO_PORT=8080 TOPO_PING_ENABLED=false python serve.py
 
 ## Deploying
 
-`topo/build-template.sh` builds an Alpine Linux VM template (OpenRC service, waitress, port 80), following the
+`topo/build-topo.sh` builds an Alpine Linux VM template (OpenRC service, waitress, port 80), following the
 same pattern as confetti-traffic's hub and confetti-butler. **It has not been run yet**; it is a copy of
 butler's script, which has run on a real Alpine 3.24 VM.
 
 - **Update a running VM:** `topo-update.sh` (no arguments: downloads the latest build from GitHub; a `<topo-dir|tarball>` argument updates from that instead and asks first without `-y`) installs the new code and packages
-  (`build-template.sh --update`), checks it, backs up the database,
+  (`build-topo.sh --update`), checks it, backs up the database,
   swaps it in, and rolls back by itself if it does not come up. `--rollback` goes back one version.
 - **Backups:** nightly (7 kept) to `/var/lib/confetti-topo/backups`.
 - **Clone settings:** `guestinfo.topo.ip` / `gateway` set a static IP; `ssh_username`, `ssh_password`,

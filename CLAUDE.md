@@ -38,7 +38,7 @@ on any command that does not start with `show `).
 - SSH server is OpenSSH (`sshd`, with `openssh-sftp-server`), not Dropbear (switched 2026-10-14, same as
   confetti-butler: Dropbear has no SFTP and drops large packets). `/etc/ssh/sshd_config.d/10-confetti.conf` keeps
   root password login on and sets `MaxStartups 100:30:200`; only an ed25519 host key is generated.
-  `build-template.sh` `switch_ssh_server()` (called last, above the `--update` exit) moves a VM that still has
+  `build-topo.sh` `switch_ssh_server()` (called last, above the `--update` exit) moves a VM that still has
   Dropbear over: converts its ed25519 host key, stops Dropbear, starts sshd, and only then removes Dropbear and
   rewrites `dropbear` to `sshd` in `topo.env`'s health list; if sshd does not start Dropbear is started again.
   Rollback does not undo it. R27 checks it.
@@ -170,7 +170,7 @@ Ambiguity is **never** auto-resolved. The operator merges via `POST /api/devices
 ### Updating a deployed VM, backups, first boot
 
 The login banner compares the installed `COMMIT` file (written by a no-argument update) with GitHub's newest commit and says whether a newer build exists (3 s timeout, so no internet only prints a notice). `topo-update.sh` with no arguments downloads the main branch tarball from GitHub (`TOPO_UPDATE_URL` overrides) and updates without asking; `topo-update.sh [-y] <topo-dir|tarball>` (also `--rollback`; with a dir/tarball and no `-y` it shows the installed build and asks,
-a closed stdin cancels) runs the new tree's `build-template.sh --update` (the build's own install steps, so no
+a closed stdin cancels) runs the new tree's `build-topo.sh --update` (the build's own install steps, so no
 second file list: apk packages, code into `/opt/confetti-topo.new` via `TOPO_STAGE_DIR`, OpenRC/cron/login
 scripts, motd; `--update` skips the root password, `topo.env`, host-key/DB/log clean-up and zero-fill). It then
 import-checks the staged tree against a throwaway DB *before* stopping anything, backs up the DB with `sqlite3 .backup`
@@ -209,7 +209,7 @@ There is no Packer template.
 ## Project Structure
 ```
 topo/
-  build-template.sh   — builds the golden template
+  build-topo.sh   — builds the golden template
   serve.py            — production entrypoint (reads TOPO_PORT at runtime)
   run.sh              — foreground launcher for debugging
   app/
