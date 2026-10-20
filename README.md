@@ -10,7 +10,7 @@ It started as the topology part of [confetti-butler](https://github.com/orneh24/
 own project now, with its own device list, poller and database. The look follows the hub UI of the sibling
 project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
 
-![Tour of confetti-topo: dashboard, devices, a device page, topology, conflicts, then the colour themes, the five layouts and the Confetti button](docs/img/confetti-topo-demo.gif)
+![Tour of confetti-topo: dashboard, devices, a device page, recent changes, topology, conflicts, then the colour themes, the five layouts and the Confetti button](docs/img/confetti-topo-demo.gif)
 
 *Mock data from a made-up lab, using documentation-range addresses. See [Running locally](#running-locally).*
 
