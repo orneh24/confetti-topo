@@ -76,7 +76,7 @@ TOPO_DB_PATH=mock.db TOPO_PORT=8080 TOPO_PING_ENABLED=false python serve.py
 ## Deploying
 
 `topo/build-topo.sh` installs confetti-topo on a fresh Alpine Linux VM (OpenRC service, waitress, port 80), following the
-same pattern as confetti-traffic's hub and confetti-butler. It has been run on a fresh Alpine 3.24 VM.
+same pattern as confetti-traffic's hub and confetti-butler.
 
 **System requirements:** Alpine Linux 3.x, 256 MB RAM minimum, 512 MB recommended.
 
