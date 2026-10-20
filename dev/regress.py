@@ -905,6 +905,8 @@ def _():
                 p.append("%s: data-ctx '%s' has no ctxMenu.register" % (f, kind))
             for kind in sorted(reg - used):
                 p.append("%s: ctxMenu.register('%s') has no data-ctx row" % (f, kind))
+        if "danger: true" in src and "confirm(" not in src and "confirm:" not in src:
+            p.append("%s has a danger menu item but never asks confirm()" % f)
         if 'id="ctx-menu"' in src or "closeContextMenu" in src:
             p.append("%s still carries its own menu code; use ctxMenu" % f)
         if node:
