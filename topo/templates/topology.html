@@ -304,6 +304,17 @@ function settled() {
     if (legend && legend.offsetWidth) {
         network.moveTo({ position: network.getViewPosition(), scale: network.getScale(), offset: { x: legend.offsetWidth / 2, y: 0 } });
     }
+    centerPending();
+}
+
+// /topology?device=<id> (from the Recent changes page): select that device and centre on it, once.
+var pendingDevice = new URLSearchParams(window.location.search).get('device');
+function centerPending() {
+    if (!pendingDevice) { return; }
+    var id = 'dev:' + pendingDevice;
+    pendingDevice = null;
+    if (!nodeSet || !nodeSet.get(id)) { toast('device not on the map (hidden or filtered)'); return; }
+    goToNode(id);
 }
 
 // "Re-arrange": forget the saved places and lay the map out again from scratch.
@@ -360,6 +371,7 @@ function load() {
         };
         network = new vis.Network(container, { nodes: nodeSet, edges: edgeSet }, options);
         if (anyFree) { network.once('stabilizationIterationsDone', settled); }
+        else { setTimeout(centerPending, 100); }
         network.on('dragEnd', function (params) {
             if (params.nodes.length) { savePositions(params.nodes); }
         });

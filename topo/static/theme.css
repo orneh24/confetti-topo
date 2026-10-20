@@ -97,6 +97,30 @@
     --blue:      #4db8ff;
     --cyan:      #00ffff;
 }
+/* Terminal green — mostly one hue by design; red and amber stay distinct so failures still read */
+:root[data-theme="terminal"] {
+    --bg:        #050805;
+    --bg-card:   #0a120a;
+    --bg-hover:  #112011;
+    --bg-muted:  #112011;
+    --bg-code:   #020402;
+    --stripe:    #081008;
+    --border:    #1f4a1f;
+    --border-soft: #112011;
+    --badge-bg:  #0d2412;
+    --badge-border: #1f4a1f;
+    --text:      #33ff66;
+    --text-dim:  #22aa44;
+    --green:     #66ff99;
+    --green-bg:  #0d2b12;
+    --red:       #ff5f5f;
+    --red-bg:    #3a0f0f;
+    --yellow:    #ffcc33;
+    --yellow-bg: #332a0a;
+    --gray:      #1f4a1f;
+    --blue:      #00e676;
+    --cyan:      #7dffb0;
+}
 /* Confetti Night — navy with a gold accent */
 :root[data-theme="confetti-night"] {
     --bg:        #0f1222;

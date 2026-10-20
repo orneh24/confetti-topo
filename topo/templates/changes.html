@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+{% block title %}Recent changes{% endblock %}
+{% block head %}
+<style>
+.changes-wrap { display: flex; gap: 12px; align-items: flex-start; }
+.changes-wrap .section { flex: 1 1 auto; min-width: 0; }
+tr.row { cursor: pointer; }
+tr.band td { background: var(--stripe); }
+tbody tr.selected td { background: var(--bg-hover); font-weight: bold; box-shadow: inset 0 2px 0 var(--blue), inset 0 -2px 0 var(--blue); }
+tbody tr.selected td:first-child { box-shadow: inset 4px 0 0 var(--blue), inset 0 2px 0 var(--blue), inset 0 -2px 0 var(--blue); }
+td.when { white-space: nowrap; }
+:root .linklike { display: inline; background: none; border: 0; box-shadow: none; transform: none; border-radius: 0;
+    padding: 0; margin: 0; font: inherit; text-transform: none; text-shadow: none; color: var(--blue); text-decoration: underline; cursor: pointer; text-align: left; }
+:root .linklike:hover { background: none; color: var(--text); }
+.filter-note { font-weight: normal; }
+/* Click a row: this pane shows the whole event. */
+.event-pane { position: relative; flex: none; width: 300px; display: none; font-size: 12px; color: var(--text);
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; }
+.event-pane h3 { margin: 0 24px 2px 0; font-size: 14px; word-break: break-word; }
+.event-pane .close { position: absolute; top: 6px; right: 8px; padding: 0 6px; }
+.event-pane .sub { color: var(--text-dim); margin-bottom: 6px; }
+.event-pane .kv-row { display: flex; gap: 8px; padding: 1px 0; }
+.event-pane .kv-row .k { flex: 0 0 76px; color: var(--text-dim); }
+.event-pane .kv-row .v { word-break: break-word; }
+.event-pane h4 { margin: 8px 0 3px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
+.event-pane .detail { white-space: pre-wrap; word-break: break-word; }
+.event-pane .actions { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+/* Right-click menu and the short message after an action. */
+.ctx-menu { position: fixed; z-index: 20; display: none; min-width: 200px; background: var(--bg-card); border: 1px solid var(--text-dim);
+    border-radius: 4px; padding: 4px; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
+.ctx-menu .title { padding: 3px 8px 5px; font-size: 11px; font-weight: bold; color: var(--text-dim); border-bottom: 1px solid var(--border); margin-bottom: 3px; word-break: break-all; }
+.ctx-menu button { display: block; width: 100%; text-align: left; margin: 1px 0; }
+.toast { position: fixed; z-index: 21; left: 50%; bottom: 16px; transform: translateX(-50%); display: none; max-width: 80%;
+    font-size: 12px; color: var(--text); background: var(--bg-card); border: 1px solid var(--text-dim); border-radius: 4px; padding: 6px 12px; }
+@media (max-width: 800px) {
+    .changes-wrap { flex-direction: column; }
+    .event-pane { width: auto; align-self: stretch; }
+}
+</style>
+{% endblock %}
+{% block content %}
+<div class="container">
+    <div class="changes-wrap">
+        <div class="section">
+            <div class="section-header"><span>Changes — last 7 days</span><span class="filter-note" id="filter-note"></span></div>
+            <div class="section-body">
+                <table>
+                    <thead><tr><th>Time (last change)</th><th>Device</th><th>Sev</th><th>Event</th><th>Detail</th></tr></thead>
+                    <tbody id="rows"></tbody>
+                </table>
+                <div class="empty" id="empty" style="display:none">no changes recorded in the last 7 days</div>
+            </div>
+        </div>
+        <div class="event-pane" id="pane" role="dialog" aria-label="Event details">
+            <button type="button" class="close" onclick="closePane()" aria-label="Close">&times;</button>
+            <h3 id="ep-title"></h3>
+            <div class="sub" id="ep-sub"></div>
+            <div id="ep-info"></div>
+            <h4>Detail</h4>
+            <div class="detail" id="ep-detail"></div>
+            <div class="actions">
+                <button type="button" id="ep-device" onclick="openDevice(selectedEvent())">Open device page</button>
+                <button type="button" id="ep-topo" onclick="openTopology(selectedEvent())">Show on topology</button>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="ctx-menu" id="ctx-menu" role="menu"></div>
+<div class="toast" id="toast" role="status"></div>
+{% endblock %}
+{% block scripts %}
+<script>
+var events = [];          // newest first, as the API sends them
+var gaps = {};            // event id -> ms since the same device's previous change (null = none loaded)
+var selectedId = null;
+var onlyDevice = null;    // right-click "show only this device's changes" (not remembered)
+
+function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s === null || s === undefined ? '' : String(s);
+    return d.innerHTML;
+}
+
+function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+// hh:mm, hours may pass 24.
+function hhmm(ms) {
+    var m = Math.floor(ms / 60000);
+    return pad(Math.floor(m / 60)) + ':' + pad(m % 60);
+}
+
+var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// "14:32 (02:15)" today, "19 Oct 14:32 (02:15)" on another day. The bracket is the gap to that device's previous change.
+function timeCell(e) {
+    var d = new Date(e.at);
+    var text = pad(d.getHours()) + ':' + pad(d.getMinutes());
+    if (d.toDateString() !== new Date().toDateString()) { text = d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + text; }
+    var gap = gaps[e.id];
+    return text + ' (' + (gap === null || gap === undefined ? '--:--' : hhmm(gap)) + ')';
+}
+
+function sevClass(sev) { return sev === 'info' ? 'ok' : (sev === 'warning' ? 'running' : 'bad'); }
+
+function deviceName(e) { return e.hostname || (e.device_id ? 'device ' + e.device_id : '-'); }
+
+function findEvent(id) {
+    for (var i = 0; i < events.length; i++) { if (events[i].id === id) { return events[i]; } }
+    return null;
+}
+
+function selectedEvent() { return findEvent(selectedId); }
+
+function computeGaps() {
+    gaps = {};
+    var last = {};   // device id -> time of its previous (older) change
+    for (var i = events.length - 1; i >= 0; i--) {
+        var e = events[i];
+        var t = new Date(e.at).getTime();
+        gaps[e.id] = e.device_id !== null && last[e.device_id] !== undefined ? t - last[e.device_id] : null;
+        if (e.device_id !== null) { last[e.device_id] = t; }
+    }
+}
+
+function visibleEvents() {
+    return onlyDevice === null ? events : events.filter(function (e) { return e.device_id === onlyDevice; });
+}
+
+function render() {
+    var list = visibleEvents();
+    var html = '';
+    var band = false;
+    var prev;
+    for (var i = 0; i < list.length; i++) {
+        var e = list[i];
+        if (i > 0 && e.device_id !== prev) { band = !band; }   // a run of rows from one device keeps one colour
+        prev = e.device_id;
+        var cls = 'row' + (band ? ' band' : '') + (e.id === selectedId ? ' selected' : '');
+        html += '<tr class="' + cls + '" data-id="' + e.id + '">' +
+            '<td class="when" title="' + esc(new Date(e.at).toLocaleString()) + '">' + esc(timeCell(e)) + '</td>' +
+            '<td>' + esc(deviceName(e)) + '</td>' +
+            '<td><span class="pill ' + sevClass(e.severity) + '">' + esc(e.severity) + '</span></td>' +
+            '<td><button type="button" class="linklike" data-id="' + e.id + '">' + esc(e.subject) + '</button></td>' +
+            '<td>' + esc(e.detail) + '</td></tr>';
+    }
+    document.getElementById('rows').innerHTML = html;
+    document.getElementById('empty').style.display = list.length ? 'none' : 'block';
+    var note = document.getElementById('filter-note');
+    note.textContent = '';
+    if (onlyDevice !== null) {
+        var first = events.filter(function (e) { return e.device_id === onlyDevice; })[0];
+        note.appendChild(document.createTextNode('Filtered: ' + (first ? deviceName(first) : 'device ' + onlyDevice) + ' · '));
+        var b = document.createElement('button');
+        b.type = 'button'; b.className = 'linklike'; b.textContent = 'Show all';
+        b.onclick = showAllDevices;
+        note.appendChild(b);
+    }
+}
+
+function load() {
+    fetch('/api/events?hours=168&limit=1000').then(function (r) { return r.json(); }).then(function (list) {
+        // Newest first by time (the API orders by id, which is the same on real data).
+        events = list.sort(function (a, b) { return new Date(b.at) - new Date(a.at) || b.id - a.id; });
+        computeGaps();
+        render();
+        if (selectedId !== null) { if (selectedEvent()) { fillPane(selectedEvent()); } else { closePane(); } }
+    });
+}
+
+// ---- Details pane ---------------------------------------------------------------
+function addRow(parent, key, value) {
+    var row = document.createElement('div');
+    row.className = 'kv-row';
+    var k = document.createElement('span'); k.className = 'k'; k.textContent = key;
+    var v = document.createElement('span'); v.className = 'v'; v.textContent = value;
+    row.appendChild(k); row.appendChild(v);
+    parent.appendChild(row);
+}
+
+function fillPane(e) {
+    document.getElementById('ep-title').textContent = e.subject;
+    document.getElementById('ep-sub').textContent = deviceName(e);
+    var info = document.getElementById('ep-info');
+    info.textContent = '';
+    addRow(info, 'time', new Date(e.at).toLocaleString());
+    addRow(info, 'device', deviceName(e));
+    addRow(info, 'kind', e.kind);
+    addRow(info, 'severity', e.severity);
+    var gap = gaps[e.id];
+    addRow(info, 'since last', gap === null || gap === undefined ? 'no earlier change for this device' : hhmm(gap) + ' (hh:mm)');
+    addRow(info, 'event id', e.id);
+    document.getElementById('ep-detail').textContent = e.detail || '(none)';
+    document.getElementById('ep-device').disabled = e.device_id === null;
+    document.getElementById('ep-topo').disabled = e.device_id === null;
+    document.getElementById('pane').style.display = 'block';
+}
+
+function selectEvent(id) {
+    var e = findEvent(id);
+    if (!e) { return; }
+    selectedId = id;
+    fillPane(e);
+    render();
+}
+
+function closePane() {
+    selectedId = null;
+    document.getElementById('pane').style.display = 'none';
+    render();
+}
+
+function openDevice(e) { if (e && e.device_id !== null) { window.location.href = '/devices/' + e.device_id; } }
+function openTopology(e) { if (e && e.device_id !== null) { window.location.href = '/topology?device=' + e.device_id; } }
+
+function showAllDevices() { onlyDevice = null; render(); }
+
+// ---- Right-click menu -----------------------------------------------------------
+function toast(text) {
+    var t = document.getElementById('toast');
+    t.textContent = text;
+    t.style.display = 'block';
+    clearTimeout(toast.timer);
+    toast.timer = setTimeout(function () { t.style.display = 'none'; }, 4500);
+}
+
+// navigator.clipboard only exists on https and localhost; the VM is plain http, so fall back to a hidden textarea.
+function copyText(text) {
+    var done = function () { toast('Copied'); };
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(done, function () { toast('Copy failed'); });
+        return;
+    }
+    var box = document.createElement('textarea');
+    box.value = text;
+    document.body.appendChild(box);
+    box.select();
+    try { document.execCommand('copy'); done(); } catch (err) { toast('Copy failed'); }
+    document.body.removeChild(box);
+}
+
+function closeContextMenu() { document.getElementById('ctx-menu').style.display = 'none'; }
+
+function menuItem(menu, text, onclick, disabled) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    b.textContent = text;
+    b.disabled = !!disabled;
+    b.onclick = function () { closeContextMenu(); onclick(); };
+    menu.appendChild(b);
+}
+
+function openContextMenu(e, x, y) {
+    var menu = document.getElementById('ctx-menu');
+    menu.textContent = '';
+    var title = document.createElement('div');
+    title.className = 'title';
+    if (e) {
+        title.textContent = deviceName(e) + ' | ' + e.subject;
+        menu.appendChild(title);
+        menuItem(menu, 'Show details', function () { selectEvent(e.id); });
+        menuItem(menu, 'Open device page', function () { openDevice(e); }, e.device_id === null);
+        menuItem(menu, 'Show on topology', function () { openTopology(e); }, e.device_id === null);
+        if (onlyDevice !== null) {
+            menuItem(menu, 'Show all devices', showAllDevices);
+        } else {
+            menuItem(menu, "Show only this device's changes", function () { onlyDevice = e.device_id; render(); }, e.device_id === null);
+        }
+        menuItem(menu, 'Copy event text', function () {
+            copyText(new Date(e.at).toLocaleString() + ' ' + deviceName(e) + ': ' + e.subject + (e.detail ? ' - ' + e.detail : ''));
+        });
+    } else {
+        title.textContent = 'Recent changes';
+        menu.appendChild(title);
+        menuItem(menu, 'Refresh now', load);
+        menuItem(menu, 'Show all devices', showAllDevices, onlyDevice === null);
+        menuItem(menu, 'Close details', closePane, selectedId === null);
+    }
+    menu.style.display = 'block';
+    // Keep the menu inside the window.
+    menu.style.left = Math.max(0, Math.min(x, window.innerWidth - menu.offsetWidth - 4)) + 'px';
+    menu.style.top = Math.max(0, Math.min(y, window.innerHeight - menu.offsetHeight - 4)) + 'px';
+    var first = menu.querySelector('button:not(:disabled)');
+    if (first) { first.focus(); }
+}
+
+var rowsBody = document.getElementById('rows');
+rowsBody.addEventListener('click', function (ev) {
+    var tr = ev.target.closest('tr.row');
+    if (tr) { selectEvent(parseInt(tr.getAttribute('data-id'), 10)); }
+});
+
+// The browser's own menu is blocked on the page content only (also the empty space below the table), not on the header, nav or taskbar.
+document.addEventListener('contextmenu', function (ev) {
+    if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer, .ctx-menu')) { return; }
+    ev.preventDefault();
+    var tr = ev.target.closest('tr.row');
+    openContextMenu(tr ? findEvent(parseInt(tr.getAttribute('data-id'), 10)) : null, ev.clientX, ev.clientY);
+});
+document.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Escape') { return; }
+    var menu = document.getElementById('ctx-menu');
+    if (menu.style.display === 'block') { closeContextMenu(); } else if (selectedId !== null) { closePane(); }
+});
+document.addEventListener('click', function (ev) { if (!ev.target.closest('#ctx-menu')) { closeContextMenu(); } });
+window.addEventListener('scroll', closeContextMenu, true);
+
+load();
+setInterval(load, 15000);
+</script>
+{% endblock %}

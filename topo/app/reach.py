@@ -7,7 +7,7 @@ devices.reachable (1 up, 0 down, NULL not checked yet).
 
 Flap guard: a device is only marked down after TOPO_PING_FAILS_TO_DOWN
 failures in a row. The first result for a device is a baseline and emits no
-event (CLAUDE.md constraint 15); after that, up->down and down->up each emit
+event (CLAUDE.md constraint 11); after that, up->down and down->up each emit
 one event, in the same transaction as the column change.
 """
 

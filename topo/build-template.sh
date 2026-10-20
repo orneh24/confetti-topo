@@ -409,11 +409,11 @@ cat > /etc/motd <<'MOTDEOF'
 
   +-----------------------------------------------+
   |                                               |
-  | confetti-topo VM                            |
+  | confetti-topo VM                              |
   |                                               |
-  | Config:    /opt/confetti-topo/topo.env    |
-  | DB:        /var/lib/confetti-topo/topo.db |
-  | Logs:      rc-service confetti-topo status  |
+  | Config:  /opt/confetti-topo/topo.env          |
+  | DB:      /var/lib/confetti-topo/topo.db       |
+  | Logs:    rc-service confetti-topo status      |
   |                                               |
   | To update this VM to the latest build, run:   |
   |     topo-update.sh                            |

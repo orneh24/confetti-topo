@@ -96,7 +96,7 @@ Places are stored in `node_positions` (`PUT`/`DELETE /api/topology/positions`, t
 `GET /api/topology` returns `x`/`y` per node and a `positions` dict). Unknown nodes whose links all go to one
 known device are drawn as one "N unknown" node (`group:dev:<id>`, made up by the page, so only `positions`
 knows it); double-click expands it. An LLDP link shows its port names only on hover or when selected.
-BGP/OSPF labels always show.
+BGP/OSPF labels always show. `/topology?device=<id>` selects and centres on that device once (the Recent changes page links there).
 
 Who is that neighbor? Two steps:
 1. **At poll time**, the apply step matches the management IP an LLDP neighbor advertises (`remote_mgmt_ip`),
@@ -229,9 +229,9 @@ topo/
     collectors/        — ssh.py, sweep.py, confetti.py, butler.py, seedfile.py
     parsers/           — ios.py, regex only
   templates/           — base.html (head, header/nav, theme + layout pickers, footer, Retro taskbar)
-                         + dashboard, devices, device, topology, conflicts, settings, each `{% extends "base.html" %}`
+                         + dashboard, devices, device, changes (Recent changes: events table, banded per device, details pane, right-click menu), topology, conflicts, settings, each `{% extends "base.html" %}`
   static/theme.css     — the ONE place colours live (Dark, Light, Monokai, High Contrast,
-                         Confetti Night, Neon Streamers). Pages must not define their own :root colours
+                         Terminal green, Confetti Night, Neon Streamers). Pages must not define their own :root colours
   static/layout.css    — Classic, Modern, Retro 95, MS-DOS, Neon Green CRT (MS-DOS also has a keyboard layer:
                          base.html's .dos-menubar / .dos-fkeys / .dos-help, a row cursor, and one keydown IIFE at
                          the end of theme.js that does nothing in any other layout; same block as confetti-butler). Loaded AFTER theme.css

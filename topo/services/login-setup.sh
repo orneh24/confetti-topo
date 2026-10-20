@@ -1,7 +1,7 @@
 # /etc/profile.d/confetti-topo-setup.sh — invite an unconfigured confetti-topo VM
 # to run its setup wizard at first interactive login. Guarded to interactive
 # shells with a real tty so it never fires for scp/rsync/non-interactive SSH
-# commands. Identical pattern to confetti-traffic's hub/services/confettictl-login-setup.sh.
+# commands. Same idea as confetti-traffic's hub/services/confettictl-login-setup.sh.
 
 case "$-" in
     *i*)
@@ -32,7 +32,7 @@ case "$-" in
             case "$_port" in ""|80) _port="" ;; *) _port=":$_port" ;; esac
             [ -z "$_ip" ] || echo "  Dashboard:                    http://${_ip}${_port}/"
             unset _ip _port
-            echo "  To re-run setup script:       topo-setup.sh"
+            echo "  To re-run setup script:       topo-setup.sh --force"
             echo "  To re-configure static IP:    set-static-ip <ip/cidr> <gateway> [dns] [hostname]"
             echo
         fi

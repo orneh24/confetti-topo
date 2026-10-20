@@ -272,6 +272,11 @@ def device_page(device_id):
     return render_template("device.html", device_id=device_id)
 
 
+@app.route("/changes")
+def changes_page():
+    return render_template("changes.html")
+
+
 @app.route("/conflicts")
 def conflicts_page():
     return render_template("conflicts.html")

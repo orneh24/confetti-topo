@@ -9,6 +9,7 @@ var THEMES = [
     ['light', 'Light'],
     ['monokai', 'Monokai'],
     ['contrast', 'High Contrast'],
+    ['terminal', 'Terminal green'],
     ['confetti-night', 'Confetti Night'],
     ['neon', 'Neon Streamers'],
 ];
