@@ -39,9 +39,9 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
 - **Reachability.** Every device is pinged every 30 seconds; a router that stops answering is outlined red
   on the graph.
 - **Events.** Neighbor, peer and interface changes, OS changes and devices going unreachable are listed on the
-  dashboard and on each device page. There is no alerting; see the roadmap.
+  dashboard, on each device page and on the Recent changes page. There is no alerting; see the roadmap.
 - **Metrics.** `GET /metrics` serves Prometheus text.
-- **Look.** Six colour themes (or Shuffle) and five layouts, picked in the header.
+- **Look.** Seven colour themes (or Shuffle) and five layouts, picked in the header.
 
 ![The dashboard in four themes: Light, Monokai, Confetti Night and Neon Streamers](docs/img/themes.png)
 

@@ -235,6 +235,7 @@ topo/
   static/layout.css    — Classic, Modern, Retro 95, MS-DOS, Neon Green CRT (MS-DOS also has a keyboard layer:
                          base.html's .dos-menubar / .dos-fkeys / .dos-help, a row cursor, and one keydown IIFE at
                          the end of theme.js that does nothing in any other layout; same block as confetti-butler). Loaded AFTER theme.css
+  static/ctxmenu.js    — right-click menus, loaded once by base.html (menu CSS at the end of layout.css); the SAME file as in confetti-butler and confetti-traffic, copy it by hand and keep the three identical. A row carries data-ctx="<type>" and the page calls ctxMenu.register(type, fn(el, ev)); one document-level listener finds the row. Fill data-* attributes with ctxMenu.attr(), never esc(). Used by changes.html (rows, plus the whole page for the empty-space menu) and the topology map (ctxMenu.open from vis's `oncontext`). R29 checks it
   static/theme.js      — THEMES + LAYOUTS lists and the two header dropdowns (confetti-topo-theme,
                          confetti-topo-layout in localStorage), themeColor() for canvas colours,
                          confettiBlast(), Shuffle, the header health dot
@@ -337,7 +338,7 @@ platform registry and read-only commands); `R20` starts the real server from a t
 HTTP; `R21`..`R26` cover the ICMP state machine, `/metrics` format, LLDP crawl, scheduled discovery, the
 container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R27` checks the OpenSSH
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
-that a bulk apply is all-or-nothing. Output is one line per check
+that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse). Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

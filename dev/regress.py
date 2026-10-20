@@ -880,6 +880,44 @@ def _():
     return p
 
 
+@check("R29", "right-click menus: base.html loads ctxmenu.js, rows and handlers pair up, data-* values are quote-safe, inline scripts parse")
+def _():
+    # static/ctxmenu.js is the same file in confetti-butler, confetti-traffic and here. A log line
+    # or hostname can hold a double quote and esc() does not escape it, so attributes on data-ctx
+    # rows are filled with ctxMenu.attr(). The changes page once had its own inline menu; it and the
+    # topology map now use the shared one.
+    p = []
+    need(os.path.exists("topo/static/ctxmenu.js"), "topo/static/ctxmenu.js is missing", p)
+    base = read("topo/templates/base.html")
+    need('src="/static/ctxmenu.js"' in base, "base.html does not load /static/ctxmenu.js", p)
+    need(base.find("/static/ctxmenu.js") < base.find("{% block scripts %}"),
+         "ctxmenu.js must load before the page scripts (they call ctxMenu.register)", p)
+    need(".ctx-menu" in read("topo/static/layout.css"), "layout.css lost the .ctx-menu rules", p)
+    node = shutil.which("node")
+    for f in sorted(glob.glob("topo/templates/*.html")):
+        src = read(f)
+        for m in re.finditer(r"data-[\w-]+=\"' \+ esc\(", src):
+            p.append("%s: data-* attribute filled with esc(), use ctxMenu.attr(): %s" % (f, src[m.start():m.start() + 40]))
+        used = set(re.findall(r'data-ctx="(\w+)', src)) | set(re.findall(r"setAttribute\('data-ctx', '(\w+)'", src))
+        reg = set(re.findall(r"ctxMenu\.register\('(\w+)'", src))
+        if not f.endswith("base.html"):
+            for kind in sorted(used - reg):
+                p.append("%s: data-ctx '%s' has no ctxMenu.register" % (f, kind))
+            for kind in sorted(reg - used):
+                p.append("%s: ctxMenu.register('%s') has no data-ctx row" % (f, kind))
+        if 'id="ctx-menu"' in src or "closeContextMenu" in src:
+            p.append("%s still carries its own menu code; use ctxMenu" % f)
+        if node:
+            for i, m in enumerate(re.finditer(r"<script>\r?\n(.*?)</script>", src, re.S)):
+                js = re.sub(r"\{\{.*?\}\}", "0", re.sub(r"\{%.*?%\}", "", m.group(1)))
+                tmp = os.path.join(TMP, "r29_%d.js" % i)
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    fh.write(js)
+                r = subprocess.run([node, "--check", tmp], capture_output=True, text=True)
+                need(r.returncode == 0, "%s script %d does not parse: %s" % (f, i, r.stderr.strip()[:150]), p)
+    return p
+
+
 @check("R26", "IOS BGP summary: an administratively shut peer keeps '(Admin)' (found on a real 15.4 router)")
 def _():
     p = []

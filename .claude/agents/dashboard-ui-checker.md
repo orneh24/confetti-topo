@@ -1,6 +1,6 @@
 ---
 name: dashboard-ui-checker
-description: Look at confetti-topo's pages (dashboard, devices, device, topology, conflicts) in a real browser after a change to topo/templates/ or topo/static/ — layout, colours, themes, layouts, the graph, console errors — and report back in plain text. Use instead of taking screenshots in the main conversation, which uses a lot of context. Checks only; never edits files.
+description: Look at confetti-topo's pages (dashboard, devices, device, recent changes, topology, conflicts, settings) in a real browser after a change to topo/templates/ or topo/static/ — layout, colours, themes, layouts, the graph, console errors — and report back in plain text. Use instead of taking screenshots in the main conversation, which uses a lot of context. Checks only; never edits files.
 tools: Read, Grep, Bash, ToolSearch, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__tabs_close_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__find, mcp__claude-in-chrome__javascript_tool, mcp__claude-in-chrome__read_console_messages
 model: sonnet
 ---
@@ -18,9 +18,9 @@ You check how confetti-topo's pages look and behave in a real browser, and repor
 
 ## Pages, themes, layouts
 
-Pages: `/`, `/devices`, `/devices/1`, `/topology`, `/conflicts`.
+Pages: `/`, `/devices`, `/devices/1`, `/changes`, `/topology`, `/conflicts`, `/settings`. On `/changes` and on the map, also try the right-click menus (shared `static/ctxmenu.js`) and `/topology?device=<id>` (selects and centres that device).
 
-Themes: `setTheme('<name>')` in `javascript_tool`; names are in the `THEMES` list in `static/theme.js` (dark, light, monokai, contrast, confetti-night, neon). Layouts: `setLayout('<name>')` (classic, modern, retro95, amber, greencrt). **Both save to the browser's localStorage** (`confetti-topo-theme`, `confetti-topo-layout`), the user's own choice: read them first and put them back before you finish.
+Themes: `setTheme('<name>')` in `javascript_tool`; names are in the `THEMES` list in `static/theme.js` (dark, light, monokai, contrast, terminal, confetti-night, neon). Layouts: `setLayout('<name>')` (classic, modern, retro95, msdos, greencrt). **Both save to the browser's localStorage** (`confetti-topo-theme`, `confetti-topo-layout`), the user's own choice: read them first and put them back before you finish.
 
 Unless told otherwise check Dark, Light and Neon Streamers, and every layout once on the dashboard. Classic must show no `.side-nav`, `.kpi-row` or `.taskbar`. Modern: side menu and five summary tiles; below 1100 px the menu hides. Retro 95: open the Start menu (a `<details>`). The CRT layouts disable the theme picker.
 

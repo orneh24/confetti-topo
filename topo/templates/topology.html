@@ -18,11 +18,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
 .legend-box .ln { flex: 0 0 22px; height: 0; border-top: 3px solid; }
 .legend-box .hint { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 5px; }
 #net .empty { padding: 24px; }
-/* Right-click menu and the short message after an action. */
-.ctx-menu { position: absolute; z-index: 8; display: none; min-width: 190px; background: var(--bg-card); border: 1px solid var(--text-dim);
-    border-radius: 4px; padding: 4px; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
-.ctx-menu .title { padding: 3px 8px 5px; font-size: 11px; font-weight: bold; color: var(--text-dim); border-bottom: 1px solid var(--border); margin-bottom: 3px; word-break: break-all; }
-.ctx-menu button { display: block; width: 100%; text-align: left; margin: 1px 0; }
+/* The right-click menu is styled in static/layout.css (ctxmenu.js); this is the map's own short message. */
 .toast { position: absolute; z-index: 9; left: 50%; bottom: 16px; transform: translateX(-50%); display: none; max-width: 80%;
     font-size: 12px; color: var(--text); background: var(--bg-card); border: 1px solid var(--text-dim); border-radius: 4px; padding: 6px 12px; }
 /* Click a node: this card shows what is known about it, with a checkbox to hide it. */
@@ -88,7 +84,6 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
         <button type="button" onclick="showAllLayers()">Show all</button>
     </div>
     </div>
-    <div class="ctx-menu" id="ctx-menu" role="menu"></div>
     <div class="toast" id="toast" role="status"></div>
     <details class="legend-box" open>
         <summary>Legend</summary>
@@ -378,14 +373,15 @@ function load() {
         network.on('oncontext', function (params) {
             params.event.preventDefault();
             var id = network.getNodeAt(params.pointer.DOM);
-            openContextMenu(id === undefined ? null : id, params.pointer.DOM.x, params.pointer.DOM.y);
+            var oe = params.event.srcEvent || params.event;   // the menu is position: fixed, so it needs window coordinates
+            openContextMenu(id === undefined ? null : id, oe.clientX, oe.clientY);
         });
         network.on('hoverEdge', function (params) { hoveredEdge = params.edge; updateLldpLabels(); });
         network.on('blurEdge', function () { hoveredEdge = null; updateLldpLabels(); });
-        network.on('dragStart', closeContextMenu);
-        network.on('zoom', closeContextMenu);
+        network.on('dragStart', ctxMenu.close);
+        network.on('zoom', ctxMenu.close);
         network.on('click', function (params) {
-            closeContextMenu();
+            ctxMenu.close();
             if (params.nodes.length) { showNodePanel(params.nodes[0]); }
             else if (params.edges.length) { showLinkPanel(params.edges[0]); }
             else { closeNodePanel(); closeLinkPanel(); }
@@ -809,36 +805,6 @@ function toast(text) {
     toast.timer = setTimeout(function () { t.style.display = 'none'; }, 4500);
 }
 
-// navigator.clipboard only exists on https and localhost; the VM is plain http, so fall back to a hidden textarea.
-function copyText(text) {
-    var done = function () { toast('Copied: ' + text); };
-    if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(text).then(done, function () { toast('Copy failed'); });
-        return;
-    }
-    var box = document.createElement('textarea');
-    box.value = text;
-    document.body.appendChild(box);
-    box.select();
-    try { document.execCommand('copy'); done(); } catch (e) { toast('Copy failed'); }
-    document.body.removeChild(box);
-}
-
-function closeContextMenu() {
-    document.getElementById('ctx-menu').style.display = 'none';
-}
-
-function menuItem(menu, text, onclick, disabled) {
-    var b = document.createElement('button');
-    b.type = 'button';
-    b.setAttribute('role', 'menuitem');
-    b.textContent = text;
-    b.disabled = !!disabled;
-    b.onclick = function () { closeContextMenu(); onclick(); };
-    menu.appendChild(b);
-    return b;
-}
-
 function pollFromMenu(deviceId, name) {
     if (!confirm('Poll ' + name + ' now? This connects to the device over SSH (show commands only).')) { return; }
     toast('Polling ' + name + '...');
@@ -853,68 +819,64 @@ function pollFromMenu(deviceId, name) {
 }
 
 function openContextMenu(id, x, y) {
-    var menu = document.getElementById('ctx-menu');
-    menu.textContent = '';
     var node = id && rawData ? rawData.nodes.filter(function (n) { return n.id === id; })[0] : null;
-    var title = document.createElement('div');
-    title.className = 'title';
+    var spec;
+    var pollItem = null;
     if (id && id.indexOf('group:') === 0) {
-        title.textContent = 'Unknown nodes';
-        menu.appendChild(title);
-        menuItem(menu, 'Expand', function () { expandedGroups[id.slice(6)] = true; load(); });
+        spec = { title: 'Unknown nodes', items: [
+            { label: 'Expand', action: function () { expandedGroups[id.slice(6)] = true; load(); } },
+        ] };
     } else if (!node) {
-        title.textContent = 'Map';
-        menu.appendChild(title);
-        menuItem(menu, 'Show all', showAllLayers);
-        menuItem(menu, 'Reset view', function () { network.fit(); });
-        menuItem(menu, 'Re-arrange', rearrange);
+        spec = { title: 'Map', items: [
+            { label: 'Show all', action: showAllLayers },
+            { label: 'Reset view', action: function () { network.fit(); } },
+            { label: 'Re-arrange', action: rearrange },
+        ] };
     } else {
-        title.textContent = node.mgmt_ip ? node.label + ' | ' + node.mgmt_ip : node.label;   // e.g. csr-1 | 192.0.2.1
-        menu.appendChild(title);
         var isDevice = !node.ghost;
-        menuItem(menu, 'Open device page', function () { window.location.href = '/devices/' + node.device_id; }, !isDevice);
-        menuItem(menu, 'Hide this node', function () {
-            hiddenNodes[id] = true;
-            saveHiddenNodes();
-            if (selectedNode === id) { document.getElementById('np-hide').checked = true; }
-            updateFilterMarker();
-            load();
-        });
-        menuItem(menu, 'Copy name', function () { copyText(node.label); });
         // A device carries its management IP; a peer ghost is labelled with its IP.
         var ip = node.mgmt_ip || (id.indexOf('ghost:peer:') === 0 ? node.label : '');
-        menuItem(menu, 'Copy IP', function () { copyText(ip); }, !ip);
-        menuItem(menu, focusNode === id ? 'Show all links' : "Show only this node's links", function () {
-            focusNode = focusNode === id ? null : id;
-            updateFilterMarker();
-            load();
-        });
+        pollItem = { label: 'Poll now', action: function () {}, disabled: true };
+        spec = { title: node.mgmt_ip ? node.label + ' | ' + node.mgmt_ip : node.label,   // e.g. csr-1 | 192.0.2.1
+                 items: [
+            { label: 'Open device page', action: function () { window.location.href = '/devices/' + node.device_id; }, disabled: !isDevice },
+            { label: 'Hide this node', action: function () {
+                hiddenNodes[id] = true;
+                saveHiddenNodes();
+                if (selectedNode === id) { document.getElementById('np-hide').checked = true; }
+                updateFilterMarker();
+                load();
+            } },
+            { label: 'Copy name', action: function () { ctxMenu.copy(node.label); } },
+            { label: 'Copy IP', action: function () { ctxMenu.copy(ip); }, disabled: !ip },
+            { label: focusNode === id ? 'Show all links' : "Show only this node's links", action: function () {
+                focusNode = focusNode === id ? null : id;
+                updateFilterMarker();
+                load();
+            } },
+        ] };
         if (isDevice && expandedGroups[id]) {
-            menuItem(menu, 'Group unknown nodes', function () { delete expandedGroups[id]; load(); });
+            spec.items.push({ label: 'Group unknown nodes', action: function () { delete expandedGroups[id]; load(); } });
         }
-        var pollItem = menuItem(menu, 'Poll now', function () {}, true);
-        if (isDevice) {
-            fetch('/api/devices/' + node.device_id).then(function (r) { return r.json(); }).then(function (d) {
-                if (d.error || menu.style.display === 'none') { return; }
-                if (d.role !== 'node' && d.enabled) {
-                    pollItem.disabled = false;
-                    pollItem.onclick = function () { closeContextMenu(); pollFromMenu(d.id, node.label); };
-                }
-            });
-        }
+        spec.items.push(pollItem);
     }
-    menu.style.display = 'block';
-    // Keep the menu inside the map.
-    var box = menu.parentNode;
-    menu.style.left = Math.max(0, Math.min(x, box.clientWidth - menu.offsetWidth - 4)) + 'px';
-    menu.style.top = Math.max(0, Math.min(y, box.clientHeight - menu.offsetHeight - 4)) + 'px';
-    var first = menu.querySelector('button:not(:disabled)');
-    if (first) { first.focus(); }
+    var menu = ctxMenu.open(x, y, spec);
+    if (pollItem && !node.ghost) {
+        // Poll now is enabled once the device's record says it is polled; the menu may be gone by then.
+        fetch('/api/devices/' + node.device_id).then(function (r) { return r.json(); }).then(function (d) {
+            if (d.error || menu.style.display === 'none') { return; }
+            if (d.role !== 'node' && d.enabled) {
+                pollItem.disabled = false;
+                pollItem.action = function () { pollFromMenu(d.id, node.label); };
+                Array.prototype.forEach.call(menu.querySelectorAll('button'), function (b) {
+                    if (b.textContent === 'Poll now') { b.disabled = false; }
+                });
+            }
+        });
+    }
 }
 
 document.getElementById('net').addEventListener('contextmenu', function (ev) { ev.preventDefault(); });
-document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') { closeContextMenu(); } });
-document.addEventListener('click', function (ev) { if (!ev.target.closest('#ctx-menu')) { closeContextMenu(); } });
 
 restoreHiddenNodes();
 restoreHiddenIcons();

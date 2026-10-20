@@ -11,7 +11,7 @@ Ideas only. Nothing here is built until the user picks it.
 - **Device routing table** (do this first): a `show ip route` task per device (verified on a real router first,
   see `confetti-topo-add-platform`), a table for it, and a routing-table section on the device page.
 - **Right-click a device on the map, "View routing table".** Needs the device routing table above first. The
-  right-click menu already exists (`topo/templates/topology.html`, `openContextMenu`); this adds one item.
+  right-click menu already exists (`openContextMenu` in `topo/templates/topology.html`, drawn by the shared `static/ctxmenu.js`); this adds one item.
 - **CDP** next to LLDP (many Cisco switches speak only CDP).
 - **L2 view:** MAC table, VLANs, spanning tree. Needs its own commands, verified on real devices first.
 - **Pair parallel sessions properly** by the local address of each session instead of by position.
@@ -34,7 +34,5 @@ Ideas only. Nothing here is built until the user picks it.
 - **Authentication** for the UI and API (the siblings have none either).
 - **Placeholder address:** `topo/scripts/topo-setup.sh:61` has a non-documentation private address in a comment
   example; change it to a documentation-range one.
-- **Theme drift:** confetti-traffic and confetti-butler still have the Terminal Green theme that was removed here.
-  Run `confetti-interop-checker`, then decide where the fix goes.
 - **Packer template** for vCenter, once one exists in butler that has actually run.
 - **vCenter discovery**, only together with a real vCenter to test against.

@@ -25,13 +25,6 @@ td.when { white-space: nowrap; }
 .event-pane h4 { margin: 8px 0 3px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
 .event-pane .detail { white-space: pre-wrap; word-break: break-word; }
 .event-pane .actions { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-/* Right-click menu and the short message after an action. */
-.ctx-menu { position: fixed; z-index: 20; display: none; min-width: 200px; background: var(--bg-card); border: 1px solid var(--text-dim);
-    border-radius: 4px; padding: 4px; box-shadow: 0 4px 14px rgba(0,0,0,.4); }
-.ctx-menu .title { padding: 3px 8px 5px; font-size: 11px; font-weight: bold; color: var(--text-dim); border-bottom: 1px solid var(--border); margin-bottom: 3px; word-break: break-all; }
-.ctx-menu button { display: block; width: 100%; text-align: left; margin: 1px 0; }
-.toast { position: fixed; z-index: 21; left: 50%; bottom: 16px; transform: translateX(-50%); display: none; max-width: 80%;
-    font-size: 12px; color: var(--text); background: var(--bg-card); border: 1px solid var(--text-dim); border-radius: 4px; padding: 6px 12px; }
 @media (max-width: 800px) {
     .changes-wrap { flex-direction: column; }
     .event-pane { width: auto; align-self: stretch; }
@@ -65,8 +58,6 @@ td.when { white-space: nowrap; }
         </div>
     </div>
 </div>
-<div class="ctx-menu" id="ctx-menu" role="menu"></div>
-<div class="toast" id="toast" role="status"></div>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -136,7 +127,7 @@ function render() {
         if (i > 0 && e.device_id !== prev) { band = !band; }   // a run of rows from one device keeps one colour
         prev = e.device_id;
         var cls = 'row' + (band ? ' band' : '') + (e.id === selectedId ? ' selected' : '');
-        html += '<tr class="' + cls + '" data-id="' + e.id + '">' +
+        html += '<tr class="' + cls + '" data-ctx="event" data-id="' + e.id + '">' +
             '<td class="when" title="' + esc(new Date(e.at).toLocaleString()) + '">' + esc(timeCell(e)) + '</td>' +
             '<td>' + esc(deviceName(e)) + '</td>' +
             '<td><span class="pill ' + sevClass(e.severity) + '">' + esc(e.severity) + '</span></td>' +
@@ -214,96 +205,47 @@ function openTopology(e) { if (e && e.device_id !== null) { window.location.href
 
 function showAllDevices() { onlyDevice = null; render(); }
 
-// ---- Right-click menu -----------------------------------------------------------
-function toast(text) {
-    var t = document.getElementById('toast');
-    t.textContent = text;
-    t.style.display = 'block';
-    clearTimeout(toast.timer);
-    toast.timer = setTimeout(function () { t.style.display = 'none'; }, 4500);
-}
-
-// navigator.clipboard only exists on https and localhost; the VM is plain http, so fall back to a hidden textarea.
-function copyText(text) {
-    var done = function () { toast('Copied'); };
-    if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(text).then(done, function () { toast('Copy failed'); });
-        return;
-    }
-    var box = document.createElement('textarea');
-    box.value = text;
-    document.body.appendChild(box);
-    box.select();
-    try { document.execCommand('copy'); done(); } catch (err) { toast('Copy failed'); }
-    document.body.removeChild(box);
-}
-
-function closeContextMenu() { document.getElementById('ctx-menu').style.display = 'none'; }
-
-function menuItem(menu, text, onclick, disabled) {
-    var b = document.createElement('button');
-    b.type = 'button';
-    b.setAttribute('role', 'menuitem');
-    b.textContent = text;
-    b.disabled = !!disabled;
-    b.onclick = function () { closeContextMenu(); onclick(); };
-    menu.appendChild(b);
-}
-
-function openContextMenu(e, x, y) {
-    var menu = document.getElementById('ctx-menu');
-    menu.textContent = '';
-    var title = document.createElement('div');
-    title.className = 'title';
-    if (e) {
-        title.textContent = deviceName(e) + ' | ' + e.subject;
-        menu.appendChild(title);
-        menuItem(menu, 'Show details', function () { selectEvent(e.id); });
-        menuItem(menu, 'Open device page', function () { openDevice(e); }, e.device_id === null);
-        menuItem(menu, 'Show on topology', function () { openTopology(e); }, e.device_id === null);
-        if (onlyDevice !== null) {
-            menuItem(menu, 'Show all devices', showAllDevices);
-        } else {
-            menuItem(menu, "Show only this device's changes", function () { onlyDevice = e.device_id; render(); }, e.device_id === null);
-        }
-        menuItem(menu, 'Copy event text', function () {
-            copyText(new Date(e.at).toLocaleString() + ' ' + deviceName(e) + ': ' + e.subject + (e.detail ? ' - ' + e.detail : ''));
-        });
-    } else {
-        title.textContent = 'Recent changes';
-        menu.appendChild(title);
-        menuItem(menu, 'Refresh now', load);
-        menuItem(menu, 'Show all devices', showAllDevices, onlyDevice === null);
-        menuItem(menu, 'Close details', closePane, selectedId === null);
-    }
-    menu.style.display = 'block';
-    // Keep the menu inside the window.
-    menu.style.left = Math.max(0, Math.min(x, window.innerWidth - menu.offsetWidth - 4)) + 'px';
-    menu.style.top = Math.max(0, Math.min(y, window.innerHeight - menu.offsetHeight - 4)) + 'px';
-    var first = menu.querySelector('button:not(:disabled)');
-    if (first) { first.focus(); }
-}
-
 var rowsBody = document.getElementById('rows');
 rowsBody.addEventListener('click', function (ev) {
     var tr = ev.target.closest('tr.row');
     if (tr) { selectEvent(parseInt(tr.getAttribute('data-id'), 10)); }
 });
 
-// The browser's own menu is blocked on the page content only (also the empty space below the table), not on the header, nav or taskbar.
-document.addEventListener('contextmenu', function (ev) {
-    if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer, .ctx-menu')) { return; }
-    ev.preventDefault();
-    var tr = ev.target.closest('tr.row');
-    openContextMenu(tr ? findEvent(parseInt(tr.getAttribute('data-id'), 10)) : null, ev.clientX, ev.clientY);
+// Right-click menus (static/ctxmenu.js). A row opens the event menu; empty page space opens the page menu.
+ctxMenu.register('event', function (tr) {
+    var e = findEvent(parseInt(tr.getAttribute('data-id'), 10));
+    if (!e) { return null; }
+    return { title: deviceName(e) + ' | ' + e.subject, items: [
+        { label: 'Show details', action: function () { selectEvent(e.id); } },
+        { label: 'Open device page', action: function () { openDevice(e); }, disabled: e.device_id === null },
+        { label: 'Show on topology', action: function () { openTopology(e); }, disabled: e.device_id === null },
+        onlyDevice !== null
+            ? { label: 'Show all devices', action: showAllDevices }
+            : { label: "Show only this device's changes", action: function () { onlyDevice = e.device_id; render(); }, disabled: e.device_id === null },
+        { label: 'Copy event text', action: function () {
+            ctxMenu.copy(new Date(e.at).toLocaleString() + ' ' + deviceName(e) + ': ' + e.subject + (e.detail ? ' - ' + e.detail : ''));
+        } },
+    ] };
 });
+
+// The whole page counts as one more menu target, so the empty space below the table has a menu too.
+// The header, nav and taskbar keep the browser's own menu.
+document.documentElement.setAttribute('data-ctx', 'page');
+ctxMenu.register('page', function (el, ev) {
+    if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
+    return { title: 'Recent changes', items: [
+        { label: 'Refresh now', action: load },
+        { label: 'Show all devices', action: showAllDevices, disabled: onlyDevice === null },
+        { label: 'Close details', action: closePane, disabled: selectedId === null },
+    ] };
+});
+
+// Esc closes the details pane, but only when no menu is open (the menu closes on the same key).
 document.addEventListener('keydown', function (ev) {
-    if (ev.key !== 'Escape') { return; }
-    var menu = document.getElementById('ctx-menu');
-    if (menu.style.display === 'block') { closeContextMenu(); } else if (selectedId !== null) { closePane(); }
-});
-document.addEventListener('click', function (ev) { if (!ev.target.closest('#ctx-menu')) { closeContextMenu(); } });
-window.addEventListener('scroll', closeContextMenu, true);
+    if (ev.key !== 'Escape' || selectedId === null) { return; }
+    var m = document.querySelector('.ctx-menu');
+    if (!m || m.style.display !== 'block') { closePane(); }
+}, true);
 
 load();
 setInterval(load, 15000);
