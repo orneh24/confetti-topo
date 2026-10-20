@@ -232,7 +232,9 @@ topo/
                          + dashboard, devices, device, topology, conflicts, settings, each `{% extends "base.html" %}`
   static/theme.css     — the ONE place colours live (Dark, Light, Monokai, High Contrast,
                          Confetti Night, Neon Streamers). Pages must not define their own :root colours
-  static/layout.css    — Classic, Modern, Retro 95, MS-DOS, Neon Green CRT. Loaded AFTER theme.css
+  static/layout.css    — Classic, Modern, Retro 95, MS-DOS, Neon Green CRT (MS-DOS also has a keyboard layer:
+                         base.html's .dos-menubar / .dos-fkeys / .dos-help, a row cursor, and one keydown IIFE at
+                         the end of theme.js that does nothing in any other layout; same block as confetti-butler). Loaded AFTER theme.css
   static/theme.js      — THEMES + LAYOUTS lists and the two header dropdowns (confetti-topo-theme,
                          confetti-topo-layout in localStorage), themeColor() for canvas colours,
                          confettiBlast(), Shuffle, the header health dot
