@@ -1,0 +1,33 @@
+<response status="success"><result><system><hostname>lab-fw-1</hostname><ip-address>192.0.2.11</ip-address><public-ip-address>unknown</public-ip-address><netmask>255.255.255.0</netmask><default-gateway>192.0.2.1</default-gateway><is-dhcp>no</is-dhcp><is-dhcp6>no</is-dhcp6><ipv6-address>unknown</ipv6-address><ipv6-link-local-address>fe80::3/64</ipv6-link-local-address><mac-address>02:00:00:00:00:09</mac-address><time>Mon Oct 26 20:46:47 2026
+</time>
+<uptime>21 days, 2:49:33</uptime>
+<devicename>lab-fw-1</devicename>
+<family>vm</family><model>PA-VM</model><serial>000000000000001</serial><vm-mac-base>02:00:00:00:00:0e</vm-mac-base><vm-mac-count>256</vm-mac-count><vm-uuid>00000000-0000-0000-0000-000000000001</vm-uuid><vm-cpuid>ESX:0000000000000001</vm-cpuid><vm-license>VM-SERIES-2</vm-license><vm-cap-tier>T1-6.5GB</vm-cap-tier><vm-cores>2</vm-cores><vm-mem>6610032</vm-mem><relicense>0</relicense><vm-mode>VMware ESXi</vm-mode>
+<cloud-mode>non-cloud</cloud-mode>
+<sw-version>11.1.10-h1</sw-version>
+<global-protect-client-package-version>0.0.0</global-protect-client-package-version>
+<device-dictionary-version>249-772</device-dictionary-version>
+<device-dictionary-release-date>2026/10/24 04:35:51 CEST</device-dictionary-release-date>
+<app-version>9165-10321</app-version>
+<app-release-date>2026/10/24 17:03:24 CEST</app-release-date>
+<av-version>5723-6251</av-version>
+<av-release-date>2026/10/25 12:00:57 CET</av-release-date>
+<threat-version>9165-10321</threat-version>
+<threat-release-date>2026/10/24 17:03:24 CEST</threat-release-date>
+<wf-private-version>0</wf-private-version>
+<wf-private-release-date>unknown</wf-private-release-date>
+<url-db>paloaltonetworks</url-db>
+<wildfire-version>1130054-1134694</wildfire-version>
+<wildfire-release-date>2026/10/26 20:08:29 CET</wildfire-release-date>
+<wildfire-rt>Disabled</wildfire-rt>
+<url-filtering-version>20261026.20297</url-filtering-version>
+<global-protect-datafile-version>0</global-protect-datafile-version>
+<global-protect-datafile-release-date>unknown</global-protect-datafile-release-date><global-protect-clientless-vpn-version>0</global-protect-clientless-vpn-version>
+<logdb-version>11.1.2</logdb-version>
+<plugin_versions><entry name='vm_series' version='5.1.7'><pkginfo>vm_series-5.1.7</pkginfo></entry><entry name='openconfig' version='2.1.0'><pkginfo>openconfig-2.1.0</pkginfo></entry><entry name='dlp' version='5.0.4'><pkginfo>dlp-5.0.4</pkginfo></entry></plugin_versions><platform-family>vm</platform-family>
+<vpn-disable-mode>off</vpn-disable-mode>
+<multi-vsys>off</multi-vsys>
+<operational-mode>normal</operational-mode>
+<advanced-routing>off</advanced-routing>
+<duplicate-ip>Disabled</duplicate-ip>
+<device-certificate-status>None</device-certificate-status></system></result></response>

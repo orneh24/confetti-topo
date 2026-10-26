@@ -98,7 +98,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
         <h4>Links</h4>
         <div class="row"><span class="ln" style="border-color:var(--cyan)"></span>LLDP cable: local port - remote port</div>
         <div class="row"><span class="ln" style="border-color:var(--yellow);border-top-width:1px"></span>iBGP session (same AS at both ends): AS and state</div>
-        <div class="row"><span class="ln" style="border-color:var(--orange)"></span>eBGP session (different AS): both AS numbers and state</div>
+        <div class="row"><span class="ln" style="border-color:var(--purple)"></span>eBGP session (different AS): both AS numbers and state</div>
         <div class="row"><span class="sw" style="background:var(--bg-muted);border:1px dashed var(--text-dim)"></span>AS area: the routers of one BGP AS</div>
         <div class="row"><span class="ln" style="border-color:var(--blue)"></span>OSPF adjacency and its state</div>
         <div class="row"><span class="ln" style="border-color:var(--red);border-top-style:dashed"></span>BGP/OSPF session that is not Established / FULL</div>
@@ -242,7 +242,7 @@ function updateLldpLabels() {
 function toVisEdges(edges) {
     var LAYER_COLOR = { lldp: themeColor('--cyan'), bgp: themeColor('--yellow'), ospf: themeColor('--blue') };
     return edges.map(function (e) {
-        var ebgp = e.bgp_type === 'ebgp';   // a session between two ASes: orange and thick; iBGP stays yellow and thin
+        var ebgp = e.bgp_type === 'ebgp';   // a session between two ASes: purple and thick; iBGP stays yellow and thin
         return {
             // Stable id, so a refresh updates this edge instead of replacing it.
             id: edgeKey(e),
@@ -251,7 +251,7 @@ function toVisEdges(edges) {
             label: edgeLabel(e),
             // A BGP/OSPF session that is not Established/FULL is drawn red and dashed.
             color: {
-                color: e.up === false ? themeColor('--red') : (ebgp ? themeColor('--orange') : (LAYER_COLOR[e.layer] || themeColor('--gray'))),
+                color: e.up === false ? themeColor('--red') : (ebgp ? themeColor('--purple') : (LAYER_COLOR[e.layer] || themeColor('--gray'))),
                 highlight: themeColor('--text'),   // the selected link
             },
             // A link to an unidentified neighbor is short, so the ghost sits next to the router that sees it.
@@ -813,7 +813,8 @@ var LINK_KIND = { lldp: 'LLDP link (cable)', bgp: 'BGP session', ospf: 'OSPF adj
 // The fields each protocol reports, in the order they are shown: [key in the report, label shown].
 var LINK_FIELDS = {
     lldp: [['local_port', 'local port'], ['remote_port', 'remote port'], ['remote_name', 'remote name'],
-           ['remote_chassis', 'chassis id'], ['remote_mgmt_ip', 'mgmt ip'], ['remote_descr', 'description']],
+           ['remote_chassis', 'chassis id'], ['remote_mgmt_ip', 'mgmt ip'], ['remote_descr', 'description'],
+           ['matched_by', 'identified by']],
     bgp: [['peer_ip', 'neighbor'], ['local_as', 'own AS'], ['remote_as', 'neighbor AS'], ['state', 'state'], ['uptime', 'up for'],
           ['prefixes', 'prefixes'], ['local_if', 'local interface']],
     ospf: [['peer_ip', 'neighbor'], ['area', 'area'], ['state', 'state'], ['uptime', 'up for'], ['local_if', 'local interface']],

@@ -164,6 +164,9 @@ def _apply_version(conn, device_id, parsed, now):
             "WHERE id = ?",
             (fields.get("model"), fields.get("os_version"), device_id),
         )
+    # Not an identity alias (constraint 16): only used to match an LLDP chassis ID when that is switched on.
+    if parsed.get("mgmt_mac"):
+        conn.execute("UPDATE devices SET mgmt_mac = ? WHERE id = ?", (parsed["mgmt_mac"], device_id))
 
 
 def _apply_interfaces(conn, device_id, parsed, now):

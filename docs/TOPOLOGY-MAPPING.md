@@ -30,6 +30,17 @@ Flow: `poll -> parse -> two tables -> /api/topology -> vis.js`.
 Verified on real IOS-XE 17.3 and 15.4 routers. Do not trust a command name from documentation:
 check it on a real device first (see 6.1).
 
+**Palo Alto PAN-OS** (platform `paloalto_panos`) is asked over the XML API, not SSH: `type=op` with a `<show>` command,
+after one `keygen` per poll (details and quirks in the `panos-xml-api` skill). Checked on a PA-VM, PAN-OS 11.1.10-h1.
+
+| Layer | `cmd` (XML) | What it tells you |
+|---|---|---|
+| Version | `<show><system><info/></system></show>` | hostname, model, serial, software version |
+| Interfaces | `<show><interface>all</interface></show>` | `ifnet`: addresses and zone; `hw`: link state, speed, duplex |
+| LLDP | `<show><lldp><neighbors>all</neighbors></lldp></show>` | per local port: chassis id, port id, system name, management address |
+| BGP | `<show><routing><protocol><bgp><peer/></bgp></protocol></routing></show>` and `...<bgp><summary/>...` | peers, remote AS, state, prefixes, uptime; the summary adds the router's own AS |
+| OSPF | `<show><routing><protocol><ospf><neighbor/></ospf></protocol></routing></show>` | neighbor address, state, area |
+
 ## 3. Storage (two tables are enough)
 
 ```sql
@@ -88,7 +99,7 @@ Returns `{nodes: [...], edges: [...]}` in the shape vis.js wants. Optional `?lay
 `reachable` (ping state, optional), `ghost: false`.
 
 **Edges:** `{from, to, layer, label, up?, details}`. `details` is a list with one report per end that saw the
-link (`reported_by` plus the fields that end stored: LLDP ports, chassis, mgmt IP; BGP/OSPF neighbor, state, uptime,
+link (`reported_by` plus the fields that end stored: LLDP ports, chassis, mgmt IP, `matched_by` (null, `chassis` or `name`: how the far end was identified); BGP/OSPF neighbor, state, uptime,
 prefixes, area, AS). The page shows it in a card when you click a link.
 - LLDP label: `"<local port> - <remote port>"`.
 - OSPF label: `"ospf FULL"`; `up = (state == FULL)`.
@@ -146,7 +157,13 @@ The map only joins up when a neighbor row is matched to a device record. How:
   lab IP) stays a ghost, a device's own address never resolves to itself, and the poller's stored match
   wins. Do **not** store these addresses as identity aliases: a re-addressed interface would permanently
   claim a device. NULL (ghost) is a normal result for peers outside your lab, not a bug.
-- Do not use the LLDP chassis id for matching unless you can learn your own chassis id (see 6.1).
+- Do not use the LLDP chassis id for matching unless you can learn your own chassis id (see 6.1). confetti-topo
+  therefore leaves it off by default. Two **optional** switches on the Settings page turn on, for a neighbor
+  that is still unresolved: a chassis ID equal to a device's management MAC (stored in `devices.mgmt_mac`; only
+  PAN-OS reports it, in `show system info`), and a system name equal to a hostname (case and domain suffix
+  ignored). Both need exactly one matching device, never match the reporting device, lose to the poller's match
+  and to an interface-IP match, and are not stored as identity. Found on a lab firewall that a switch reported
+  with a chassis ID and name but no management address: the cable was drawn twice, once to a ghost.
 
 ### 6.1 Verify every command on real hardware
 
@@ -207,7 +224,7 @@ against them.
   `remove` of ids that disappeared) instead of creating a new `vis.Network`; rebuilding resets
   layout and zoom on every refresh. Give edges a stable id (`from|to|layer|label`) so updates match.
 - Nodes: boxes for devices, dots for ghosts. Edge colour per layer (LLDP, BGP, OSPF) plus the red
-  dashed "down" style. An iBGP session is a thin yellow line, an eBGP session a thick orange one (`--orange` in
+  dashed "down" style. An iBGP session is a thin yellow line, an eBGP session a thick purple one (`--purple` in
   theme.css; the CRT layouts have one hue, so there eBGP differs by width only). An **AS areas** toggle
   (`confetti-topo-as-areas`, a look setting) draws a dashed box labelled `AS <n>` behind the nodes of each AS, on vis's
   `beforeDrawing`; it shows only while BGP is shown. LLDP / BGP / OSPF toggle buttons (independent, remembered in `confetti-topo-layers`, a FILTERED marker while any is off) pass `?layer=` as a comma list. An independent **Unknown nodes** toggle
@@ -256,7 +273,10 @@ against them.
 
 ## 12. Not done / limits
 
-- IOS and IOS-XE only. Other vendors need their own commands and
+- IOS / IOS-XE (SSH) and PAN-OS (XML API) only. Other vendors need their own commands and
   parsers, each verified on a real device first.
+- PAN-OS: IPv4 only; no Panorama or HA state; only the default listing of BGP/OSPF is read, and the same peer address
+  in two virtual routers keeps one row. LLDP rows are unique per local port and remote port name, so two neighbors
+  that name their port alike on one firewall port overwrite each other (seen in the lab).
 - LLDP only, no CDP. No L2 (MAC table / VLAN / STP) view.
 - BGP/OSPF peers outside the lab (and peers behind an address two devices share) show as ghosts.

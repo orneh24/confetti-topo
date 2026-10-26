@@ -121,13 +121,15 @@ def app_modules():
     try:
         from app import config, db, identity, poller, events
         from app import app as app_pkg_app            # the Flask module
-        from app.collectors import ssh, sweep, confetti, butler
+        from app.collectors import ssh, sweep, confetti, butler, panos
         from app.parsers import ios
+        from app.parsers import panos as panos_parser
     except ImportError as e:
         raise Skip("app not importable here (%s)" % e)
     _mods.update(config=config, db=db, identity=identity,
                  poller=poller, events=events,
-                 appmod=app_pkg_app, ssh=ssh, sweep=sweep, confetti=confetti, butler=butler, ios=ios)
+                 appmod=app_pkg_app, ssh=ssh, sweep=sweep, confetti=confetti, butler=butler, ios=ios,
+                 panos=panos, panos_parser=panos_parser)
     return _mods
 
 
@@ -636,8 +638,12 @@ def _():
     for name, plat in platforms.PLATFORMS.items():
         need(tuple(plat["commands"]) == ios_tasks, "%s tasks are %r, expected %r" % (name, tuple(plat["commands"]), ios_tasks), p)
         need(set(plat["parsers"]) == set(plat["commands"]), "%s: commands and parsers differ" % name, p)
-        for task, cmd in list(plat["commands"].items()) + [("lldp_brief", plat.get("lldp_brief_command", "show x"))]:
-            need(cmd.startswith("show "), "%s %s runs %r: only read-only 'show' commands are allowed" % (name, task, cmd), p)
+        # SSH platforms run `show ...`; the XML API platform sends `<show>...</show>` operations. Nothing else.
+        prefix = "<show>" if plat.get("transport") == "xml_api" else "show "
+        extra = [("lldp_brief", plat.get("lldp_brief_command", prefix + "x")),
+                 ("bgp_summary", plat.get("bgp_summary_command", prefix + "x"))]
+        for task, cmd in list(plat["commands"].items()) + extra:
+            need(cmd.startswith(prefix), "%s %s runs %r: only read-only 'show' commands are allowed" % (name, task, cmd), p)
     need(platforms.get(None) is platforms.IOS and platforms.get("no-such-os") is platforms.IOS, "unknown platform must fall back to IOS", p)
     need(m["ssh"].TASKS == ios_tasks, "ssh.TASKS drifted from platforms.IOS", p)
     for path in py_files():
@@ -940,6 +946,253 @@ def _():
     need(rows.get("198.51.100.81", {}).get("state") == "Established" and rows["198.51.100.81"]["prefixes"] == 4, "established peer: %r" % rows.get("198.51.100.81"), p)
     need(rows.get("198.51.100.164", {}).get("state") == "Idle", "idle peer: %r" % rows.get("198.51.100.164"), p)
     need(all(r.get("local_as") == 65030 for r in rows.values()) and rows, "local AS from the header line: %r" % [r.get("local_as") for r in rows.values()], p)
+    return p
+
+
+@check("R30", "PAN-OS XML API: parses real output, read-only <show> ops only, password in the body and key in a header, never a URL")
+def _():
+    p = []
+    m = app_modules()
+    pp, panos, poller = m["panos_parser"], m["panos"], m["poller"]
+    from app import platforms
+    plat = platforms.PLATFORMS["paloalto_panos"]
+
+    # Parsers, on fixtures captured from a real PA-VM (PAN-OS 11.1).
+    v = pp.parse_version(sample("panos_version.xml"))
+    need(v["model"] == "PA-VM" and v["serial"] and v["os_version"] == "11.1.10-h1" and v["hostname_hint"], "version: %r" % v, p)
+    ifs = {r["name"]: r for r in pp.parse_interfaces(sample("panos_interfaces.xml"))}
+    e1 = ifs.get("ethernet1/1", {})
+    need(e1.get("ip") == "198.51.100.81" and e1.get("prefix_len") == 24 and e1.get("oper_status") == "up"
+         and e1.get("network") == "198.51.100.0/24", "interface with an address: %r" % e1, p)
+    need(ifs.get("ethernet1/1.3101", {}).get("oper_status") is None, "a sub-interface has no link state of its own, none must be invented", p)
+    need(ifs.get("ethernet1/2", {}).get("ip") is None, "an interface with ip N/A must have no address", p)
+    ll = pp.parse_lldp_neighbors(sample("panos_lldp.xml"))
+    sw = [r for r in ll if r["remote_port"] == "Gi0/7"]
+    need(len(ll) == 9 and len(sw) == 1 and sw[0]["local_if"] == "ethernet1/1" and sw[0]["remote_mgmt_ip"] == "198.51.100.2",
+         "lldp: the remote port is the neighbor's port id, not its port description (%d rows): %r" % (len(ll), sw), p)
+    need(any(r["remote_sysname"] is None and r["remote_mgmt_ip"] is None for r in ll), "a neighbor with no name or address must still parse", p)
+    peers = pp.fill_bgp_local_as(pp.parse_bgp_peers(sample("panos_bgp.xml")), pp.parse_bgp_local_as(sample("panos_bgp_summary.xml")))
+    by_ip = {r["peer_ip"]: r for r in peers}
+    est = by_ip.get("198.51.100.167", {})
+    need(est.get("state") == "Established" and est.get("remote_as") == 65030 and est.get("local_as") == 65000 and est.get("prefixes") == 3,
+         "established peer (the :179 port must be dropped from its address): %r" % est, p)
+    need(by_ip.get("198.51.100.164", {}).get("state") == "Connect", "a peer that is not up keeps the state it reports: %r" % by_ip.get("198.51.100.164"), p)
+    need([r["state"] for r in pp.parse_ospf_neighbors(sample("panos_ospf_neighbor.xml"))] == ["FULL"], "ospf 'full' must read FULL like IOS", p)
+    for fn in (pp.parse_version, pp.parse_interfaces, pp.parse_lldp_neighbors, pp.parse_bgp_peers, pp.parse_ospf_neighbors):
+        for junk in ("", "<x", None, '<response status="error"><msg>no</msg></response>', '<response status="success"><result></result></response>'):
+            try:
+                fn(junk)
+            except Exception as exc:
+                p.append("%s raised %r on %r: parsers must fail soft" % (fn.__name__, exc, junk))
+
+    # Static: the collector sends only keygen and op requests.
+    path = "topo/app/collectors/panos.py"
+    p += at(path, grep(r'"type":\s*"(?!keygen"|op")', path))
+    p += at(path, grep(r"requests\.(get|put|delete)|\.get\(\s*[\"']https", path))
+
+    # The collector against a fake HTTP session.
+    class Resp:
+        status_code = 200
+
+        def __init__(self, text):
+            self.text = text
+
+    class FakeSession:
+        calls = []
+        answers = {}
+        reject_login = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, data=None, headers=None, verify=None, timeout=None):
+            FakeSession.calls.append({"url": url, "data": dict(data), "headers": dict(headers or {})})
+            if data["type"] == "keygen":
+                if FakeSession.reject_login:
+                    return Resp('<response status="error"><result><msg>Invalid credentials.</msg></result></response>')
+                return Resp('<response status="success"><result><key>FAKEKEY123</key></result></response>')
+            return Resp(FakeSession.answers.get(data["cmd"], '<response status="error"><msg>no such</msg></response>'))
+
+    cmds = plat["commands"]
+    FakeSession.answers = {cmds["version"]: sample("panos_version.xml"), cmds["interfaces"]: sample("panos_interfaces.xml"),
+                           cmds["lldp"]: sample("panos_lldp.xml"), cmds["bgp"]: sample("panos_bgp.xml"),
+                           cmds["ospf"]: sample("panos_ospf_neighbor.xml"),
+                           plat["bgp_summary_command"]: sample("panos_bgp_summary.xml")}
+    real = panos.requests.Session
+    panos.requests.Session = FakeSession
+    try:
+        creds = {"username": "reader", "password": "s3cret!#pw", "secret": ""}
+        dev = {"mgmt_ip": "192.0.2.9", "platform": "paloalto_panos"}
+        got = list(panos.run_tasks(dev, creds))
+        need([t for t, ok, *_ in got] == list(cmds) and all(ok for _, ok, *_ in got), "every task must succeed on a good answer: %r" % [(t, ok, e) for t, ok, _, e, _ in got], p)
+        types = [c["data"]["type"] for c in FakeSession.calls]
+        need(types[0] == "keygen" and set(types) == {"keygen", "op"}, "only keygen and op requests may be sent: %r" % types, p)
+        need(all(c["data"]["cmd"].startswith("<show>") for c in FakeSession.calls if c["data"]["type"] == "op"), "an op request is not a <show> command", p)
+        need(all("?" not in c["url"] and "s3cret" not in c["url"] and "FAKEKEY" not in c["url"] for c in FakeSession.calls), "a secret or a query string is in a URL", p)
+        need(FakeSession.calls[0]["data"].get("password") == "s3cret!#pw" and not FakeSession.calls[0]["headers"], "keygen: the password goes in the POST body, with no key header", p)
+        need(all(c["headers"] == {"X-PAN-KEY": "FAKEKEY123"} and "password" not in c["data"] for c in FakeSession.calls[1:]), "an op call must carry the key in the header and no password", p)
+        need(all("s3cret" not in (out or "") and "FAKEKEY" not in (out or "") for _, _, out, _, _ in got), "a secret ended up in the stored raw output", p)
+        bgp = [parsed for t, _, _, _, parsed in got if t == "bgp"][0]
+        need({r["local_as"] for r in bgp} == {65000}, "bgp rows must carry the router's own AS from the summary: %r" % bgp, p)
+
+        # The summary is a bonus: without it the peers are still reported.
+        del FakeSession.answers[plat["bgp_summary_command"]]
+        got = list(panos.run_tasks(dev, creds, ["bgp"]))
+        need(got[0][1] and {r["local_as"] for r in got[0][4]} == {None}, "a failed bgp summary must not lose the peers: %r" % (got,), p)
+
+        # A wrong password fails every task, and nothing else is sent.
+        FakeSession.calls.clear()
+        FakeSession.reject_login = True
+        got = list(panos.run_tasks(dev, creds))
+        need(len(got) == len(cmds) and not any(ok for _, ok, *_ in got) and len(FakeSession.calls) == 1, "a failed login must fail every task after one request", p)
+        need(all("s3cret" not in (e or "") for _, _, _, e, _ in got), "the password is in an error text", p)
+        FakeSession.reject_login = False
+
+        # A management address that could change the URL is refused before any request.
+        FakeSession.calls.clear()
+        got = list(panos.run_tasks({"mgmt_ip": "192.0.2.9/evil", "platform": "paloalto_panos"}, creds))
+        need(not any(ok for _, ok, *_ in got) and not FakeSession.calls, "a mgmt_ip with a slash must be refused without a request", p)
+        try:
+            panos._op(FakeSession(), "192.0.2.9", "k", "<request><restart><system/></restart></request>")
+            p.append("_op sent a command that is not <show>")
+        except ValueError:
+            pass
+
+        # Through the poller: a PAN-OS device is polled by the XML collector, recorded as that transport,
+        # and a failed poll deletes nothing (R14 covers the shared apply steps).
+        mm, conn = fresh_db()
+        did = add_device(conn, "192.0.2.9", "fw1")
+        conn.execute("UPDATE devices SET platform = 'paloalto_panos' WHERE id = ?", (did,))
+        conn.commit()
+        conn.close()
+        FakeSession.answers[plat["bgp_summary_command"]] = sample("panos_bgp_summary.xml")
+        real_ssh = poller.ssh_collector.run_tasks
+        poller.ssh_collector.run_tasks = lambda *a, **k: (_ for _ in ()).throw(AssertionError("a PAN-OS device was polled over SSH"))
+        try:
+            res = poller._poll_device(did)
+        finally:
+            poller.ssh_collector.run_tasks = real_ssh
+        need(res and all(r["ok"] for r in res.values()), "polling a PAN-OS device through the poller: %r" % (res,), p)
+        c = mm["db"].connect()
+        try:
+            need({r["transport"] for r in c.execute("SELECT transport FROM poll_history")} == {"xml_api"}, "poll_history must record the xml_api transport", p)
+            need(c.execute("SELECT count(*) FROM adjacencies WHERE device_id = ? AND proto = 'bgp' AND local_as = 65000", (did,)).fetchone()[0] == 2, "bgp peers with local_as must be stored", p)
+            before = c.execute("SELECT count(*) FROM lldp_neighbors").fetchone()[0]
+            need(c.execute("SELECT mgmt_mac FROM devices WHERE id = ?", (did,)).fetchone()[0] == "02:00:00:00:00:09", "the version task must store the management MAC", p)
+        finally:
+            c.close()
+        FakeSession.reject_login = True
+        poller._poll_device(did)
+        c = mm["db"].connect()
+        try:
+            need(c.execute("SELECT count(*) FROM lldp_neighbors").fetchone()[0] == before > 0, "a failed login deleted LLDP neighbors", p)
+        finally:
+            c.close()
+    finally:
+        panos.requests.Session = real
+    return p
+
+
+@check("R31", "LLDP chassis/name matching: off by default, unique owner only, never itself, never an alias, one cable once")
+def _():
+    p = []
+    m, conn = fresh_db()
+    from app import topology
+    cfg = m["config"]
+    client = m["appmod"].app.test_client()
+    fw = add_device(conn, "192.0.2.10", "lab-fw-1", "firewall")
+    sw = add_device(conn, "192.0.2.2", "sw1")
+    csr = add_device(conn, "192.0.2.3", "csr-1.lab.local")
+    conn.execute("UPDATE devices SET mgmt_mac = '02:00:00:00:00:09' WHERE id = ?", (fw,))
+    _put_lldp(conn, sw, "Gi0/7", "lab-fw-1", "ethernet1/1", chassis="0200.0000.0009")   # the switch's view of the firewall
+    _put_lldp(conn, fw, "ethernet1/1", "sw1", "Gi0/7", remote_id=sw)                         # the firewall's view of the switch
+    conn.commit()
+
+    def edges():
+        return [e for e in topology.build(conn, "lldp")["edges"]]
+
+    def ghosts():
+        return sorted(n["id"] for n in topology.build(conn)["nodes"] if n["ghost"])
+
+    def set_on(chassis, name):
+        conn.commit()   # the API writes through its own connection; an open write here would lock it
+        r = client.put("/api/settings/lldp-matching", json={"chassis": chassis, "name": name})
+        need(r.status_code == 200, "PUT lldp-matching -> %s" % r.status_code, p)
+
+    # Default: off, nothing changes (constraints 3 and 13).
+    cfg.LLDP_MATCH_CHASSIS = cfg.LLDP_MATCH_NAME = False
+    need(topology.lldp_matching(conn)["chassis"] is False and topology.lldp_matching(conn)["name"] is False, "matching must be off by default", p)
+    need(ghosts() == ["ghost:lldp:lab-fw-1"] and len(edges()) == 2, "off: the unknown neighbor must stay a ghost: %r %d" % (ghosts(), len(edges())), p)
+
+    # Chassis on: one cable, two reports, no ghost.
+    set_on(True, False)
+    e = edges()
+    need(not ghosts() and len(e) == 1 and len(e[0]["details"]) == 2, "chassis on: one edge with two reports and no ghost: %r %r" % (ghosts(), e), p)
+    need({d["matched_by"] for d in e[0]["details"]} == {"chassis", None}, "the report must say it was matched by chassis: %r" % e[0]["details"], p)
+    need(topology.lldp_neighbors(conn, sw)[0]["remote_device_id"] == fw, "/api/lldp-neighbors disagrees with the graph", p)
+
+    # Name only (chassis off): same result, other label. Name on its own must not need a MAC.
+    conn.execute("UPDATE devices SET mgmt_mac = NULL")
+    set_on(False, True)
+    e = edges()
+    need(not ghosts() and len(e) == 1 and {d["matched_by"] for d in e[0]["details"]} == {"name", None}, "name on: matched by name: %r %r" % (ghosts(), e), p)
+    set_on(True, False)
+    need(ghosts() == ["ghost:lldp:lab-fw-1"], "chassis on with no MAC on file must not match by name: %r" % ghosts(), p)
+    set_on(False, False)
+    need(ghosts() == ["ghost:lldp:lab-fw-1"], "both switched off again: the ghost must return", p)
+
+    # The domain suffix and the case of a name do not matter, in both directions.
+    _put_lldp(conn, sw, "Gi0/9", "CSR-1", "Gi1")
+    _put_lldp(conn, sw, "Gi0/10", "csr-1.LAB.local", "Gi2")
+    conn.commit()
+    set_on(False, True)
+    need(len([x for x in edges() if x["to"] == "dev:%d" % csr]) == 2, "CSR-1 and csr-1.LAB.local must both find csr-1.lab.local", p)
+
+    # Ambiguous: two devices with one name or one MAC stay ghosts.
+    dup = add_device(conn, "192.0.2.4", "csr-1")
+    need("ghost:lldp:CSR-1" in ghosts(), "a name two devices answer to must stay a ghost: %r" % ghosts(), p)
+    conn.execute("DELETE FROM devices WHERE id = ?", (dup,))
+    conn.execute("UPDATE devices SET mgmt_mac = '02-00-00-00-00-09' WHERE id IN (?, ?)", (fw, sw))
+    conn.commit()
+    set_on(True, False)
+    need("ghost:lldp:lab-fw-1" in ghosts(), "a MAC two devices hold must stay a ghost: %r" % ghosts(), p)
+    conn.execute("UPDATE devices SET mgmt_mac = NULL WHERE id = ?", (sw,))
+
+    # Never to itself; the stored match and the IP match win.
+    _put_lldp(conn, fw, "ethernet1/5", "lab-fw-1", "x", chassis="0200.0000.0009")
+    conn.commit()
+    set_on(True, True)
+    need(all(x["from"] != x["to"] for x in edges()), "a neighbor that is the device itself became a self-loop", p)
+    need(topology.resolve_lldp({"owners": {}, "macs": {"020000000009": fw}, "names": None}, sw, csr, None, "0200.0000.0009", None) == (csr, None),
+         "the poller's stored match must win over a chassis match", p)
+    need(topology.resolve_lldp({"owners": {"10.0.0.9": csr}, "macs": None, "names": {"lab-fw-1": fw}}, sw, None, "10.0.0.9", None, "lab-fw-1") == (csr, None),
+         "an interface IP match must win over a name match", p)
+
+    # Formats, and nothing written as an identity.
+    for t in ("02:00:00:00:00:09", "0200.0000.0009", "02-00-00-00-00-09", "020000000009"):
+        need(topology.norm_mac(t) == "020000000009", "norm_mac(%r) = %r" % (t, topology.norm_mac(t)), p)
+    need(topology.norm_mac("sw1") is None and topology.norm_mac("0200.0000") is None and topology.norm_mac(None) is None, "norm_mac must refuse what is not a MAC", p)
+    n = conn.execute("SELECT COUNT(*) FROM device_aliases WHERE lower(value) LIKE '%0009%' OR lower(value) LIKE '%lab-fw-1%'").fetchone()[0]
+    need(n == 0, "a matched MAC or name was stored as an identity alias (%d)" % n, p)
+    p += at("topo/app/topology.py", grep(r"device_aliases|INSERT|UPDATE|DELETE", "topo/app/topology.py"))
+
+    # Settings API: partial update, bad body, env fallback.
+    set_on(True, True)
+    client.put("/api/settings/lldp-matching", json={"name": False})
+    got = client.get("/api/settings/lldp-matching").get_json()
+    need(got["chassis"] is True and got["name"] is False and got["source"] == {"chassis": "settings", "name": "settings"}, "partial PUT: %r" % got, p)
+    need(client.put("/api/settings/lldp-matching", json={"chassis": "yes"}).status_code == 400, "a non-boolean value must be refused", p)
+    need(client.put("/api/settings/lldp-matching", json={}).status_code == 400, "an empty body must be refused", p)
+    conn.execute("DELETE FROM settings WHERE key LIKE 'lldp_match_%'")
+    conn.commit()
+    cfg.LLDP_MATCH_NAME = True
+    got = topology.lldp_matching(conn)
+    need(got["name"] is True and got["chassis"] is False and got["source"]["name"] == "env", "env default not used when no Settings row: %r" % got, p)
+    cfg.LLDP_MATCH_NAME = False
+    conn.close()
     return p
 
 

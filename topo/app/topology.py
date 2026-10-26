@@ -17,7 +17,7 @@ interface must not become a permanent claim on a device.
 
 import re
 
-from . import db
+from . import config, db
 
 # Words in a model or hostname that say what a router-role device really is.
 # A word matches a whole name part with its digits dropped ("sw1", "asa5506"), or sits inside the text.
@@ -45,6 +45,8 @@ def device_type(role, model, hostname, platform=None):
     """
     if role in ("switch", "firewall"):
         return role
+    if platform == "paloalto_panos":
+        return "firewall"
     if platform == "linux":
         return "linux"
     if role not in ("router", None, ""):
@@ -80,11 +82,83 @@ def resolve(owners, device_id, stored_id, ip):
     return None if found == device_id else found
 
 
-def _lldp_report(r, names):
+def norm_mac(text):
+    """12 lower-case hex digits for "02:00:00:00:00:09", "0200.0000.0009" or "02-00-00-00-00-09", else None."""
+    text = (text or "").strip()
+    if not re.fullmatch(r"[0-9a-fA-F:.\-]+", text):
+        return None
+    digits = re.sub(r"[^0-9a-fA-F]", "", text)
+    return digits.lower() if len(digits) == 12 else None
+
+
+def mac_owners(conn):
+    """{mac: device_id} for management MACs held by exactly one device."""
+    holders = {}
+    for r in conn.execute("SELECT id, mgmt_mac FROM devices WHERE mgmt_mac IS NOT NULL AND mgmt_mac <> ''"):
+        mac = norm_mac(r["mgmt_mac"])
+        if mac:
+            holders.setdefault(mac, set()).add(r["id"])
+    return {mac: next(iter(ids)) for mac, ids in holders.items() if len(ids) == 1}
+
+
+def name_owners(conn):
+    """{name: device_id} for hostnames held by exactly one device, lower case, each under its full name and
+    its short name (before the first dot): "FW-1.lab.local" is found as "fw-1.lab.local" and as "fw-1"."""
+    holders = {}
+    for r in conn.execute("SELECT id, hostname FROM devices WHERE hostname IS NOT NULL AND hostname <> ''"):
+        full = r["hostname"].strip().lower()
+        for name in {full, full.split(".")[0]}:
+            holders.setdefault(name, set()).add(r["id"])
+    return {name: next(iter(ids)) for name, ids in holders.items() if len(ids) == 1}
+
+
+def _toggle(conn, key, default):
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    if row is None or row["value"] in (None, ""):
+        return default, "env"
+    return row["value"].lower() in ("1", "true", "yes"), "settings"
+
+
+def lldp_matching(conn):
+    """{"chassis": bool, "name": bool, "source": {...}}: the two LLDP matching switches in use
+    (the Settings row if there is one, else the TOPO_LLDP_MATCH_* default)."""
+    chassis, c_src = _toggle(conn, "lldp_match_chassis", config.LLDP_MATCH_CHASSIS)
+    name, n_src = _toggle(conn, "lldp_match_name", config.LLDP_MATCH_NAME)
+    return {"chassis": chassis, "name": name, "source": {"chassis": c_src, "name": n_src}}
+
+
+def lldp_context(conn):
+    """What resolve_lldp needs: the interface owners and, for a switched-on match, its owner map."""
+    on = lldp_matching(conn)
+    return {"owners": interface_owners(conn),
+            "macs": mac_owners(conn) if on["chassis"] else None,
+            "names": name_owners(conn) if on["name"] else None}
+
+
+def resolve_lldp(ctx, device_id, stored_id, ip, chassis, sysname):
+    """(device_id, how) for an LLDP neighbor. how is None for the poller's match or an interface IP (resolve),
+    "chassis" or "name" for the optional matches, tried in that order and only when still unresolved.
+    Never to the reporting device itself, never when two devices share the value."""
+    found = resolve(ctx["owners"], device_id, stored_id, ip)
+    if found or stored_id or (ip and ctx["owners"].get(ip)):
+        return found, None   # a device's own address (found None) is not retried by chassis or name
+    if ctx["macs"] is not None and norm_mac(chassis):
+        found = ctx["macs"].get(norm_mac(chassis))
+        if found and found != device_id:
+            return found, "chassis"
+    if ctx["names"] is not None and sysname:
+        full = sysname.strip().lower()
+        found = ctx["names"].get(full) or ctx["names"].get(full.split(".")[0])
+        if found and found != device_id:
+            return found, "name"
+    return None, None
+
+
+def _lldp_report(r, names, how=None):
     """What one end of a cable says about it, for the link details."""
     return {"reported_by": names.get(r["device_id"]), "local_port": r["local_if"], "remote_port": r["remote_port"],
             "remote_name": r["remote_sysname"], "remote_chassis": r["remote_chassis"], "remote_mgmt_ip": r["remote_mgmt_ip"],
-            "remote_descr": r["remote_descr"]}
+            "remote_descr": r["remote_descr"], "matched_by": how}
 
 
 def _session_report(r, names):
@@ -102,7 +176,8 @@ def build(conn, layer=None):
     """layer limits the edges to some sources: "lldp", "bgp", "ospf", or a comma list
     such as "lldp,bgp". None or "" overlays all three; an unknown name draws none."""
     wanted = {"lldp", "bgp", "ospf"} if not layer else {x.strip() for x in layer.split(",")}
-    owners = interface_owners(conn)
+    ctx = lldp_context(conn)
+    owners = ctx["owners"]
     device_as = bgp_as_numbers(conn, owners)
     nodes = {}
     names = {}
@@ -126,9 +201,10 @@ def build(conn, layer=None):
 
     # A known device that a neighbor sees as plain Linux is a Linux server, whatever vendor it was added with
     # (an LLDP-adopted device starts with the Cisco defaults).
-    for r in conn.execute("SELECT device_id, remote_device_id, remote_mgmt_ip, remote_descr FROM lldp_neighbors "
-                          "WHERE remote_descr LIKE '%inux%'"):
-        remote = resolve(owners, r["device_id"], r["remote_device_id"], r["remote_mgmt_ip"])
+    for r in conn.execute("SELECT device_id, remote_device_id, remote_mgmt_ip, remote_descr, remote_chassis, remote_sysname "
+                          "FROM lldp_neighbors WHERE remote_descr LIKE '%inux%'"):
+        remote, _ = resolve_lldp(ctx, r["device_id"], r["remote_device_id"], r["remote_mgmt_ip"],
+                                 r["remote_chassis"], r["remote_sysname"])
         if remote and lldp_says_linux(r["remote_descr"]) and "dev:{}".format(remote) in nodes:
             nodes["dev:{}".format(remote)].update(device_type="linux", vendor="")
 
@@ -148,11 +224,12 @@ def build(conn, layer=None):
         # links are never de-duplicated.
         seen = {}   # cable (both ends) -> the edge already drawn for it
         for r in rows:
-            remote = resolve(owners, r["device_id"], r["remote_device_id"], r["remote_mgmt_ip"])
+            remote, how = resolve_lldp(ctx, r["device_id"], r["remote_device_id"], r["remote_mgmt_ip"],
+                                       r["remote_chassis"], r["remote_sysname"])
             if remote:
                 link = frozenset([(r["device_id"], r["local_if"]), (remote, r["remote_port"])])
                 if link in seen:
-                    seen[link]["details"].append(_lldp_report(r, names))   # the other end's view of the same cable
+                    seen[link]["details"].append(_lldp_report(r, names, how))   # the other end's view of the same cable
                     continue
             target = ("dev:{}".format(remote) if remote
                       else ghost_id("lldp", r["remote_sysname"] or r["remote_chassis"] or "unknown",
@@ -160,7 +237,7 @@ def build(conn, layer=None):
             edge = {
                 "from": "dev:{}".format(r["device_id"]), "to": target, "layer": "lldp",
                 "label": "{} - {}".format(r["local_if"], r["remote_port"] or "?"),
-                "details": [_lldp_report(r, names)],
+                "details": [_lldp_report(r, names, how)],
             }
             edges.append(edge)
             if remote:
@@ -294,7 +371,7 @@ def adjacencies(conn, device_id=None):
 
 def lldp_neighbors(conn, device_id=None):
     """LLDP rows for the API, with the effective remote_device_id."""
-    owners = interface_owners(conn)
+    ctx = lldp_context(conn)
     sql = """SELECT l.device_id, d.hostname, l.local_if, l.remote_chassis, l.remote_sysname,
                     l.remote_port, l.remote_mgmt_ip, l.remote_device_id, l.remote_descr, l.last_seen
              FROM lldp_neighbors l JOIN devices d ON d.id = l.device_id"""
@@ -306,7 +383,8 @@ def lldp_neighbors(conn, device_id=None):
     out = []
     for r in conn.execute(sql, params):
         d = dict(r)
-        d["remote_device_id"] = resolve(owners, d["device_id"], d["remote_device_id"], d["remote_mgmt_ip"])
+        d["remote_device_id"], d["matched_by"] = resolve_lldp(
+            ctx, d["device_id"], d["remote_device_id"], d["remote_mgmt_ip"], d["remote_chassis"], d["remote_sysname"])
         d["last_seen"] = db.iso(d["last_seen"])
         out.append(d)
     return out

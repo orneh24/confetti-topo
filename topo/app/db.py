@@ -226,6 +226,8 @@ def init_db():
         db.execute("ALTER TABLE lldp_neighbors ADD COLUMN remote_descr TEXT")
     if "local_as" not in [r[1] for r in db.execute("PRAGMA table_info(adjacencies)")]:
         db.execute("ALTER TABLE adjacencies ADD COLUMN local_as INTEGER")
+    if "mgmt_mac" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
+        db.execute("ALTER TABLE devices ADD COLUMN mgmt_mac TEXT")
     db.commit()
     db.close()
 

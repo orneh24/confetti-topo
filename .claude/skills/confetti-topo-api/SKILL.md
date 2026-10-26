@@ -49,6 +49,8 @@ those two columns to NULL, so its neighbors become ghosts again.
   only `*_set` booleans; PUT is partial, `""` clears one)
 - `GET|PUT /api/settings/credentials` — server-wide defaults (the `settings` table; GET shows `*_source`:
   settings/env/none). Order per field: device row > settings > `TOPO_SSH_*` env, empty falls through
+- `GET|PUT /api/settings/lldp-matching` — `{chassis, name}` booleans (default off; GET adds `source`: settings/env;
+  PUT is partial and refuses non-booleans). Optional LLDP match by chassis ID = `devices.mgmt_mac`, or system name = hostname
 - `GET /api/credentials` (every non-node device with `has_override`, `username`, `password_set`, `enable_secret_set`, `updated_at`; no secrets); `POST /api/credentials/bulk`
   `{device_ids, username?, password?, enable_secret?}` (one transaction, an unknown id applies nothing);
   `POST /api/credentials/clear {device_ids}`
@@ -63,7 +65,7 @@ those two columns to NULL, so its neighbors become ghosts again.
 `PUT` / `DELETE /api/topology/positions` (saved node places; nodes carry `x`/`y` when saved, and the response
 also has `positions` {node_id: {x, y}}, including the page-only `group:dev:<id>`),
 `GET /api/adjacencies[?device_id=]`, `GET /api/lldp-neighbors[?device_id=]`. The last two return the
-**effective** `peer_device_id` / `remote_device_id`.
+**effective** `peer_device_id` / `remote_device_id` (`/api/lldp-neighbors` also has `matched_by`: null, `chassis` or `name`).
 
 **Events and metrics:** `GET /api/events` (`device_id`, `kind`, `severity`, `hours`, `limit`); `GET /metrics`
 (Prometheus text, hand-written, labels escaped).

@@ -26,6 +26,18 @@
         </div>
     </div>
     <div class="section">
+        <div class="section-header"><span>LLDP neighbor matching</span></div>
+        <div class="section-body">
+            <div class="hint" id="lldp-status">loading</div>
+            <form id="lldp-form" onsubmit="return false;">
+                <label><input type="checkbox" name="chassis" onchange="saveLldp()"> Match the chassis ID to a device's management MAC</label><br>
+                <label><input type="checkbox" name="name" onchange="saveLldp()"> Match the system name to a known hostname</label>
+                <div class="hint">Only for a neighbor that advertises no management IP a known device owns. A match is used only when exactly one device has the MAC or name, and is not saved as an identity. Two devices with the same name, or a reused MAC, are left unmatched. A device reports its own MAC only on PAN-OS (poll it once); name matching works for any device. Off by default.</div>
+                <span class="msg" id="lldp-msg"></span>
+            </form>
+        </div>
+    </div>
+    <div class="section">
         <div class="section-header"><span>Device credentials</span></div>
         <div class="section-body">
             <div class="hint">Set the same credentials on several devices, or remove their own credentials so they use the defaults. Nodes imported from Confetti Traffic are never polled and are not listed.</div>
@@ -172,7 +184,32 @@ function removeSelected() {
     bulk('/api/credentials/clear', { device_ids: ids }, 'removed from ' + ids.length + ' device(s)');
 }
 
+function loadLldp() {
+    fetch('/api/settings/lldp-matching').then(function (r) { return r.json(); }).then(function (m) {
+        var f = document.getElementById('lldp-form');
+        f.chassis.checked = m.chassis;
+        f.name.checked = m.name;
+        document.getElementById('lldp-status').textContent =
+            'In use now: chassis ID ' + (m.chassis ? 'on' : 'off') + ' (from ' + (m.source.chassis === 'settings' ? 'this page' : 'the TOPO_LLDP_MATCH_* environment') +
+            '), name ' + (m.name ? 'on' : 'off') + ' (from ' + (m.source.name === 'settings' ? 'this page' : 'the environment') + ').';
+    });
+}
+
+function saveLldp() {
+    var f = document.getElementById('lldp-form');
+    fetch('/api/settings/lldp-matching', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chassis: f.chassis.checked, name: f.name.checked }),
+    }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+    }).then(function (res) {
+        say('lldp-msg', res.ok, res.ok ? 'saved' : (res.data.error || 'save failed'));
+        loadLldp();
+    });
+}
+
 loadDefaults();
+loadLldp();
 loadDevices();
 </script>
 {% endraw %}

@@ -1,0 +1,247 @@
+<response status="success"><result><entry name="ethernet1/1">
+<local>
+<index>16</index>
+<port-id>1</port-id>
+</local>
+<neighbors>
+<entry name="02000000000d4769302f37">
+<chassis-type>MAC address</chassis-type>
+<chassis-id>02:00:00:00:00:0d</chassis-id>
+<port-type>Interface name</port-type>
+<port-id>Gi0/7</port-id>
+<port-description>lab-vmnic-1</port-description>
+<ttl>91</ttl>
+<system-name>lab-sw-1</system-name>
+<system-description>Cisco IOS Software, C3560C Software (C3560c405ex-UNIVERSALK9-M), Version 15.2(2)E4, RELEASE SOFTWARE (fc2)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2016 by Cisco Systems, Inc.
+Compiled Sat 13-Feb-16 02:28 by prod_rel_team</system-description>
+<system-capabilities>B, R, </system-capabilities>
+<enabled-capabilities>B, R, </enabled-capabilities>
+<management-address>
+<entry name="198.51.100.2">
+<address-type>ipv4</address-type>
+<interface-number>1</interface-number>
+<interface-type>System Port Number</interface-type>
+</entry>
+</management-address>
+</entry>
+<entry name="020000000008020000000008">
+<chassis-type>MAC address</chassis-type>
+<chassis-id>02:00:00:00:00:08</chassis-id>
+<port-type>MAC address</port-type>
+<port-id>02:00:00:00:00:08</port-id>
+<port-description>eth0</port-description>
+<ttl>110</ttl>
+<system-name>lab-node-1</system-name>
+<system-description>Alpine Linux v3.24 Linux 6.18.53-0-virt #1-Alpine SMP PREEMPT_DYNAMIC 2026-09-22 15:07:36 x86_64</system-description>
+<system-capabilities>B, W, R, S, </system-capabilities>
+<enabled-capabilities>S, </enabled-capabilities>
+<management-address>
+<entry name="198.51.100.27">
+<address-type>ipv4</address-type>
+<interface-number>2</interface-number>
+<interface-type>Ifindex</interface-type>
+</entry>
+<entry name="fe80::2">
+<address-type>ipv6</address-type>
+<interface-number>2</interface-number>
+<interface-type>Ifindex</interface-type>
+</entry>
+</management-address>
+</entry>
+<entry name="020000000007020000000007">
+<chassis-type>MAC address</chassis-type>
+<chassis-id>02:00:00:00:00:07</chassis-id>
+<port-type>MAC address</port-type>
+<port-id>02:00:00:00:00:07</port-id>
+<port-description>eth0</port-description>
+<ttl>110</ttl>
+<system-name>lab-node-2</system-name>
+<system-description>Alpine Linux v3.24 Linux 6.18.53-0-virt #1-Alpine SMP PREEMPT_DYNAMIC 2026-09-22 15:07:36 x86_64</system-description>
+<system-capabilities>B, W, R, S, </system-capabilities>
+<enabled-capabilities>S, </enabled-capabilities>
+<management-address>
+<entry name="198.51.100.23">
+<address-type>ipv4</address-type>
+<interface-number>2</interface-number>
+<interface-type>Ifindex</interface-type>
+</entry>
+<entry name="fe80::1">
+<address-type>ipv6</address-type>
+<interface-number>2</interface-number>
+<interface-type>Ifindex</interface-type>
+</entry>
+</management-address>
+</entry>
+</neighbors>
+</entry>
+<entry name="ethernet1/3">
+<local>
+<index>18</index>
+<port-id>3</port-id>
+</local>
+<neighbors>
+<entry name="52595a454e2d35373030020000000012">
+<chassis-type>Locally assigned</chassis-type>
+<chassis-id>lab-pc-1</chassis-id>
+<port-type>MAC address</port-type>
+<port-id>02:00:00:00:00:12</port-id>
+<port-description></port-description>
+<ttl>3165</ttl>
+<system-name></system-name>
+<system-description></system-description>
+<system-capabilities></system-capabilities>
+<enabled-capabilities></enabled-capabilities>
+<management-address>
+</management-address>
+</entry>
+</neighbors>
+</entry>
+<entry name="ethernet1/4">
+<local>
+<index>19</index>
+<port-id>4</port-id>
+</local>
+<neighbors>
+<entry name="02000000000b02000000000b">
+<chassis-type>MAC address</chassis-type>
+<chassis-id>02:00:00:00:00:0b</chassis-id>
+<port-type>MAC address</port-type>
+<port-id>02:00:00:00:00:0b</port-id>
+<port-description>eth0</port-description>
+<ttl>96</ttl>
+<system-name>lab-node-3</system-name>
+<system-description>Alpine Linux v3.24 Linux 6.18.53-0-virt #1-Alpine SMP PREEMPT_DYNAMIC 2026-09-22 15:07:36 x86_64</system-description>
+<system-capabilities>B, W, R, S, </system-capabilities>
+<enabled-capabilities>S, </enabled-capabilities>
+<management-address>
+<entry name="203.0.113.13">
+<address-type>ipv4</address-type>
+<interface-number>2</interface-number>
+<interface-type>Ifindex</interface-type>
+</entry>
+<entry name="fe80::4">
+<address-type>ipv6</address-type>
+<interface-number>2</interface-number>
+<interface-type>Ifindex</interface-type>
+</entry>
+</management-address>
+</entry>
+</neighbors>
+</entry>
+<entry name="ethernet1/8">
+<local>
+<index>23</index>
+<port-id>8</port-id>
+</local>
+<neighbors>
+</neighbors>
+</entry>
+<entry name="ethernet1/5">
+<local>
+<index>20</index>
+<port-id>5</port-id>
+</local>
+<neighbors>
+<entry name="020000000002476932">
+<chassis-type>MAC address</chassis-type>
+<chassis-id>02:00:00:00:00:02</chassis-id>
+<port-type>Interface name</port-type>
+<port-id>Gi2</port-id>
+<port-description>GigabitEthernet2</port-description>
+<ttl>98</ttl>
+<system-name>lab-rtr-b.example</system-name>
+<system-description>Cisco IOS Software [Amsterdam], Virtual XE Software (X86_64_LINUX_IOSD-UNIVERSALK9-M), Version 17.3.2, RELEASE SOFTWARE (fc3)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2020 by Cisco Systems, Inc.
+Compiled Sat 31-Oct-20 13:16 b</system-description>
+<system-capabilities>B, R, </system-capabilities>
+<enabled-capabilities>R, </enabled-capabilities>
+<management-address>
+<entry name="203.0.113.14">
+<address-type>ipv4</address-type>
+<interface-number>2</interface-number>
+<interface-type>Ifindex</interface-type>
+</entry>
+</management-address>
+</entry>
+<entry name="02000000000b02000000000b">
+<chassis-type>MAC address</chassis-type>
+<chassis-id>02:00:00:00:00:0b</chassis-id>
+<port-type>MAC address</port-type>
+<port-id>02:00:00:00:00:0b</port-id>
+<port-description>eth0</port-description>
+<ttl>96</ttl>
+<system-name>lab-node-3</system-name>
+<system-description>Alpine Linux v3.24 Linux 6.18.53-0-virt #1-Alpine SMP PREEMPT_DYNAMIC 2026-09-22 15:07:36 x86_64</system-description>
+<system-capabilities>B, W, R, S, </system-capabilities>
+<enabled-capabilities>S, </enabled-capabilities>
+<management-address>
+<entry name="203.0.113.13">
+<address-type>ipv4</address-type>
+<interface-number>2</interface-number>
+<interface-type>Ifindex</interface-type>
+</entry>
+<entry name="fe80::4">
+<address-type>ipv6</address-type>
+<interface-number>2</interface-number>
+<interface-type>Ifindex</interface-type>
+</entry>
+</management-address>
+</entry>
+<entry name="020000000001476932">
+<chassis-type>MAC address</chassis-type>
+<chassis-id>02:00:00:00:00:01</chassis-id>
+<port-type>Interface name</port-type>
+<port-id>Gi2</port-id>
+<port-description>GigabitEthernet2</port-description>
+<ttl>104</ttl>
+<system-name>lab-rtr-a.example</system-name>
+<system-description>Cisco IOS Software, CSR1000V Software (X86_64_LINUX_IOSD-UNIVERSALK9-M), Version 15.4(1)S2, RELEASE SOFTWARE (fc3)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2014 by Cisco Systems, Inc.
+Compiled Tue 27-May-14 10:11 by mcpre</system-description>
+<system-capabilities>B, R, </system-capabilities>
+<enabled-capabilities>R, </enabled-capabilities>
+<management-address>
+<entry name="203.0.113.15">
+<address-type>ipv4</address-type>
+<interface-number>2</interface-number>
+<interface-type>Ifindex</interface-type>
+</entry>
+</management-address>
+</entry>
+<entry name="020000000002476933">
+<chassis-type>MAC address</chassis-type>
+<chassis-id>02:00:00:00:00:02</chassis-id>
+<port-type>Interface name</port-type>
+<port-id>Gi3</port-id>
+<port-description>GigabitEthernet3</port-description>
+<ttl>118</ttl>
+<system-name>lab-rtr-b.example</system-name>
+<system-description>Cisco IOS Software [Amsterdam], Virtual XE Software (X86_64_LINUX_IOSD-UNIVERSALK9-M), Version 17.3.2, RELEASE SOFTWARE (fc3)
+Technical Support: http://www.cisco.com/techsupport
+Copyright (c) 1986-2020 by Cisco Systems, Inc.
+Compiled Sat 31-Oct-20 13:16 b</system-description>
+<system-capabilities>B, R, </system-capabilities>
+<enabled-capabilities>R, </enabled-capabilities>
+<management-address>
+<entry name="203.0.113.16">
+<address-type>ipv4</address-type>
+<interface-number>3</interface-number>
+<interface-type>Ifindex</interface-type>
+</entry>
+</management-address>
+</entry>
+</neighbors>
+</entry>
+<entry name="ethernet1/2">
+<local>
+<index>17</index>
+<port-id>2</port-id>
+</local>
+<neighbors>
+</neighbors>
+</entry>
+</result></response>

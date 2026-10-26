@@ -20,9 +20,10 @@ It shares no database or API with butler. Two sibling repos stay related:
 
 Reference notes for the feature itself: `docs/TOPOLOGY-MAPPING.md` (design, pitfalls, test checklist).
 
-**SSH is read-only.** confetti-topo never writes to a device: only `show` commands. There is no
-config-push path and none should be added without being asked for explicitly (regression check R19 fails
-on any command that does not start with `show `).
+**Device access is read-only.** confetti-topo never writes to a device: SSH `show` commands, and for PAN-OS
+`<show>` operations over the XML API. There is no config-push path and none should be added without being asked
+for explicitly (regression check R19 fails on any command that is not a `show`; R30 on any XML API request that
+is not a `<show>` op).
 
 ## Architecture
 
@@ -33,7 +34,7 @@ on any command that does not start with `show `).
     requests and the dashboard would queue behind each other)
   - SQLite database (WAL mode) at `/var/lib/confetti-topo/topo.db`
   - Web UI on port 80
-  - A background **poller** thread pool (device SSH polling), an **ICMP checker** thread and an optional
+  - A background **poller** thread pool (device polling, SSH or XML API), an **ICMP checker** thread and an optional
     **discovery** timer thread
 - SSH server is OpenSSH (`sshd`, with `openssh-sftp-server`), not Dropbear (switched 2026-10-14, same as
   confetti-butler: Dropbear has no SFTP and drops large packets). `/etc/ssh/sshd_config.d/10-confetti.conf` keeps
@@ -49,7 +50,7 @@ on any command that does not start with `show `).
 
 ### The poller — server-initiated pull
 
-confetti-topo dials out to devices over SSH rather than waiting for them to report in. One daemon thread
+confetti-topo dials out to devices over SSH (or the PAN-OS XML API) rather than waiting for them to report in. One daemon thread
 (`app/poller.py`), started by `serve.py` beside `reach.start()`, idempotent — `start()` returns quietly if
 already running.
 
@@ -62,7 +63,7 @@ Per device, five tasks run independently, **each committing its own transaction*
 collected 200ms earlier. `role='node'` devices (confetti-traffic's imported Alpine fleet) are never polled —
 `poller.py`'s device-selection query filters `role != 'node'`.
 
-All five tasks share **one SSH session** per poll (`ssh.run_tasks` is a generator, so each task still commits
+All five tasks share **one SSH session** per poll (PAN-OS: one keygen per poll) (`ssh.run_tasks` is a generator, so each task still commits
 before the next command runs). Each apply step deletes that device's rows not seen in this poll — a removed
 peer or cable must not stay on the topology forever. But **only a successful task deletes**: a timeout or a
 failed login applies nothing (constraint 14). `interfaces` skips the delete on an empty result, since empty
@@ -77,8 +78,18 @@ Commands and parsers (`app/collectors/ssh.py`, `app/parsers/ios.py`) use **pure 
 availability is unverified (same caution as confetti-traffic CLAUDE.md constraint 14). Confirmed against a
 real IOS-XE 17.3 CSR1000v and a 15.4 router; see constraint 3 for command-name gotchas found that way.
 
-`app/platforms.py` maps a device's `platform` to its commands and parsers: `cisco_ios` / `cisco_xe` only. An
-unknown platform falls back to the IOS entry. Junos is planned, not started. There is no SNMP collector.
+`app/platforms.py` maps a device's `platform` to its transport, commands and parsers: `cisco_ios` / `cisco_xe`
+(SSH) and `paloalto_panos` (XML API). An unknown platform falls back to the IOS entry. Junos is planned, not
+started. There is no SNMP collector.
+
+**PAN-OS** (`collectors/panos.py`, `parsers/panos.py`, skill `panos-xml-api`): the poller picks the collector from the
+platform's `transport` (`xml_api` or `ssh`) and records it in `poll_history.transport`; the five tasks, the apply
+steps and the events are shared. The collector logs in once per poll (`keygen`, with the username and password from
+the usual credential order), then sends one `<show>` operation per task; BGP takes two (the peer list, and the
+summary that holds the router's own AS). Its parsers use XML (ElementTree), the one place the parsers are not regex.
+The management certificate is not checked unless `TOPO_PANOS_VERIFY_TLS=true`; the request timeout is
+`TOPO_PANOS_TIMEOUT_S` (default 20 s). Fixtures in `dev/samples/panos_*.xml`
+were captured from a real PA-VM (PAN-OS 11.1); other versions and Panorama are untested.
 
 ### Topology
 
@@ -97,7 +108,7 @@ Places are stored in `node_positions` (`PUT`/`DELETE /api/topology/positions`, t
 known device are drawn as one "N unknown" node (`group:dev:<id>`, made up by the page, so only `positions`
 knows it); double-click expands it. An LLDP link shows its port names only on hover or when selected.
 BGP/OSPF labels always show. A BGP session is typed by the AS at its two ends (`adjacencies.local_as` is the router's own
-AS, from `show bgp summary`): `bgp_type` `ibgp` = thin yellow line, `ebgp` = thick orange line, and the **AS areas** toggle
+AS, from `show bgp summary`): `bgp_type` `ibgp` = thin yellow line, `ebgp` = thick purple line, and the **AS areas** toggle
 draws a box labelled with the AS behind its nodes (`nodes[].asn`). `/topology?device=<id>` selects and centres on that device once (the Recent changes page links there).
 
 Who is that neighbor? Two steps:
@@ -110,8 +121,13 @@ Who is that neighbor? Two steps:
    IP. An address on two devices (HSRP/VRRP, a reused lab IP) stays a ghost, a device's own address never
    resolves to itself, and the poller's stored match always wins. It is **never written back as an alias**
    (constraint 12).
+3. **Optional, off by default, LLDP only** (Settings page, `GET|PUT /api/settings/lldp-matching`, env
+   `TOPO_LLDP_MATCH_CHASSIS` / `_NAME`): a neighbor still unresolved is matched by its chassis ID to a device's
+   management MAC (`devices.mgmt_mac`, filled by the PAN-OS version task; IOS cannot report its own, constraint 3),
+   then by its system name to a hostname (case and domain suffix ignored). `topology.resolve_lldp`; same rules as
+   step 2 and never stored (constraint 16). The link card says `identified by`.
 
-NULL after both steps is the expected result for peers outside the lab, not a bug.
+NULL after these steps is the expected result for peers outside the lab, not a bug.
 
 ### Reachability
 
@@ -199,7 +215,7 @@ There is no Packer template: topo is installed once per environment, so the buil
 | Path | Route | Notes |
 |---|---|---|
 | Manual | `POST /api/devices` | Operator-entered, from the Devices page |
-| Subnet sweep | `POST /api/discover/sweep` | TCP connect to port 22 only — coarse on purpose; the poller's own `version` task does real identification next cycle |
+| Subnet sweep | `POST /api/discover/sweep` | TCP connect to port 22 only (a firewall with SSH off must be added by hand or seed file) — coarse on purpose; the poller's own `version` task does real identification next cycle |
 | YAML seed file | `POST /api/discover/seedfile` | `seed/devices.yaml.sample` shows the shape |
 | confetti-traffic import | `POST /api/discover/confetti` | `GET <hub_url>/endpoints`, imported as `role='node'`, `vendor='alpine'`, `platform='linux'` — never SSH-polled. `site` is the endpoint's `group_name`, which is confetti-traffic's *effective* group: a group set on its dashboard overrides what the node registers, so an override changes `site` on the next import |
 | confetti-butler import | `POST /api/discover/butler` | `GET <butler_url>/api/devices`; inventory only (hostname, IP, serial, vendor, platform, model, role, site), no credentials. Merged through `identity.ingest` (source `butler`), so a router already known is not duplicated; butler's role is kept, so a `role='node'` device is still never polled |
@@ -217,16 +233,16 @@ topo/
     config.py          — env-var config
     db.py              — get_db / connect / init_db / sqlite_now / iso / sqlite_ts_arg / like_arg
     identity.py        — device identity ladder, ingest/observe/merge
-    poller.py          — background SSH polling scheduler
+    poller.py          — background polling scheduler (SSH or XML API)
     topology.py        — the graph, ghost nodes, interface-IP peer resolution
     events.py          — emit() change events, is_baseline() first-poll guard
-    platforms.py       — per-platform commands/parsers (IOS only)
+    platforms.py       — per-platform transport/commands/parsers (IOS over SSH, PAN-OS over the XML API)
     reach.py           — ICMP reachability thread
     discovery.py       — scheduled discovery thread (off by default)
     lldp_crawl.py      — adopt unknown LLDP neighbors as inventory-only devices
     metrics.py         — /metrics Prometheus text
-    collectors/        — ssh.py, sweep.py, confetti.py, butler.py, seedfile.py
-    parsers/           — ios.py, regex only
+    collectors/        — ssh.py, panos.py (XML API), sweep.py, confetti.py, butler.py, seedfile.py
+    parsers/           — ios.py (regex only), panos.py (XML)
   templates/           — base.html (head, header/nav, theme + layout pickers, footer, Retro taskbar)
                          + dashboard, devices, device, changes (Recent changes: events table, banded per device, details pane, right-click menu), topology, conflicts, settings, each `{% extends "base.html" %}`
   static/theme.css     — the ONE place colours live (Dark, Light, Monokai, High Contrast,
@@ -247,7 +263,8 @@ container/ — Dockerfile + compose
 dev/regress.py — the regression gate (see below); dev/samples/ = parser fixtures
 docs/ — TOPOLOGY-MAPPING.md, HANDOFF.md, ROADMAP.md, img/
 .claude/ — agents: dashboard-ui-checker, lab-validator, leak-scanner, readme-image-capturer;
-           skills: 3 reference skills (cisco-ios-patterns, netmiko-ssh-automation, network-bgp-diagnostics) and 6
+           skills: 4 reference skills (cisco-ios-patterns, netmiko-ssh-automation, network-bgp-diagnostics,
+           panos-xml-api) and 6
            confetti-topo-* (api, dev-run, add-platform, lab-validation, release, ui). regression-gate,
            docs-drift-checker, confetti-interop-checker and the alpine-appliance and constraint-regression
            skills are user-level (~/.claude), not in this repo
@@ -259,7 +276,7 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
 ## Design Decisions
 - **Mirror the sibling stack exactly**: Flask + SQLite (WAL) + waitress, vanilla JS with no build step, Alpine
   golden image, OpenRC.
-- **Read-only SSH.** No Netmiko config-push path.
+- **Read-only device access.** No Netmiko config-push path, no XML API config or commit.
 - **Credentials**: per field, a device's own `credentials` row, then the Settings page (`settings` table), then
   the env defaults (`TOPO_SSH_*`); an empty value falls through (`ssh.resolve_credentials`, R28). The Settings
   page also applies or removes per-device credentials on several devices at once. Plaintext in v1 —
@@ -327,6 +344,15 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
 14. **A failed task deletes nothing.** Only a successful answer — including an empty "LLDP is not enabled" —
     may remove rows. A timeout or a failed login must leave the topology as it was, and the per-device lock
     must be released either way.
+15. **PAN-OS is read-only and keeps its secrets out of URLs.** The XML API collector sends only `keygen` and
+    `op` requests, and the `op` command must start with `<show>`; the password travels in the POST body, the API key
+    in the `X-PAN-KEY` header, never in a URL, a stored output or an error text. A failed login fails every task
+    and deletes nothing (constraint 14). Checked by R30 (R15 was already taken by a cross-file check).
+16. **LLDP chassis/name matching is optional, unique-owner only, query-time only.** Both switches
+    (`lldp_match_chassis`, `lldp_match_name`) default to off, so constraints 3 and 13 hold unless an operator turns
+    one on. A match applies only when exactly one device has the MAC or name, never to the reporting device itself,
+    never over the poller's stored match or an interface-IP match, and is **never stored as an alias**
+    (`devices.mgmt_mac` is not an identity; constraints 1 and 12). Checked by R31.
 
 ## Regression gate
 
@@ -337,7 +363,8 @@ platform registry and read-only commands); `R20` starts the real server from a t
 HTTP; `R21`..`R26` cover the ICMP state machine, `/metrics` format, LLDP crawl, scheduled discovery, the
 container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R27` checks the OpenSSH
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
-that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse). Output is one line per check
+that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
+the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

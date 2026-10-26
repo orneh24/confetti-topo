@@ -27,6 +27,8 @@ Ideas only. Nothing here is built until the user picks it.
 - **More vendor marks** (Fortinet, Arista, Aruba, ...): add to `VENDOR_MARKS` and `VENDOR_NAMES` in topology.html.
 
 ## Platforms
+- **PAN-OS** (XML API) is done and polled on a real PA-VM (11.1); to do: other versions, Panorama, more than the
+  default virtual router, and LLDP rows that tell two neighbors with the same port name apart.
 - **Junos**, then others. Follow the `confetti-topo-add-platform` skill: real output first.
 - **SNMP LLDP-MIB** for devices without SSH.
 

@@ -3,8 +3,9 @@
 > **AI disclaimer:** This project was created using [Claude Code](https://claude.com/claude-code).
 
 A small server that draws the network from what its routers say about themselves. It logs in to each
-router over SSH (read-only `show` commands), reads LLDP neighbors, BGP sessions and OSPF adjacencies, and
-shows them as one topology graph. confetti-topo never writes to a device.
+router over SSH (read-only `show` commands), or a Palo Alto firewall over the XML API (read-only `<show>`
+operations), reads LLDP neighbors, BGP sessions and OSPF adjacencies, and shows them as one topology graph.
+confetti-topo never writes to a device.
 
 It started as the topology part of [confetti-butler](https://github.com/orneh24/confetti-butler) and is its
 own project now, with its own device list, poller and database. The look follows the hub UI of the sibling
@@ -21,20 +22,23 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
   A cable or session that both routers report is drawn once. A neighbor that is not a known device shows
   as a dashed "ghost" node, so nothing is silently dropped. A BGP/OSPF session that is not Established /
   FULL is red and dashed. A BGP session inside one AS (iBGP) is a thin yellow line and one between two ASes (eBGP)
-  a thick orange line, and an "AS areas" toggle draws a box around the routers of each AS. Unknown nodes that hang off one router are grouped into a single "N unknown"
+  a thick purple line, and an "AS areas" toggle draws a box around the routers of each AS. Unknown nodes that hang off one router are grouped into a single "N unknown"
   node (double-click to open it). The layout stands still and is saved on the server, so everyone sees the
   same map (right-click the background and choose Re-arrange to start over). An LLDP link shows its ports
   on hover or when selected.
 - **Peers find their router.** A BGP or OSPF peer is usually a loopback or link address, not the router's
   management IP. confetti-topo also reads each router's interface addresses, so a peer resolves to its
-  router when exactly one router owns that address. Peers outside your lab stay ghosts.
+  router when exactly one router owns that address. Peers outside your lab stay ghosts. Two optional switches on
+  the Settings page (off by default) also match an LLDP neighbor's chassis ID to a device's management MAC
+  (PAN-OS reports it) or its system name to a hostname, for neighbors that advertise no known management IP.
 - **Devices.** Add routers by hand, by a subnet sweep (SSH port scan), from a YAML seed file, or import the
   test nodes from confetti-traffic or the device list from confetti-butler. The same router seen by two sources lands on one device. When the
   identifiers disagree (the same IP now answers with a different serial), it raises a conflict instead of
   guessing.
 - **Polling.** Every few minutes it logs in once per router and reads version, interfaces, LLDP, BGP and
   OSPF. Anything a router stops reporting drops out. A failed poll (timeout, bad login) removes nothing.
-  Platforms: Cisco IOS / IOS-XE.
+  Platforms: Cisco IOS / IOS-XE (SSH) and Palo Alto PAN-OS (XML API, set the device's platform to
+  `paloalto_panos`; the same username and password as for SSH).
 - **Crawl.** LLDP neighbors that advertise an unknown management IP are listed on the Devices page and can be
   added as inventory-only devices (polling stays off until you set a login and enable them).
 - **Reachability.** Every device is pinged every 30 seconds; a router that stops answering is outlined red
@@ -53,7 +57,8 @@ rows, F6 between panels, F1 for the list.
 
 Built for Cisco IOS / IOS-XE. The parsers come from confetti-butler, where they were checked against CSR1000v
 routers on IOS-XE 17.3 and 15.4; confetti-topo itself has not been run on real routers yet (see
-[`docs/HANDOFF.md`](docs/HANDOFF.md)).
+[`docs/HANDOFF.md`](docs/HANDOFF.md)). The PAN-OS support was written from real output of a PA-VM on PAN-OS 11.1 and
+polled once against it; other PAN-OS versions, Panorama and several virtual routers are untested.
 
 ## Running locally
 

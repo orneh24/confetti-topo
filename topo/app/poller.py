@@ -17,6 +17,8 @@ from . import config
 from . import db
 from . import events
 from . import identity
+from . import platforms
+from .collectors import panos as panos_collector
 from .collectors import ssh as ssh_collector
 
 _thread = None
@@ -126,10 +128,13 @@ def _poll_device(device_id):
         if device is None:
             return None
         creds = ssh_collector.resolve_credentials(conn, device_id)
+        # The platform says how to ask the device; what comes back is applied the same way for all.
+        transport = platforms.get(device["platform"])["transport"]
+        collector = panos_collector if transport == "xml_api" else ssh_collector
 
         results = {}
         started = db.sqlite_now()
-        for task, ok, output, error, parsed in ssh_collector.run_tasks(dict(device), creds):
+        for task, ok, output, error, parsed in collector.run_tasks(dict(device), creds):
             if ok:
                 try:
                     ssh_collector.apply_result(conn, device_id, task, parsed)
@@ -148,8 +153,8 @@ def _poll_device(device_id):
             conn.execute(
                 """INSERT INTO poll_history
                        (device_id, transport, task, ok, error, output, started_at, received_at)
-                   VALUES (?, 'ssh', ?, ?, ?, ?, ?, ?)""",
-                (device_id, task, 1 if ok else 0, error, (output or "")[:20000], started, received),
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (device_id, transport, task, 1 if ok else 0, error, (output or "")[:20000], started, received),
             )
             conn.commit()
             results[task] = {"ok": ok, "error": error}

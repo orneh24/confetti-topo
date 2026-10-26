@@ -511,6 +511,38 @@ def api_put_default_credentials():
     return jsonify({"status": "ok"})
 
 
+LLDP_MATCH_KEYS = {"chassis": "lldp_match_chassis", "name": "lldp_match_name"}
+
+
+@app.route("/api/settings/lldp-matching", methods=["GET"])
+def api_get_lldp_matching():
+    """The two optional LLDP neighbor matches (chassis ID = management MAC, system name = hostname)."""
+    return jsonify(topology.lldp_matching(db.get_db()))
+
+
+@app.route("/api/settings/lldp-matching", methods=["PUT"])
+def api_put_lldp_matching():
+    """Partial update: body {"chassis": bool, "name": bool}; only the fields given change."""
+    data = request.get_json(force=True, silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Body must be a JSON object"}), 400
+    fields = [k for k in LLDP_MATCH_KEYS if k in data]
+    if not fields:
+        return jsonify({"error": "no fields in body", "fields": list(LLDP_MATCH_KEYS)}), 400
+    if any(not isinstance(data[k], bool) for k in fields):
+        return jsonify({"error": "values must be true or false"}), 400
+    conn = db.get_db()
+    now = db.sqlite_now()
+    for k in fields:
+        conn.execute(
+            "INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
+            (LLDP_MATCH_KEYS[k], "1" if data[k] else "0", now),
+        )
+    conn.commit()
+    return jsonify(topology.lldp_matching(conn))
+
+
 @app.route("/api/credentials", methods=["GET"])
 def api_list_device_credentials():
     """Which devices have their own credentials row. No secrets."""

@@ -26,4 +26,6 @@ reason.
    task-count wording in CLAUDE.md if it changes (R15).
 7. **Docs.** CLAUDE.md "The poller", README, ROADMAP status, `docs/TOPOLOGY-MAPPING.md` section 2 and 12,
    the `confetti-topo-api` skill if routes change.
+   A platform that is not SSH (like `paloalto_panos`, `transport: "xml_api"`) also needs its own collector with the
+   same `run_tasks` shape and a branch in `poller._poll_device`; follow the `panos-xml-api` skill and R30 as the example.
 8. **Validate on the device** with the `lab-validator` agent. Do not mark the platform verified before that.

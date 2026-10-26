@@ -8,12 +8,14 @@ here plus its parsers (Junos is planned, see docs/ROADMAP.md).
 
 Status of each platform:
   cisco_ios / cisco_xe  verified against real IOS-XE 17.3 and 15.4 hardware
+  paloalto_panos        XML API (transport "xml_api"); fixtures captured from a real PA-VM, PAN-OS 11.1
 
 An unknown platform string falls back to the IOS entry (netmiko is still given
 the platform string as its device_type).
 """
 
 from .parsers import ios
+from .parsers import panos
 
 IOS = {
     "transport": "ssh",
@@ -36,9 +38,31 @@ IOS = {
     "lldp_brief_command": "show lldp neighbors",
 }
 
+# Palo Alto PAN-OS over the XML API (collectors/panos.py): the commands are XML operations, read-only
+# `<show>` ones only. BGP needs two: the peer list, and the summary that holds the router's own AS.
+PANOS = {
+    "transport": "xml_api",
+    "commands": {
+        "version": "<show><system><info/></system></show>",
+        "interfaces": "<show><interface>all</interface></show>",
+        "lldp": "<show><lldp><neighbors>all</neighbors></lldp></show>",
+        "bgp": "<show><routing><protocol><bgp><peer/></bgp></protocol></routing></show>",
+        "ospf": "<show><routing><protocol><ospf><neighbor/></ospf></protocol></routing></show>",
+    },
+    "parsers": {
+        "version": panos.parse_version,
+        "interfaces": panos.parse_interfaces,
+        "lldp": panos.parse_lldp_neighbors,
+        "bgp": panos.parse_bgp_peers,
+        "ospf": panos.parse_ospf_neighbors,
+    },
+    "bgp_summary_command": "<show><routing><protocol><bgp><summary/></bgp></protocol></routing></show>",
+}
+
 PLATFORMS = {
     "cisco_ios": IOS,
     "cisco_xe": IOS,
+    "paloalto_panos": PANOS,
 }
 
 

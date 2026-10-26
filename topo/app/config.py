@@ -59,6 +59,16 @@ DEFAULT_SSH_USERNAME = os.environ.get("TOPO_SSH_USERNAME", "admin")
 DEFAULT_SSH_PASSWORD = os.environ.get("TOPO_SSH_PASSWORD", "")
 DEFAULT_SSH_SECRET = os.environ.get("TOPO_SSH_SECRET", "")
 
+# PAN-OS XML API (collectors/panos.py). A firewall ships with a self-signed management certificate, so
+# the certificate is not checked unless asked: the same isolated-lab posture as the other defaults.
+PANOS_VERIFY_TLS = os.environ.get("TOPO_PANOS_VERIFY_TLS", "false").lower() in ("1", "true", "yes")
+PANOS_TIMEOUT_S = int(os.environ.get("TOPO_PANOS_TIMEOUT_S", "20"))
+
+# Extra ways to tell who an LLDP neighbor is when it advertises no known management IP. Off by default; the
+# Settings page overrides these at run time (settings keys lldp_match_chassis / lldp_match_name).
+LLDP_MATCH_CHASSIS = os.environ.get("TOPO_LLDP_MATCH_CHASSIS", "false").lower() in ("1", "true", "yes")
+LLDP_MATCH_NAME = os.environ.get("TOPO_LLDP_MATCH_NAME", "false").lower() in ("1", "true", "yes")
+
 # ---------------------------------------------------------------------------
 # Self-health (/api/health)
 # ---------------------------------------------------------------------------
