@@ -154,11 +154,16 @@ def resolve_lldp(ctx, device_id, stored_id, ip, chassis, sysname):
     return None, None
 
 
+def port_text(port, descr):
+    """The port name to show: a port id that is only a MAC address (Linux lldpd) is shown as the port description."""
+    return descr if norm_mac(port) and descr else port
+
+
 def _lldp_report(r, names, how=None):
     """What one end of a cable says about it, for the link details."""
     return {"reported_by": names.get(r["device_id"]), "local_port": r["local_if"], "remote_port": r["remote_port"],
             "remote_name": r["remote_sysname"], "remote_chassis": r["remote_chassis"], "remote_mgmt_ip": r["remote_mgmt_ip"],
-            "remote_descr": r["remote_descr"], "matched_by": how}
+            "remote_descr": r["remote_descr"], "remote_port_descr": r["remote_port_descr"], "matched_by": how}
 
 
 def _session_report(r, names):
@@ -213,7 +218,7 @@ def build(conn, layer=None):
     if "lldp" in wanted:
         rows = conn.execute(
             """SELECT device_id, local_if, remote_chassis, remote_sysname, remote_port,
-                      remote_mgmt_ip, remote_device_id, remote_descr
+                      remote_mgmt_ip, remote_device_id, remote_descr, remote_port_descr
                FROM lldp_neighbors"""
         ).fetchall()
         # Two known devices each report the other, so the same cable shows up
@@ -236,7 +241,7 @@ def build(conn, layer=None):
                                   lldp_says_linux(r["remote_descr"])))
             edge = {
                 "from": "dev:{}".format(r["device_id"]), "to": target, "layer": "lldp",
-                "label": "{} - {}".format(r["local_if"], r["remote_port"] or "?"),
+                "label": "{} - {}".format(r["local_if"], port_text(r["remote_port"], r["remote_port_descr"]) or "?"),
                 "details": [_lldp_report(r, names, how)],
             }
             edges.append(edge)
@@ -373,7 +378,7 @@ def lldp_neighbors(conn, device_id=None):
     """LLDP rows for the API, with the effective remote_device_id."""
     ctx = lldp_context(conn)
     sql = """SELECT l.device_id, d.hostname, l.local_if, l.remote_chassis, l.remote_sysname,
-                    l.remote_port, l.remote_mgmt_ip, l.remote_device_id, l.remote_descr, l.last_seen
+                    l.remote_port, l.remote_mgmt_ip, l.remote_device_id, l.remote_descr, l.remote_port_descr, l.last_seen
              FROM lldp_neighbors l JOIN devices d ON d.id = l.device_id"""
     params = []
     if device_id:

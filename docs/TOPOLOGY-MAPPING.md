@@ -22,7 +22,7 @@ Flow: `poll -> parse -> two tables -> /api/topology -> vis.js`.
 
 | Layer | IOS / IOS-XE command | What it tells you |
 |---|---|---|
-| LLDP | `show lldp neighbors detail` | local port, neighbor chassis id, system name, port id, advertised management IP |
+| LLDP | `show lldp neighbors detail` | local port, neighbor chassis id, system name, port id, port description, advertised management IP |
 | LLDP (old IOS only) | `show lldp neighbors` | the table that maps a neighbor to a local port (see 6.3) |
 | BGP | `show bgp summary` | neighbor IP, remote AS, state, prefixes received, uptime |
 | OSPF | `show ip ospf neighbor` | neighbor address, state, local interface |
@@ -37,7 +37,7 @@ after one `keygen` per poll (details and quirks in the `panos-xml-api` skill). C
 |---|---|---|
 | Version | `<show><system><info/></system></show>` | hostname, model, serial, software version |
 | Interfaces | `<show><interface>all</interface></show>` | `ifnet`: addresses and zone; `hw`: link state, speed, duplex |
-| LLDP | `<show><lldp><neighbors>all</neighbors></lldp></show>` | per local port: chassis id, port id, system name, management address |
+| LLDP | `<show><lldp><neighbors>all</neighbors></lldp></show>` | per local port: chassis id, port id, port description, system name, management address |
 | BGP | `<show><routing><protocol><bgp><peer/></bgp></protocol></routing></show>` and `...<bgp><summary/>...` | peers, remote AS, state, prefixes, uptime; the summary adds the router's own AS |
 | OSPF | `<show><routing><protocol><ospf><neighbor/></ospf></protocol></routing></show>` | neighbor address, state, area |
 
@@ -48,6 +48,7 @@ lldp_neighbors (
   id, device_id -> devices ON DELETE CASCADE,
   local_if, remote_chassis, remote_sysname, remote_port, remote_mgmt_ip,
   remote_descr,              -- the LLDP system description (up to 200 characters)
+  remote_port_descr,         -- the neighbor's port description; shown instead of a port id that is only a MAC
   remote_device_id,          -- NULL = neighbor not matched to a known device
   last_seen,
   UNIQUE(device_id, local_if, remote_port))
@@ -176,7 +177,7 @@ Found the hard way on IOS-XE 17.3:
 ### 6.2 LLDP detail output quirks
 
 Blocks are separated by a line of 10+ dashes. Use one small regex per field
-(`^Chassis id:`, `^Port id:`, `^System Name:`, `^Local Intf:`, `IP:\s*a.b.c.d`) instead of one big
+(`^Chassis id:`, `^Port id:`, `^Port Description:`, `^System Name:`, `^Local Intf:`, `IP:\s*a.b.c.d`) instead of one big
 pattern; a missing field then gives `None` and the rest still parses. A neighbor with no system
 name is normal: fall back to chassis id for the label.
 
@@ -227,7 +228,10 @@ against them.
   dashed "down" style. An iBGP session is a thin yellow line, an eBGP session a thick purple one (`--purple` in
   theme.css; the CRT layouts have one hue, so there eBGP differs by width only). An **AS areas** toggle
   (`confetti-topo-as-areas`, a look setting) draws a dashed box labelled `AS <n>` behind the nodes of each AS, on vis's
-  `beforeDrawing`; it shows only while BGP is shown. LLDP / BGP / OSPF toggle buttons (independent, remembered in `confetti-topo-layers`, a FILTERED marker while any is off) pass `?layer=` as a comma list. An independent **Unknown nodes** toggle
+  `beforeDrawing`; it shows only while BGP is shown. A box is sized from the node places and a fixed size (not
+  `getBoundingBox`, which grows with the selection outline), and its title sits on the top edge. The legend starts closed
+  (`confetti-topo-legend-open`). An LLDP port id that is only a MAC address (Linux lldpd) is labelled with the port
+  description when there is one (`topology.port_text`); the cable key still uses the port id. LLDP / BGP / OSPF toggle buttons (independent, remembered in `confetti-topo-layers`, a FILTERED marker while any is off) pass `?layer=` as a comma list. An independent **Unknown nodes** toggle
   (remembered in `confetti-topo-hide-unknown`) hides ghost nodes and their edges in the browser only; it is not
   sent as `?layer=`, and the FILTERED marker shows while it is off too.
   Each known device is drawn as an icon above its name by type (`topology.device_type`: router, switch, firewall,

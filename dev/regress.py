@@ -445,6 +445,16 @@ def _():
     lldp = [e for e in g["edges"] if e["layer"] == "lldp"]
     need(len([e for e in lldp if e["label"] == "Gi1 - Gi2" or e["label"] == "Gi2 - Gi1"]) == 1, "the Gi1/Gi2 cable is not drawn exactly once", p)
     need(len([e for e in lldp if "4" in e["label"] and "Gi5" not in e["label"]]) == 2, "differently spelled ports must keep both edges (a duplicate line beats a hidden link)", p)
+    # A port id that is only a MAC (Linux lldpd) is labelled with the port description; the cable key keeps the id.
+    _put_lldp(conn, a, "Gi8", "host9", "0200.0000.0008")
+    conn.execute("UPDATE lldp_neighbors SET remote_port_descr = 'eth0' WHERE remote_port = '0200.0000.0008'")
+    conn.commit()
+    need("Gi8 - eth0" in [e["label"] for e in topology.build(conn)["edges"]], "a MAC port id must be shown as the port description", p)
+    need(topology.port_text("Gi1", "Management") == "Gi1" and topology.port_text("0200.0000.0008", None) == "0200.0000.0008",
+         "a real port name stays, and a MAC with no description stays", p)
+    conn.execute("DELETE FROM lldp_neighbors WHERE local_if = 'Gi8'")
+    conn.commit()
+    g = topology.build(conn)
     ghosts = {n["id"]: n for n in g["nodes"] if n["ghost"]}
     need("ghost:lldp:sw9" in ghosts and "ghost:lldp:aabb.ccdd.eeff" in ghosts, "unresolved neighbors are not ghost nodes: %r" % sorted(ghosts), p)
     need(len([e for e in lldp if e["to"] == "ghost:lldp:sw9"]) == 2, "links to a ghost must not be de-duplicated", p)
@@ -971,6 +981,8 @@ def _():
     need(len(ll) == 9 and len(sw) == 1 and sw[0]["local_if"] == "ethernet1/1" and sw[0]["remote_mgmt_ip"] == "198.51.100.2",
          "lldp: the remote port is the neighbor's port id, not its port description (%d rows): %r" % (len(ll), sw), p)
     need(any(r["remote_sysname"] is None and r["remote_mgmt_ip"] is None for r in ll), "a neighbor with no name or address must still parse", p)
+    need(any(r["remote_port"] == "02:00:00:00:00:08" and r["remote_port_descr"] == "eth0" for r in ll) and sw[0]["remote_port_descr"] is not None,
+         "lldp: the port description must be kept as remote_port_descr, beside the port id", p)
     peers = pp.fill_bgp_local_as(pp.parse_bgp_peers(sample("panos_bgp.xml")), pp.parse_bgp_local_as(sample("panos_bgp_summary.xml")))
     by_ip = {r["peer_ip"]: r for r in peers}
     est = by_ip.get("198.51.100.167", {})

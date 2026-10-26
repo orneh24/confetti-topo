@@ -119,8 +119,9 @@ def _interface_row(name, ifnet, hw):
 #
 # <entry name="ethernet1/1"><neighbors><entry>...: one outer entry per local port, one inner per neighbor.
 # The remote port is the neighbor's port id, as in the IOS parser ("Port id:"). It is what the neighbor's own
-# row calls that port ("Gi0/7"), so a cable both ends report is drawn once. The port description is not used: it
-# is free text an admin sets ("uplink to esx"), and falls back to the port id only when that is missing.
+# row calls that port ("Gi0/7"), so a cable both ends report is drawn once. The port description is not used for that: it
+# is free text an admin sets ("uplink to esx"). It is kept as remote_port_descr for the map to show when the port id is
+# only a MAC address; it is the port id's fallback only when that is missing.
 # ---------------------------------------------------------------------------
 
 def parse_lldp_neighbors(text):
@@ -147,6 +148,7 @@ def parse_lldp_neighbors(text):
                 "remote_sysname": _text(n, "system-name"),
                 "remote_mgmt_ip": mgmt_ip,
                 "remote_descr": descr.splitlines()[0].strip()[:200] if descr else None,
+                "remote_port_descr": (_text(n, "port-description") or "")[:100] or None,
             })
     return out
 

@@ -158,6 +158,7 @@ def init_db():
             remote_mgmt_ip   TEXT,
             remote_device_id INTEGER,
             remote_descr     TEXT,
+            remote_port_descr TEXT,
             last_seen        TEXT NOT NULL,
             UNIQUE(device_id, local_if, remote_port)
         );
@@ -224,6 +225,8 @@ def init_db():
     # CREATE TABLE IF NOT EXISTS never adds a column to a table that exists already.
     if "remote_descr" not in [r[1] for r in db.execute("PRAGMA table_info(lldp_neighbors)")]:
         db.execute("ALTER TABLE lldp_neighbors ADD COLUMN remote_descr TEXT")
+    if "remote_port_descr" not in [r[1] for r in db.execute("PRAGMA table_info(lldp_neighbors)")]:
+        db.execute("ALTER TABLE lldp_neighbors ADD COLUMN remote_port_descr TEXT")
     if "local_as" not in [r[1] for r in db.execute("PRAGMA table_info(adjacencies)")]:
         db.execute("ALTER TABLE adjacencies ADD COLUMN local_as INTEGER")
     if "mgmt_mac" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:

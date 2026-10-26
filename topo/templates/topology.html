@@ -25,7 +25,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
 /* Top-left: the node or link card with the FILTERED marker on its right. On a narrow map the marker wraps under the card. */
 .left-stack { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 6; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 8px; pointer-events: none; }
 .left-stack > * { pointer-events: auto; }
-.node-panel { position: relative; flex: none; width: 270px; overflow-y: auto;
+.node-panel { position: relative; flex: none; width: 300px; overflow-y: auto;
     display: none; font-size: 12px; color: var(--text); background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; }
 /* A name in the card that selects that device: plain link look in every layout. */
 :root .node-panel .kv-row button.linklike { display: inline; background: none; border: 0; box-shadow: none; transform: none; border-radius: 0;
@@ -36,7 +36,9 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
 .node-panel .sub { color: var(--text-dim); margin-bottom: 6px; }
 .node-panel .kv-row { display: flex; gap: 8px; padding: 1px 0; }
 .node-panel .kv-row .k { flex: 0 0 76px; color: var(--text-dim); }
-.node-panel .kv-row .v { word-break: break-all; }
+.node-panel .kv-row .v { overflow-wrap: anywhere; }
+.node-panel .kv-row .v .port { color: var(--text-dim); }
+.node-panel .kv-row .v .port.cable { display: inline-block; white-space: nowrap; }
 .node-panel h4 { margin: 8px 0 3px; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
 .node-panel .hide-row + .hide-row { margin-top: 4px; padding-top: 0; border-top: 0; }
 .legend-box .icons { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 3px 0; }
@@ -86,13 +88,13 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     </div>
     </div>
     <div class="toast" id="toast" role="status"></div>
-    <details class="legend-box" open>
+    <details class="legend-box" id="legend-box">
         <summary>Legend</summary>
         <h4>Devices</h4>
         <div class="icons" id="legend-icons"></div>
-        <div class="row"><span class="sw" style="background:var(--blue)"></span>router (polled over SSH)</div>
+        <div class="row"><span class="sw" style="background:var(--blue)"></span>router, switch or firewall polled over SSH or the PAN-OS API</div>
         <div class="row"><span class="sw" style="background:var(--text-dim)"></span>Confetti Traffic node (never polled)</div>
-        <div class="row"><span class="sw" style="background:var(--green)"></span>other device role</div>
+        <div class="row"><span class="sw" style="background:var(--green)"></span>device with another role (host, ...)</div>
         <div class="row"><span class="sw" style="background:var(--blue);outline:2px solid var(--red)"></span>red outline: device not answering ping</div>
         <div class="row"><span class="sw ghost"></span>unresolved neighbor or peer: seen, but not matched to a known device</div>
         <h4>Links</h4>
@@ -580,18 +582,21 @@ function drawAsAreas(ctx) {
     var boxes = {};   // AS number -> bounding box of its nodes
     Object.keys(nodeAs).forEach(function (id) {
         if (!nodeSet.get(id)) { return; }
-        var b = network.getBoundingBox(id);
+        // From the node's place and a fixed size, not getBoundingBox: that one grows with the selection outline and the
+        // box would jump when a node is clicked. Room for the icon, the name under it and the vendor mark beside it.
+        var pos = network.getPositions([id])[id];
+        var b = { left: pos.x - 55, right: pos.x + 55, top: pos.y - 32, bottom: pos.y + 50 };
         var a = boxes[nodeAs[id]];
         boxes[nodeAs[id]] = a ? { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top),
                                   right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) } : b;
     });
-    var pad = 34;
+    var pad = 10;
     ctx.save();
     // Biggest first: a smaller box that overlaps a bigger one is drawn on top of it, so its label stays readable.
     var area = function (b) { return (b.right - b.left) * (b.bottom - b.top); };
     Object.keys(boxes).sort(function (x, y) { return area(boxes[y]) - area(boxes[x]); }).forEach(function (asn) {
         var b = boxes[asn];
-        var x = b.left - pad, y = b.top - pad - 12, w = b.right - b.left + 2 * pad, h = b.bottom - b.top + 2 * pad + 12;
+        var x = b.left - pad, y = b.top - pad, w = b.right - b.left + 2 * pad, h = b.bottom - b.top + 2 * pad;
         ctx.beginPath();
         ctx.roundRect(x, y, w, h, 14);
         ctx.globalAlpha = 0.55;
@@ -606,10 +611,11 @@ function drawAsAreas(ctx) {
         ctx.font = 'bold 14px monospace';
         ctx.textBaseline = 'top';
         var text = 'AS ' + asn;
-        ctx.fillStyle = themeColor('--bg');   // a chip behind the label, so another box's border does not cross it
-        ctx.fillRect(x + 6, y + 5, ctx.measureText(text).width + 8, 20);
+        // The title sits on the top edge, outside the box, so it never lies over a node or an edge label inside.
+        ctx.fillStyle = themeColor('--bg');
+        ctx.fillRect(x + 6, y - 11, ctx.measureText(text).width + 8, 20);
         ctx.fillStyle = themeColor('--text-dim');
-        ctx.fillText(text, x + 10, y + 8);
+        ctx.fillText(text, x + 10, y - 8);
     });
     ctx.restore();
 }
@@ -695,8 +701,9 @@ function ago(iso) {
     return Math.floor(s / 86400) + 'd ago';
 }
 
-function fillDeviceInfo(info, d) {
+function fillDeviceInfo(info, d, type) {
     addRow(info, 'role', d.role);
+    if (type && type !== d.role) { addRow(info, 'drawn as', type + ' (read from the platform, model or name)'); }
     addRow(info, 'mgmt ip', d.mgmt_ip || '-');
     addRow(info, 'platform', [d.vendor, d.platform, d.model].filter(Boolean).join(' / ') || '-');
     addRow(info, 'os', d.os_version || '-');
@@ -706,6 +713,14 @@ function fillDeviceInfo(info, d) {
         addRow(info, 'last poll', d.fail_count > 0 ? 'failing (' + d.fail_count + ' in a row)'
             : (d.last_poll_ok ? 'ok, ' + ago(d.last_poll_ok) : 'not polled yet'));
     }
+}
+
+// "Gi0/7 - Gi1" kept on one line: it moves under the name when there is no room beside it.
+function portSpan(e) {
+    var sp = document.createElement('span');
+    sp.className = e.layer === 'lldp' ? 'port cable' : 'port';
+    sp.textContent = '(' + e.label + ')';
+    return sp;
 }
 
 function goToNode(id) {
@@ -735,7 +750,7 @@ function showNodePanel(id) {
         fetch('/api/devices/' + node.device_id).then(function (r) { return r.json(); }).then(function (d) {
             if (selectedNode === id && !d.error) {
                 info.textContent = '';
-                fillDeviceInfo(info, d);
+                fillDeviceInfo(info, d, node.device_type);
                 if (node.asn) { addRow(info, 'BGP AS', node.asn); }
             }
         });
@@ -756,9 +771,11 @@ function showNodePanel(id) {
             go.title = 'Select ' + label[other];
             go.onclick = function () { goToNode(other); };
             cell.appendChild(go);
-            cell.appendChild(document.createTextNode('  (' + e.label + ')'));
+            cell.appendChild(document.createTextNode(' '));
+            cell.appendChild(portSpan(e));
         } else {
-            cell.textContent = (label[other] || '?') + '  (' + e.label + ')';
+            cell.textContent = (label[other] || '?') + ' ';
+            cell.appendChild(portSpan(e));
         }
     });
     if (!mine.length) { addRow(links, '', 'none shown'); }
@@ -803,7 +820,13 @@ function hideNode(hide) {
     load();
 }
 
-document.querySelector('.legend-box').addEventListener('toggle', fitNodePanel);
+// The legend starts closed (it covers part of the map); open or closed is remembered in this browser.
+var LEGEND_KEY = 'confetti-topo-legend-open';
+try { document.getElementById('legend-box').open = localStorage.getItem(LEGEND_KEY) === '1'; } catch (e) { /* closed */ }
+document.querySelector('.legend-box').addEventListener('toggle', function () {
+    try { localStorage.setItem(LEGEND_KEY, this.open ? '1' : '0'); } catch (e) { /* not remembered */ }
+    fitNodePanel();
+});
 window.addEventListener('resize', fitNodePanel);
 document.addEventListener('themechange', fitNodePanel);   // the layout picker fires this too: the legend changes height
 fitNodePanel();

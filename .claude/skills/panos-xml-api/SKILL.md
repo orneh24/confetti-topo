@@ -49,7 +49,8 @@ still returns the peers, with `local_as` empty. `<virtual-router>name</virtual-r
   Prefixes received are `prefix-counter/entry/incoming-total`.
 - OSPF `status` is lower case (`full`); the parser upper-cases it so it reads like IOS (`FULL`).
 - LLDP: the remote port is `port-id` (what the neighbor's own row calls it, e.g. `Gi0/7`). `port-description` is free
-  text (`uplink to esx`) and is not used. A Linux host's `port-id` is its MAC.
+  text (`uplink to esx`); it is not the remote port, but is kept as `remote_port_descr` and shown by the map when the
+  `port-id` is only a MAC (a Linux host's `port-id` is its MAC).
   `management-address` lists IPv4 and IPv6; the first IPv4 is used. `system-description` can be several lines: the first is kept.
 - Interfaces: `hw` has link state only for physical ports. A sub-interface, loopback or tunnel has an address in `ifnet`
   but no state, so `oper_status` is left empty rather than guessed. `admin_status` is not reported. The zone is kept as the description.
