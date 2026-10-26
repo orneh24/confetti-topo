@@ -20,7 +20,8 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
   Devices are drawn as icons by type (router, switch, firewall, Linux server) with a Cisco, Palo Alto, Juniper or HPE mark; both can be switched off.
   A cable or session that both routers report is drawn once. A neighbor that is not a known device shows
   as a dashed "ghost" node, so nothing is silently dropped. A BGP/OSPF session that is not Established /
-  FULL is red and dashed. Unknown nodes that hang off one router are grouped into a single "N unknown"
+  FULL is red and dashed. A BGP session inside one AS (iBGP) is a thin yellow line and one between two ASes (eBGP)
+  a thick orange line, and an "AS areas" toggle draws a box around the routers of each AS. Unknown nodes that hang off one router are grouped into a single "N unknown"
   node (double-click to open it). The layout stands still and is saved on the server, so everyone sees the
   same map (right-click the background and choose Re-arrange to start over). An LLDP link shows its ports
   on hover or when selected.

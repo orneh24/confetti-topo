@@ -360,7 +360,7 @@ def merge(conn, survivor_id, loser_id):
                        "oper_status, speed, duplex, mtu, last_seen"),
         ("lldp_neighbors", "local_if, remote_chassis, remote_sysname, remote_port, "
                            "remote_mgmt_ip, remote_device_id, remote_descr, last_seen"),
-        ("adjacencies", "proto, peer_ip, peer_device_id, remote_as, area, state, "
+        ("adjacencies", "proto, peer_ip, peer_device_id, remote_as, local_as, area, state, "
                         "uptime, prefixes, local_if, last_seen"),
     ):
         conn.execute(

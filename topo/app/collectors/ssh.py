@@ -289,15 +289,16 @@ def _apply_adjacencies(conn, device_id, proto, parsed, now):
             (row["peer_ip"],),
         ).fetchone()
         conn.execute(
-            """INSERT INTO adjacencies (device_id, proto, peer_ip, peer_device_id, remote_as,
+            """INSERT INTO adjacencies (device_id, proto, peer_ip, peer_device_id, remote_as, local_as,
                    state, uptime, prefixes, local_if, last_seen)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(device_id, proto, peer_ip) DO UPDATE SET
                    peer_device_id=excluded.peer_device_id, remote_as=excluded.remote_as,
+                   local_as=excluded.local_as,
                    state=excluded.state, uptime=excluded.uptime, prefixes=excluded.prefixes,
                    local_if=excluded.local_if, last_seen=excluded.last_seen""",
             (device_id, proto, row["peer_ip"], peer["device_id"] if peer else None,
-             row.get("remote_as"), row["state"], row.get("uptime"), row.get("prefixes"),
+             row.get("remote_as"), row.get("local_as"), row["state"], row.get("uptime"), row.get("prefixes"),
              row.get("local_if"), now),
         )
     # Same as LLDP: a peer no longer listed was removed from the config.

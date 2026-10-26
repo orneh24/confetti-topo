@@ -90,7 +90,7 @@ def _lldp_report(r, names):
 def _session_report(r, names):
     """What one router says about a BGP/OSPF session (remote_as is the peer's AS)."""
     return {"reported_by": names.get(r["device_id"]), "peer_ip": r["peer_ip"], "state": r["state"],
-            "remote_as": r["remote_as"], "uptime": r["uptime"], "prefixes": r["prefixes"],
+            "remote_as": r["remote_as"], "local_as": r["local_as"], "uptime": r["uptime"], "prefixes": r["prefixes"],
             "area": r["area"], "local_if": r["local_if"]}
 
 
@@ -103,6 +103,7 @@ def build(conn, layer=None):
     such as "lldp,bgp". None or "" overlays all three; an unknown name draws none."""
     wanted = {"lldp", "bgp", "ospf"} if not layer else {x.strip() for x in layer.split(",")}
     owners = interface_owners(conn)
+    device_as = bgp_as_numbers(conn, owners)
     nodes = {}
     names = {}
     for d in conn.execute("SELECT id, hostname, role, model, vendor, platform, reachable, mgmt_ip FROM devices"):
@@ -111,6 +112,7 @@ def build(conn, layer=None):
         nodes[nid] = {
             "id": nid, "label": d["hostname"], "group": d["role"],
             "device_id": d["id"], "ghost": False, "reachable": d["reachable"], "mgmt_ip": d["mgmt_ip"],
+            "asn": device_as.get(d["id"]),
             "device_type": device_type(d["role"], d["model"], d["hostname"], d["platform"]),
             "vendor": (d["vendor"] or "").lower(),
         }
@@ -167,7 +169,7 @@ def build(conn, layer=None):
     protos = [p for p in ("bgp", "ospf") if p in wanted]
     if protos:
         rows = conn.execute(
-            "SELECT device_id, proto, peer_ip, peer_device_id, remote_as, state, uptime, prefixes, area, local_if FROM adjacencies "
+            "SELECT device_id, proto, peer_ip, peer_device_id, remote_as, local_as, state, uptime, prefixes, area, local_if FROM adjacencies "
             "WHERE proto IN ({})".format(",".join("?" * len(protos))),
             protos,
         ).fetchall()
@@ -177,10 +179,15 @@ def build(conn, layer=None):
             if remote is None:
                 # One ghost per peer IP across BGP and OSPF — the same router
                 # peering both ways is one box, not two.
+                gid = ghost_id("peer", r["peer_ip"])
+                ends = [r["local_as"] if r["local_as"] is not None else device_as.get(r["device_id"]), r["remote_as"]]
+                kind = _bgp_type(r["proto"], ends)
+                if r["proto"] == "bgp" and r["remote_as"] is not None and nodes[gid].get("asn") is None:
+                    nodes[gid]["asn"] = r["remote_as"]   # the area on the page puts the unknown peer in its AS
                 edges.append({
-                    "from": "dev:{}".format(r["device_id"]), "to": ghost_id("peer", r["peer_ip"]),
-                    "layer": r["proto"], "label": _session_label(r["proto"], [r["remote_as"]], r["state"]),
-                    "up": _is_up(r),
+                    "from": "dev:{}".format(r["device_id"]), "to": gid,
+                    "layer": r["proto"], "label": _session_label(r["proto"], ends, r["state"], kind),
+                    "bgp_type": kind, "up": _is_up(r),
                     "details": [_session_report(r, names)],
                 })
             else:
@@ -199,9 +206,14 @@ def build(conn, layer=None):
             for k in range(max(len(a), len(b))):
                 ends = [x[k] for x in (a, b) if k < len(x)]
                 bad = [x for x in ends if not _is_up(x)]
+                # A router's own AS (device_as) first; what the two rows say about each other fills a gap.
+                said = _as_numbers(ends, lo)
+                as_pair = [device_as.get(lo, said[0]), device_as.get(hi, said[1])]
+                kind = _bgp_type(proto, as_pair)
                 edges.append({
                     "from": "dev:{}".format(lo), "to": "dev:{}".format(hi), "layer": proto,
-                    "label": _session_label(proto, _as_numbers(ends, lo), (bad or ends)[0]["state"]),
+                    "label": _session_label(proto, as_pair, (bad or ends)[0]["state"], kind),
+                    "bgp_type": kind,
                     "up": not bad,
                     "details": [_session_report(x, names) for x in ends],
                 })
@@ -229,19 +241,41 @@ def _as_numbers(ends, lo):
     return [own.get(False), own.get(True)]
 
 
-def _session_label(proto, as_numbers, state):
-    """"bgp AS65001 - AS65002 Established"; one AS when both ends match (iBGP) or only one is known."""
+def bgp_as_numbers(conn, owners):
+    """{device_id: its own AS}. A router's `local AS number` wins; a router that never reported
+    one (not polled since local_as was added) takes the AS another router names for it."""
+    rows = conn.execute("SELECT device_id, peer_ip, peer_device_id, remote_as, local_as FROM adjacencies "
+                        "WHERE proto = 'bgp'").fetchall()
+    out = {r["device_id"]: r["local_as"] for r in rows if r["local_as"] is not None}
+    for r in rows:
+        remote = resolve(owners, r["device_id"], r["peer_device_id"], r["peer_ip"])
+        if remote and r["remote_as"] is not None:
+            out.setdefault(remote, r["remote_as"])
+    return out
+
+
+def _bgp_type(proto, as_numbers):
+    """"ibgp" (same AS at both ends), "ebgp" (different), None when not BGP or an end's AS is unknown."""
+    if proto != "bgp" or None in as_numbers:
+        return None
+    return "ibgp" if as_numbers[0] == as_numbers[1] else "ebgp"
+
+
+def _session_label(proto, as_numbers, state, bgp_type=None):
+    """"eBGP AS65001 - AS65002 Established", "iBGP AS65001 Established". Without a known type:
+    "bgp AS65002 Established" (one AS when only one is known)."""
     known = [n for n in as_numbers if n is not None]
     if proto != "bgp" or not known:
         return "{} {}".format(proto, state)
     asn = "AS{}".format(known[0]) if len(set(known)) == 1 else " - ".join("AS{}".format(n) for n in known)
-    return "{} {} {}".format(proto, asn, state)
+    name = {"ibgp": "iBGP", "ebgp": "eBGP"}.get(bgp_type, proto)
+    return "{} {} {}".format(name, asn, state)
 
 
 def adjacencies(conn, device_id=None):
     """BGP/OSPF rows for the API, with the effective peer_device_id."""
     owners = interface_owners(conn)
-    sql = """SELECT a.device_id, d.hostname, a.proto, a.peer_ip, a.peer_device_id, a.remote_as,
+    sql = """SELECT a.device_id, d.hostname, a.proto, a.peer_ip, a.peer_device_id, a.remote_as, a.local_as,
                     a.area, a.state, a.uptime, a.prefixes, a.local_if, a.last_seen
              FROM adjacencies a JOIN devices d ON d.id = a.device_id"""
     params = []

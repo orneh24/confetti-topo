@@ -59,6 +59,8 @@ LLDP = [
     (2, "GigabitEthernet4", "sw-access-1", "Fa0/24", None, "192.0.2.50"),
 ]
 
+LAB_AS = 65000   # all three routers: the 65000 peers are iBGP, the 64500 / 64501 ones eBGP
+
 # device index, proto, peer_ip, remote_as, area, state, uptime, prefixes, local_if
 # Peers on a loopback or a link address resolve through the interface table
 # (the poller stored no peer_device_id); the 203.0.113.x / 198.51.100.x peers
@@ -121,9 +123,9 @@ def main():
              ids[remote_idx] if remote_idx is not None else None, now))
     for idx, proto, peer, asn, area, state, up, pfx, lif in ADJACENCIES:
         conn.execute(
-            "INSERT INTO adjacencies (device_id, proto, peer_ip, remote_as, area, state, uptime, "
-            "prefixes, local_if, last_seen) VALUES (?,?,?,?,?,?,?,?,?,?)",
-            (ids[idx], proto, peer, asn, area, state, up, pfx, lif, now))
+            "INSERT INTO adjacencies (device_id, proto, peer_ip, remote_as, local_as, area, state, uptime, "
+            "prefixes, local_if, last_seen) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (ids[idx], proto, peer, asn, LAB_AS if proto == "bgp" else None, area, state, up, pfx, lif, now))
 
     for ago, idx, kind, sev, subject, detail in EVENTS:
         conn.execute(

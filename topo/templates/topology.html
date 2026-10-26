@@ -58,6 +58,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <button class="active" id="unknown-btn" aria-pressed="true" onclick="toggleUnknown(this)" title="Neighbors and peers that are not matched to a known device">Unknown nodes</button>
     <button class="active" id="icons-btn" aria-pressed="true" onclick="toggleIcons(this)" title="Draw devices as icons with a vendor mark. Off: plain boxes for every device">Device icons</button>
     <button class="active" id="vendor-btn" aria-pressed="true" onclick="toggleVendor(this)" title="Show the vendor mark and name beside each device icon">Vendor icons</button>
+    <button class="active" id="as-btn" aria-pressed="true" onclick="toggleAsAreas(this)" title="Draw a box around the routers of each BGP AS (needs BGP shown)">AS areas</button>
 </div>
 <div class="net-wrap">
     <div id="net"></div>
@@ -96,7 +97,9 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
         <div class="row"><span class="sw ghost"></span>unresolved neighbor or peer: seen, but not matched to a known device</div>
         <h4>Links</h4>
         <div class="row"><span class="ln" style="border-color:var(--cyan)"></span>LLDP cable: local port - remote port</div>
-        <div class="row"><span class="ln" style="border-color:var(--yellow)"></span>BGP session: AS number(s) and state</div>
+        <div class="row"><span class="ln" style="border-color:var(--yellow);border-top-width:1px"></span>iBGP session (same AS at both ends): AS and state</div>
+        <div class="row"><span class="ln" style="border-color:var(--orange)"></span>eBGP session (different AS): both AS numbers and state</div>
+        <div class="row"><span class="sw" style="background:var(--bg-muted);border:1px dashed var(--text-dim)"></span>AS area: the routers of one BGP AS</div>
         <div class="row"><span class="ln" style="border-color:var(--blue)"></span>OSPF adjacency and its state</div>
         <div class="row"><span class="ln" style="border-color:var(--red);border-top-style:dashed"></span>BGP/OSPF session that is not Established / FULL</div>
         <div class="hint">Double-click a router to open its page. Drag to move, scroll to zoom.</div>
@@ -239,6 +242,7 @@ function updateLldpLabels() {
 function toVisEdges(edges) {
     var LAYER_COLOR = { lldp: themeColor('--cyan'), bgp: themeColor('--yellow'), ospf: themeColor('--blue') };
     return edges.map(function (e) {
+        var ebgp = e.bgp_type === 'ebgp';   // a session between two ASes: orange and thick; iBGP stays yellow and thin
         return {
             // Stable id, so a refresh updates this edge instead of replacing it.
             id: edgeKey(e),
@@ -247,7 +251,7 @@ function toVisEdges(edges) {
             label: edgeLabel(e),
             // A BGP/OSPF session that is not Established/FULL is drawn red and dashed.
             color: {
-                color: e.up === false ? themeColor('--red') : (LAYER_COLOR[e.layer] || themeColor('--gray')),
+                color: e.up === false ? themeColor('--red') : (ebgp ? themeColor('--orange') : (LAYER_COLOR[e.layer] || themeColor('--gray'))),
                 highlight: themeColor('--text'),   // the selected link
             },
             // A link to an unidentified neighbor is short, so the ghost sits next to the router that sees it.
@@ -255,7 +259,7 @@ function toVisEdges(edges) {
             // between the router and the ghost. LLDP labels are hidden until hover, and a group's label is short.
             length: e.to.indexOf('group:') === 0 ? 170 : (e.to.indexOf('ghost:') === 0 ? (e.layer === 'lldp' ? 110 : 230) : undefined),
             dashes: e.up === false,
-            width: e.up === false ? 2 : 1,
+            width: e.up === false ? 2 : (ebgp ? 3 : 1),
             // Lines between the same two devices would sit on top of each other: bend BGP one way, OSPF the other.
             smooth: { type: 'curvedCW', roundness: { lldp: 0, bgp: 0.25, ospf: -0.25 }[e.layer] || 0 },
             font: { color: themeColor('--text-dim'), size: 10, strokeWidth: 0, background: themeColor('--bg') },
@@ -333,6 +337,8 @@ function load() {
         if (seq !== loadSeq) { return; }   // a newer toggle already asked: drop this older answer
         rawData = data;                    // the node card reads this, so a hidden node can still be shown and un-hidden
         data = groupUnknown(hideFiltered(data));
+        nodeAs = {};
+        data.nodes.forEach(function (n) { if (n.asn !== null && n.asn !== undefined) { nodeAs[n.id] = n.asn; } });
         var container = document.getElementById('net');
         if (!data.nodes.length) {
             if (network) { network.destroy(); network = null; }
@@ -353,7 +359,10 @@ function load() {
         container.innerHTML = '';
         var items = toVisNodes(data.nodes);
         var anyFree = false;
-        items.forEach(function (it) { if (it.x === undefined) { anyFree = true; } else { it.fixed = true; } });
+        items.forEach(function (it) { if (it.x === undefined) { anyFree = true; } });
+        // Saved places stand still while physics lays out the new ones. With no new node physics is off, and a
+        // fixed node could not be dragged.
+        if (anyFree) { items.forEach(function (it) { if (it.x !== undefined) { it.fixed = true; } }); }
         nodeSet = new vis.DataSet(items);
         edgeSet = new vis.DataSet(toVisEdges(data.edges));
         // Physics only places the nodes that have no saved place; then it is switched off, so the map stands still.
@@ -376,6 +385,7 @@ function load() {
             var oe = params.event.srcEvent || params.event;   // the menu is position: fixed, so it needs window coordinates
             openContextMenu(id === undefined ? null : id, oe.clientX, oe.clientY);
         });
+        network.on('beforeDrawing', drawAsAreas);
         network.on('hoverEdge', function (params) { hoveredEdge = params.edge; updateLldpLabels(); });
         network.on('blurEdge', function () { hoveredEdge = null; updateLldpLabels(); });
         network.on('dragStart', ctxMenu.close);
@@ -550,6 +560,60 @@ function vendorOn() {
     return document.getElementById('vendor-btn').className === 'active';
 }
 
+// AS areas: a rounded box behind the routers of each BGP AS, drawn on vis's canvas under the links.
+// nodeAs is {node id: AS number} for the nodes now on the map; the colours are read from the theme each frame.
+var AS_AREAS_KEY = 'confetti-topo-as-areas';
+var nodeAs = {};
+
+function asAreasOn() {
+    return document.getElementById('as-btn').className === 'active' && shownLayers().indexOf('bgp') !== -1;
+}
+
+function toggleAsAreas(btn) {
+    setLayerButton(btn, btn.className !== 'active');
+    try { localStorage.setItem(AS_AREAS_KEY, btn.className === 'active' ? '1' : '0'); } catch (e) { /* not remembered */ }
+    if (network) { network.redraw(); }
+}
+
+function drawAsAreas(ctx) {
+    if (!asAreasOn() || !nodeSet) { return; }
+    var boxes = {};   // AS number -> bounding box of its nodes
+    Object.keys(nodeAs).forEach(function (id) {
+        if (!nodeSet.get(id)) { return; }
+        var b = network.getBoundingBox(id);
+        var a = boxes[nodeAs[id]];
+        boxes[nodeAs[id]] = a ? { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top),
+                                  right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) } : b;
+    });
+    var pad = 34;
+    ctx.save();
+    // Biggest first: a smaller box that overlaps a bigger one is drawn on top of it, so its label stays readable.
+    var area = function (b) { return (b.right - b.left) * (b.bottom - b.top); };
+    Object.keys(boxes).sort(function (x, y) { return area(boxes[y]) - area(boxes[x]); }).forEach(function (asn) {
+        var b = boxes[asn];
+        var x = b.left - pad, y = b.top - pad - 12, w = b.right - b.left + 2 * pad, h = b.bottom - b.top + 2 * pad + 12;
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 14);
+        ctx.globalAlpha = 0.55;
+        ctx.fillStyle = themeColor('--bg-muted');
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.setLineDash([6, 4]);
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = themeColor('--text-dim');
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = 'bold 14px monospace';
+        ctx.textBaseline = 'top';
+        var text = 'AS ' + asn;
+        ctx.fillStyle = themeColor('--bg');   // a chip behind the label, so another box's border does not cross it
+        ctx.fillRect(x + 6, y + 5, ctx.measureText(text).width + 8, 20);
+        ctx.fillStyle = themeColor('--text-dim');
+        ctx.fillText(text, x + 10, y + 8);
+    });
+    ctx.restore();
+}
+
 function toggleVendor(btn) {
     setLayerButton(btn, btn.className !== 'active');
     try { localStorage.setItem(VENDOR_ON_KEY, vendorOn() ? '1' : '0'); } catch (e) { /* not remembered */ }
@@ -666,9 +730,14 @@ function showNodePanel(id) {
     info.textContent = '';
     if (node.ghost) {
         addRow(info, 'address', node.label);
+        if (node.asn) { addRow(info, 'BGP AS', node.asn); }
     } else {
         fetch('/api/devices/' + node.device_id).then(function (r) { return r.json(); }).then(function (d) {
-            if (selectedNode === id && !d.error) { info.textContent = ''; fillDeviceInfo(info, d); }
+            if (selectedNode === id && !d.error) {
+                info.textContent = '';
+                fillDeviceInfo(info, d);
+                if (node.asn) { addRow(info, 'BGP AS', node.asn); }
+            }
         });
     }
     var links = document.getElementById('np-links');
@@ -745,7 +814,7 @@ var LINK_KIND = { lldp: 'LLDP link (cable)', bgp: 'BGP session', ospf: 'OSPF adj
 var LINK_FIELDS = {
     lldp: [['local_port', 'local port'], ['remote_port', 'remote port'], ['remote_name', 'remote name'],
            ['remote_chassis', 'chassis id'], ['remote_mgmt_ip', 'mgmt ip'], ['remote_descr', 'description']],
-    bgp: [['peer_ip', 'neighbor'], ['remote_as', 'neighbor AS'], ['state', 'state'], ['uptime', 'up for'],
+    bgp: [['peer_ip', 'neighbor'], ['local_as', 'own AS'], ['remote_as', 'neighbor AS'], ['state', 'state'], ['uptime', 'up for'],
           ['prefixes', 'prefixes'], ['local_if', 'local interface']],
     ospf: [['peer_ip', 'neighbor'], ['area', 'area'], ['state', 'state'], ['uptime', 'up for'], ['local_if', 'local interface']],
 };
@@ -762,6 +831,7 @@ function showLinkPanel(edgeId) {
     var info = document.getElementById('lp-info');
     info.textContent = '';
     addRow(info, 'status', edge.layer === 'lldp' ? 'cable seen' : (edge.up === false ? 'DOWN' : 'up'));
+    if (edge.bgp_type) { addRow(info, 'type', edge.bgp_type === 'ibgp' ? 'iBGP (same AS at both ends)' : 'eBGP (between different ASes)'); }
     addRow(info, 'label', edge.label);
     var reports = document.getElementById('lp-reports');
     reports.textContent = '';
@@ -883,6 +953,7 @@ restoreHiddenIcons();
 fillLegendIcons();
 restoreLayers();
 try { setLayerButton(document.getElementById('vendor-btn'), localStorage.getItem(VENDOR_ON_KEY) !== '0'); } catch (e) { /* shown */ }
+try { setLayerButton(document.getElementById('as-btn'), localStorage.getItem(AS_AREAS_KEY) !== '0'); } catch (e) { /* shown */ }
 try { setLayerButton(document.getElementById('icons-btn'), localStorage.getItem(ICONS_ON_KEY) !== '0'); } catch (e) { /* shown */ }
 try { setLayerButton(document.getElementById('unknown-btn'), localStorage.getItem(UNKNOWN_KEY) !== '1'); } catch (e) { /* shown */ }
 updateFilterMarker();

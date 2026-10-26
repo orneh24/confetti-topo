@@ -169,6 +169,7 @@ def init_db():
             peer_ip        TEXT NOT NULL,
             peer_device_id INTEGER,
             remote_as      INTEGER,
+            local_as       INTEGER,
             area           TEXT,
             state          TEXT NOT NULL,
             uptime         TEXT,
@@ -223,6 +224,8 @@ def init_db():
     # CREATE TABLE IF NOT EXISTS never adds a column to a table that exists already.
     if "remote_descr" not in [r[1] for r in db.execute("PRAGMA table_info(lldp_neighbors)")]:
         db.execute("ALTER TABLE lldp_neighbors ADD COLUMN remote_descr TEXT")
+    if "local_as" not in [r[1] for r in db.execute("PRAGMA table_info(adjacencies)")]:
+        db.execute("ALTER TABLE adjacencies ADD COLUMN local_as INTEGER")
     db.commit()
     db.close()
 

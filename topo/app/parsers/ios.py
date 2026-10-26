@@ -253,10 +253,15 @@ _BGP_SUMMARY_RE = re.compile(
 )
 
 
+_BGP_LOCAL_AS_RE = re.compile(r"local AS number (\d+)")   # the router's own AS, in the header line
+
+
 def parse_bgp_summary(text):
     """'% BGP not active' or no neighbors both fall through to an empty
     list naturally — the regex simply finds nothing to match."""
     neighbors = []
+    local = _BGP_LOCAL_AS_RE.search(text)
+    local_as = int(local.group(1)) if local else None
     for m in _BGP_SUMMARY_RE.finditer(text):
         state_pfx = m.group("state_pfx")
         try:
@@ -268,6 +273,7 @@ def parse_bgp_summary(text):
         neighbors.append({
             "peer_ip": m.group("neighbor"),
             "remote_as": int(m.group("remote_as")),
+            "local_as": local_as,
             "state": state,
             "prefixes": prefixes,
             "uptime": m.group("uptime"),

@@ -45,7 +45,9 @@ adjacencies (
   id, device_id -> devices ON DELETE CASCADE,
   proto,                     -- 'bgp' | 'ospf'
   peer_ip, peer_device_id,   -- NULL = peer not matched to a known device
-  remote_as, area, state, uptime, prefixes, local_if, last_seen,
+  remote_as,                 -- the peer's AS
+  local_as,                  -- this router's own AS (`local AS number` in `show bgp summary`); NULL until polled
+  area, state, uptime, prefixes, local_if, last_seen,
   UNIQUE(device_id, proto, peer_ip))
 ```
 
@@ -90,9 +92,11 @@ link (`reported_by` plus the fields that end stored: LLDP ports, chassis, mgmt I
 prefixes, area, AS). The page shows it in a card when you click a link.
 - LLDP label: `"<local port> - <remote port>"`.
 - OSPF label: `"ospf FULL"`; `up = (state == FULL)`.
-- BGP label: `"bgp AS65001 - AS65002 Established"`; `up = (state == Established)`. One `AS` when both ends match
-  (iBGP) or only one is known; the peer's AS for a ghost. A row stores its peer's AS, so a router's own AS is
-  read from the other end's row.
+- BGP label: `"eBGP AS65001 - AS65002 Established"` or `"iBGP AS65001 Established"`; `up = (state == Established)`.
+  `bgp_type` on the edge is `"ibgp"` (same AS at both ends), `"ebgp"` (different) or null (an end's AS is unknown:
+  the label is then `"bgp AS65002 Established"`). A router's own AS is its `local_as`; a router with none yet
+  takes the `remote_as` another router names for it (`topology.bgp_as_numbers`). A node carries it as `asn`;
+  a ghost BGP peer gets the `remote_as` of the row that points at it.
 
 ### 5.1 Ghost nodes
 
@@ -203,7 +207,10 @@ against them.
   `remove` of ids that disappeared) instead of creating a new `vis.Network`; rebuilding resets
   layout and zoom on every refresh. Give edges a stable id (`from|to|layer|label`) so updates match.
 - Nodes: boxes for devices, dots for ghosts. Edge colour per layer (LLDP, BGP, OSPF) plus the red
-  dashed "down" style. LLDP / BGP / OSPF toggle buttons (independent, remembered in `confetti-topo-layers`, a FILTERED marker while any is off) pass `?layer=` as a comma list. An independent **Unknown nodes** toggle
+  dashed "down" style. An iBGP session is a thin yellow line, an eBGP session a thick orange one (`--orange` in
+  theme.css; the CRT layouts have one hue, so there eBGP differs by width only). An **AS areas** toggle
+  (`confetti-topo-as-areas`, a look setting) draws a dashed box labelled `AS <n>` behind the nodes of each AS, on vis's
+  `beforeDrawing`; it shows only while BGP is shown. LLDP / BGP / OSPF toggle buttons (independent, remembered in `confetti-topo-layers`, a FILTERED marker while any is off) pass `?layer=` as a comma list. An independent **Unknown nodes** toggle
   (remembered in `confetti-topo-hide-unknown`) hides ghost nodes and their edges in the browser only; it is not
   sent as `?layer=`, and the FILTERED marker shows while it is off too.
   Each known device is drawn as an icon above its name by type (`topology.device_type`: router, switch, firewall,

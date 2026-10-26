@@ -473,8 +473,19 @@ def _():
     conn.execute("UPDATE adjacencies SET remote_as = 65002 WHERE device_id = ? AND proto = 'bgp'", (a,))
     conn.execute("UPDATE adjacencies SET remote_as = 65001 WHERE device_id = ? AND proto = 'bgp'", (b,))
     conn.commit()
-    labels = [e["label"] for e in topology.build(conn, "bgp")["edges"]]
-    need(labels == ["bgp AS65001 - AS65002 Established"], "BGP label must name both AS numbers: %r" % labels, p)
+    built = topology.build(conn, "bgp")
+    labels = [e["label"] for e in built["edges"]]
+    need(labels == ["eBGP AS65001 - AS65002 Established"], "BGP label must name both AS numbers: %r" % labels, p)
+    need([e["bgp_type"] for e in built["edges"]] == ["ebgp"], "two different ASes must be an eBGP edge: %r" % built["edges"], p)
+    need({n["device_id"]: n["asn"] for n in built["nodes"]} == {a: 65001, b: 65002}, "nodes must carry their AS: %r" % built["nodes"], p)
+    # Same AS at both ends is iBGP, and a router's own `local AS` wins over what the other row says about it.
+    conn.execute("UPDATE adjacencies SET remote_as = 65001, local_as = 65001 WHERE proto = 'bgp'")
+    conn.commit()
+    same = topology.build(conn, "bgp")["edges"]
+    need([(e["bgp_type"], e["label"]) for e in same] == [("ibgp", "iBGP AS65001 Established")], "same AS at both ends must be iBGP: %r" % same, p)
+    conn.execute("UPDATE adjacencies SET remote_as = 65002, local_as = NULL WHERE device_id = ? AND proto = 'bgp'", (a,))
+    conn.execute("UPDATE adjacencies SET remote_as = 65001, local_as = NULL WHERE device_id = ? AND proto = 'bgp'", (b,))
+    conn.commit()
     need([e["label"] for e in topology.build(conn, "ospf")["edges"]] == ["ospf EXSTART"], "an OSPF label must not get an AS", p)
     # LLDP says "Linux" and names no network vendor: a Linux server (ghost or known device); a Cisco description is not
     did = conn.execute("SELECT id FROM devices ORDER BY id LIMIT 1").fetchone()[0]
@@ -928,6 +939,7 @@ def _():
     need(rows.get("192.0.2.250", {}).get("state") == "Idle (Admin)", "admin-down peer parsed as %r" % rows.get("192.0.2.250"), p)
     need(rows.get("198.51.100.81", {}).get("state") == "Established" and rows["198.51.100.81"]["prefixes"] == 4, "established peer: %r" % rows.get("198.51.100.81"), p)
     need(rows.get("198.51.100.164", {}).get("state") == "Idle", "idle peer: %r" % rows.get("198.51.100.164"), p)
+    need(all(r.get("local_as") == 65030 for r in rows.values()) and rows, "local AS from the header line: %r" % [r.get("local_as") for r in rows.values()], p)
     return p
 
 

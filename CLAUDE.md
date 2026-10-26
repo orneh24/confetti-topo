@@ -96,7 +96,9 @@ Places are stored in `node_positions` (`PUT`/`DELETE /api/topology/positions`, t
 `GET /api/topology` returns `x`/`y` per node and a `positions` dict). Unknown nodes whose links all go to one
 known device are drawn as one "N unknown" node (`group:dev:<id>`, made up by the page, so only `positions`
 knows it); double-click expands it. An LLDP link shows its port names only on hover or when selected.
-BGP/OSPF labels always show. `/topology?device=<id>` selects and centres on that device once (the Recent changes page links there).
+BGP/OSPF labels always show. A BGP session is typed by the AS at its two ends (`adjacencies.local_as` is the router's own
+AS, from `show bgp summary`): `bgp_type` `ibgp` = thin yellow line, `ebgp` = thick orange line, and the **AS areas** toggle
+draws a box labelled with the AS behind its nodes (`nodes[].asn`). `/topology?device=<id>` selects and centres on that device once (the Recent changes page links there).
 
 Who is that neighbor? Two steps:
 1. **At poll time**, the apply step matches the management IP an LLDP neighbor advertises (`remote_mgmt_ip`),
