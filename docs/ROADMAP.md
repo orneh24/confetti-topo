@@ -8,10 +8,8 @@ Ideas only. Nothing here is built until the user picks it.
   sender thread (webhook / mail), or send events to butler.
 
 ## Topology
-- **Device routing table** (do this first): a `show ip route` task per device (verified on a real router first,
-  see `confetti-topo-add-platform`), a table for it, and a routing-table section on the device page.
-- **Right-click a device on the map, "View routing table".** Needs the device routing table above first. The
-  right-click menu already exists (`openContextMenu` in `topo/templates/topology.html`, drawn by the shared `static/ctxmenu.js`); this adds one item.
+- **Routing table follow-ups:** IPv6 and a cap on a very large table; validate ECMP against a real router (the
+  fixture `ios_route_not_captured.txt` is not a capture).
 - **CDP** next to LLDP (many Cisco switches speak only CDP).
 - **L2 view:** MAC table, VLANs, spanning tree. Needs its own commands, verified on real devices first.
 - **Pair parallel sessions properly** by the local address of each session instead of by position.

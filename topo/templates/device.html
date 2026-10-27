@@ -24,14 +24,14 @@
     <div class="section">
         <div class="section-header"><span>Identifiers</span></div>
         <div class="section-body">
-            <table><thead><tr><th>Kind</th><th>Value</th><th>First seen</th></tr></thead>
+            <table data-sortable><thead><tr><th>Kind</th><th>Value</th><th>First seen</th></tr></thead>
                 <tbody id="alias-rows"></tbody></table>
         </div>
     </div>
     <div class="section">
         <div class="section-header"><span>Sources</span></div>
         <div class="section-body">
-            <table><thead><tr><th>Source</th><th>Ref</th><th>Last seen</th></tr></thead>
+            <table data-sortable><thead><tr><th>Source</th><th>Ref</th><th>Last seen</th></tr></thead>
                 <tbody id="source-rows"></tbody></table>
         </div>
     </div>
@@ -79,7 +79,7 @@
     <div class="section wide">
         <div class="section-header"><span>Events</span></div>
         <div class="section-body">
-            <table>
+            <table data-sortable>
                 <thead><tr><th>Time</th><th>Sev</th><th>Event</th><th>Detail</th></tr></thead>
                 <tbody id="event-rows"></tbody>
             </table>
@@ -89,7 +89,7 @@
     <div class="section wide">
         <div class="section-header"><span>LLDP neighbors</span></div>
         <div class="section-body">
-            <table>
+            <table data-sortable>
                 <thead><tr><th>Local port</th><th>Neighbor</th><th>Remote port</th><th>Mgmt IP</th><th>Last seen</th></tr></thead>
                 <tbody id="lldp-rows"></tbody>
             </table>
@@ -99,7 +99,7 @@
     <div class="section wide">
         <div class="section-header"><span>BGP / OSPF</span></div>
         <div class="section-body">
-            <table>
+            <table data-sortable>
                 <thead><tr><th>Proto</th><th>Peer</th><th>State</th><th>Remote AS</th><th>Prefixes</th><th>Uptime</th><th>Interface</th></tr></thead>
                 <tbody id="adj-rows"></tbody>
             </table>
@@ -109,12 +109,41 @@
     <div class="section wide">
         <div class="section-header"><span>Interfaces</span></div>
         <div class="section-body">
-            <table>
+            <div class="hint">
+                Show only:
+                <label><input type="checkbox" class="if-filter" value="down" onchange="renderInterfaces()"> Down (oper not up)</label>
+                <label><input type="checkbox" class="if-filter" value="unused" onchange="renderInterfaces()"> Unused (admin down)</label>
+                <label><input type="checkbox" class="if-filter" value="noip" onchange="renderInterfaces()"> No IP configured</label>
+                <span class="msg" id="if-count"></span>
+            </div>
+            <table data-sortable>
                 <thead><tr><th>Name</th><th>Admin</th><th>Oper</th><th>IP</th><th>Speed/Duplex</th>
                     <th>MTU</th><th>Last seen</th></tr></thead>
                 <tbody id="interface-rows"></tbody>
             </table>
             <div class="empty" id="interface-empty" style="display:none">no interfaces polled yet</div>
+        </div>
+    </div>
+    <div class="section wide" id="routes">
+        <div class="section-header"><span>Routing table</span></div>
+        <div class="section-body">
+            <div class="hint">
+                <label for="rt-vrf">VRF</label> <select id="rt-vrf" onchange="renderRoutes()"></select>
+                <label for="rt-kind">Table</label>
+                <select id="rt-kind" onchange="renderRoutes()">
+                    <option value="rib">RIB</option>
+                    <option value="fib">FIB</option>
+                </select>
+                <label for="rt-prefix">Prefix</label>
+                <input id="rt-prefix" placeholder="10.0" oninput="renderRoutes()">
+                <span class="msg" id="rt-count"></span>
+            </div>
+            <table data-sortable>
+                <thead><tr><th>Prefix</th><th>Protocol</th><th>Next hop</th><th>Interface</th>
+                    <th>AD/Metric</th><th>Age</th></tr></thead>
+                <tbody id="route-rows"></tbody>
+            </table>
+            <div class="empty" id="route-empty" style="display:none">no routes polled yet</div>
         </div>
     </div>
 </div>
@@ -255,8 +284,26 @@ function clearSecrets() {
     sendCredentials({ password: '', enable_secret: '' }, 'secrets cleared');
 }
 
+var interfaceList = [];   // last polled interfaces; the filter works on this, not on a new request
+
 function loadInterfaces() {
     fetch('/api/devices/' + deviceId + '/interfaces').then(function (r) { return r.json(); }).then(function (list) {
+        interfaceList = list;
+        renderInterfaces();
+    });
+}
+
+function renderInterfaces() {
+    // Ticked boxes add up: an interface is shown when it matches any ticked one. None ticked shows all.
+    var on = {};
+    Array.prototype.forEach.call(document.querySelectorAll('.if-filter:checked'), function (c) { on[c.value] = true; });
+    var any = Object.keys(on).length > 0;
+    var list = interfaceList.filter(function (f) {
+        if (!any) { return true; }
+        return (on.down && f.oper_status !== 'up') || (on.unused && f.admin_status !== 'up') || (on.noip && !f.ip);
+    });
+    document.getElementById('if-count').textContent = any ? list.length + ' of ' + interfaceList.length : '';
+    {
         var rows = '';
         for (var i = 0; i < list.length; i++) {
             var f = list[i];
@@ -272,8 +319,48 @@ function loadInterfaces() {
                 '</tr>';
         }
         document.getElementById('interface-rows').innerHTML = rows;
-        document.getElementById('interface-empty').style.display = list.length ? 'none' : 'block';
+        var empty = document.getElementById('interface-empty');
+        empty.textContent = interfaceList.length ? 'no interfaces match this filter' : 'no interfaces polled yet';
+        empty.style.display = list.length ? 'none' : 'block';
+    }
+}
+
+var routeList = [];   // all polled routes of this device; the pickers filter this list
+
+function loadRoutes() {
+    fetch('/api/routes?device_id=' + deviceId).then(function (r) { return r.json(); }).then(function (list) {
+        routeList = list;
+        var vrfs = [];
+        list.forEach(function (r) { if (vrfs.indexOf(r.vrf) < 0) { vrfs.push(r.vrf); } });
+        var sel = document.getElementById('rt-vrf');
+        var keep = sel.value;
+        sel.innerHTML = vrfs.map(function (v) { return '<option>' + esc(v) + '</option>'; }).join('');
+        if (vrfs.indexOf(keep) >= 0) { sel.value = keep; }
+        var fibOpt = document.querySelector('#rt-kind option[value=fib]');
+        fibOpt.hidden = !list.some(function (r) { return r.kind === 'fib'; });
+        if (fibOpt.hidden) { document.getElementById('rt-kind').value = 'rib'; }
+        renderRoutes();
     });
+}
+
+function renderRoutes() {
+    var vrf = document.getElementById('rt-vrf').value;
+    var kind = document.getElementById('rt-kind').value;
+    var prefix = document.getElementById('rt-prefix').value.trim();
+    var list = routeList.filter(function (r) {
+        return r.vrf === vrf && r.kind === kind && (!prefix || r.prefix.indexOf(prefix) >= 0);
+    });
+    var rows = '';
+    list.forEach(function (r) {
+        var adm = (r.distance === null ? '' : r.distance) + (r.metric === null ? '' : '/' + r.metric);
+        rows += '<tr><td>' + esc(r.prefix) + '</td><td>' + esc(r.protocol) + '</td><td>' + esc(r.next_hop) +
+            '</td><td>' + esc(r.interface) + '</td><td>' + esc(adm) + '</td><td>' + esc(r.age || '') + '</td></tr>';
+    });
+    document.getElementById('route-rows').innerHTML = rows;
+    document.getElementById('rt-count').textContent = routeList.length ? list.length + ' routes' : '';
+    var empty = document.getElementById('route-empty');
+    empty.textContent = routeList.length ? 'no routes match' : 'no routes polled yet';
+    empty.style.display = list.length ? 'none' : 'block';
 }
 
 function loadLldp() {
@@ -317,7 +404,7 @@ function loadEvents() {
         for (var i = 0; i < list.length; i++) {
             var e = list[i];
             var cls = e.severity === 'info' ? 'ok' : (e.severity === 'warning' ? 'running' : 'bad');
-            rows += '<tr><td>' + new Date(e.at).toLocaleString() + '</td>' +
+            rows += '<tr><td data-sort="' + ctxMenu.attr(e.at) + '">' + new Date(e.at).toLocaleString() + '</td>' +
                 '<td><span class="pill ' + cls + '">' + esc(e.severity) + '</span></td>' +
                 '<td>' + esc(e.subject) + '</td><td>' + esc(e.detail) + '</td></tr>';
         }
@@ -344,6 +431,7 @@ function pollNow() {
         btn.disabled = false;
         loadDevice();
         loadInterfaces();
+        loadRoutes();
         loadLldp();
         loadAdjacencies();
         loadEvents();
@@ -355,6 +443,7 @@ function pollNow() {
 
 loadDevice();
 loadInterfaces();
+loadRoutes();
 loadLldp();
 loadAdjacencies();
 loadEvents();

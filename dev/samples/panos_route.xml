@@ -1,0 +1,75 @@
+<response status="success"><result>
+	<flags>flags: A:active, ?:loose, C:connect, H:host, S:static, ~:internal, R:rip, O:ospf, B:bgp, Oi:ospf intra-area, Oo:ospf inter-area, O1:ospf ext-type-1, O2:ospf ext-type-2, E:ecmp, M:multicast</flags>
+	<entry>
+		<virtual-router>default</virtual-router>
+		<destination>0.0.0.0/0</destination>
+		<nexthop>192.0.2.1</nexthop>
+		<metric>10</metric>
+		<flags>A S   </flags>
+		<age></age>
+		<interface>ethernet1/1</interface>
+		<route-table>unicast</route-table></entry>
+	<entry>
+		<virtual-router>default</virtual-router>
+		<destination>192.0.2.0/24</destination>
+		<nexthop>192.0.2.10</nexthop>
+		<metric>0</metric>
+		<flags>A C   </flags>
+		<age></age>
+		<interface>ethernet1/1</interface>
+		<route-table>unicast</route-table></entry>
+	<entry>
+		<virtual-router>default</virtual-router>
+		<destination>192.0.2.10/32</destination>
+		<nexthop>0.0.0.0</nexthop>
+		<metric>0</metric>
+		<flags>A H   </flags>
+		<age></age>
+		<interface></interface>
+		<route-table>unicast</route-table></entry>
+	<entry>
+		<virtual-router>default</virtual-router>
+		<destination>198.51.100.0/24</destination>
+		<nexthop>192.0.2.81</nexthop>
+		<metric>0</metric>
+		<flags>A?B   </flags>
+		<age>1110198</age>
+		<interface></interface>
+		<route-table>unicast</route-table></entry>
+	<entry>
+		<virtual-router>default</virtual-router>
+		<destination>203.0.113.0/24</destination>
+		<nexthop>192.0.2.82</nexthop>
+		<metric>21</metric>
+		<flags>A Oi  </flags>
+		<age>1650000</age>
+		<interface>ethernet1/2</interface>
+		<route-table>unicast</route-table></entry>
+	<entry>
+		<virtual-router>vr-b</virtual-router>
+		<destination>198.51.100.0/24</destination>
+		<nexthop>203.0.113.1</nexthop>
+		<metric>10</metric>
+		<flags>A S   </flags>
+		<age></age>
+		<interface>tunnel.100</interface>
+		<route-table>unicast</route-table></entry>
+	<entry>
+		<virtual-router>default</virtual-router>
+		<destination>224.0.0.0/4</destination>
+		<nexthop>0.0.0.0</nexthop>
+		<metric>0</metric>
+		<flags>A M   </flags>
+		<age></age>
+		<interface></interface>
+		<route-table>multicast</route-table></entry>
+	<entry>
+		<virtual-router>default</virtual-router>
+		<destination>2001:db8::/32</destination>
+		<nexthop>::</nexthop>
+		<metric>0</metric>
+		<flags>A S   </flags>
+		<age></age>
+		<interface>ethernet1/1</interface>
+		<route-table>unicast</route-table></entry>
+</result></response>

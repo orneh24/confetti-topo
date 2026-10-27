@@ -243,3 +243,68 @@ def parse_ospf_neighbors(text):
             "local_if": None,
         })
     return out
+
+
+# ---------------------------------------------------------------------------
+# <show><routing><route/></routing></show>   (the RIB, all virtual routers; the virtual router is the vrf)
+# <show><routing><fib/></routing></show>     (the FIB the data plane forwards with)
+#
+# RIB <entry> has virtual-router, destination, nexthop, metric, flags ("A S", "A?B": A active, C connect, H host,
+# S static, O.. ospf, B bgp, R rip, ~ internal), age in seconds, interface and route-table (only unicast is read).
+# There is no administrative distance. The FIB is <fibs><entry><vr>..</vr><entries><entry><dst>..</dst>.
+# A next hop of 0.0.0.0 means "on the link" and is stored as ''.
+# ---------------------------------------------------------------------------
+
+_PREFIX = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}(?:/\d+)?")
+
+
+def _next_hop(value):
+    return "" if value in (None, "0.0.0.0") else value
+
+
+def _route_protocol(flags):
+    for letter, name in (("O", "ospf"), ("B", "bgp"), ("R", "rip"), ("S", "static"), ("C", "connected"),
+                         ("H", "host"), ("~", "internal")):
+        if letter in flags:
+            return name
+    return ""
+
+
+def parse_routes(text):
+    result = _root(text)
+    if result is None:
+        return []
+    out = []
+    for e in result.findall("entry"):
+        prefix = _text(e, "destination")
+        if not prefix or not _PREFIX.fullmatch(prefix) or (_text(e, "route-table") or "unicast") != "unicast":
+            continue
+        flags = _text(e, "flags") or ""
+        metric = _text(e, "metric")
+        out.append({
+            "vrf": _text(e, "virtual-router") or "default", "kind": "rib", "prefix": prefix,
+            "protocol": _route_protocol(flags), "next_hop": _next_hop(_text(e, "nexthop")),
+            "interface": _text(e, "interface") or "", "distance": None,
+            "metric": int(metric) if metric and metric.isdigit() else None,
+            "age": _age(_text(e, "age")) if _text(e, "age") else None, "flags": flags,
+        })
+    return out
+
+
+def parse_fib(text):
+    result = _root(text)
+    if result is None:
+        return []
+    out = []
+    for fib in result.findall("fibs/entry"):
+        vrf = _text(fib, "vr") or "default"
+        for e in fib.findall("entries/entry"):
+            prefix = _text(e, "dst")
+            if not prefix or not _PREFIX.fullmatch(prefix):
+                continue
+            out.append({
+                "vrf": vrf, "kind": "fib", "prefix": prefix, "protocol": "",
+                "next_hop": _next_hop(_text(e, "nexthop")), "interface": _text(e, "interface") or "",
+                "distance": None, "metric": None, "age": None, "flags": _text(e, "flags") or "",
+            })
+    return out

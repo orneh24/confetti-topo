@@ -1,0 +1,7 @@
+Gateway of last resort is not set
+
+B        198.51.100.0/24 [20/0] via 192.0.2.1, 1w5d
+                         [20/0] via 192.0.2.2, 1w5d
+O        198.51.100.128/25
+           [110/2] via 192.0.2.3, 00:01:00, GigabitEthernet2
+O        203.0.113.0/24 is a summary, 3d02h, Null0

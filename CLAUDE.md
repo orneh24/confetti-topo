@@ -58,12 +58,12 @@ Each tick (`TOPO_POLL_TICK_S`, default 15s): claim devices with `poll_state='idl
 `next_poll_at <= now`, mark them `'running'` (this is the per-device lock — a device whose SSH hangs is never
 queued twice), and hand each to a `ThreadPoolExecutor` (`TOPO_POLL_WORKERS`, default 8).
 
-Per device, five tasks run independently, **each committing its own transaction**: `version`, `interfaces`,
-`lldp`, `bgp`, `ospf`. Partial failure is the normal case — an LLDP timeout must never discard interface data
+Per device, six tasks run independently, **each committing its own transaction**: `version`, `interfaces`,
+`lldp`, `bgp`, `ospf`, `routes`. Partial failure is the normal case — an LLDP timeout must never discard interface data
 collected 200ms earlier. `role='node'` devices (confetti-traffic's imported Alpine fleet) are never polled —
 `poller.py`'s device-selection query filters `role != 'node'`.
 
-All five tasks share **one SSH session** per poll (PAN-OS: one keygen per poll) (`ssh.run_tasks` is a generator, so each task still commits
+All six tasks share **one SSH session** per poll (PAN-OS: one keygen per poll) (`ssh.run_tasks` is a generator, so each task still commits
 before the next command runs). Each apply step deletes that device's rows not seen in this poll — a removed
 peer or cable must not stay on the topology forever. But **only a successful task deletes**: a timeout or a
 failed login applies nothing (constraint 14). `interfaces` skips the delete on an empty result, since empty
@@ -128,6 +128,17 @@ Who is that neighbor? Two steps:
    step 2 and never stored (constraint 16). The link card says `identified by`.
 
 NULL after these steps is the expected result for peers outside the lab, not a bug.
+
+### Routing table
+
+The `routes` task stores a device's IPv4 routing table in `routes` (one row per next hop, `vrf`, `kind` = `rib` or
+`fib`); `GET /api/routes?device_id=N` (`vrf`, `kind`, `prefix`) reads it, the device page shows it, and the map's
+right-click menu links to it. IOS runs `show ip route vrf *` (the global table, then each VRF; an IOS that answers
+`%` gets `show ip route`). PAN-OS sends the RIB (`<show><routing><route/>`, the virtual router is the vrf) and the
+FIB (`<show><routing><fib/>`); a FIB that cannot be read keeps the RIB. Under `is subnetted` an IOS route line has no
+mask and takes the header's. `emit()` writes one `routes_changed` event per poll (`+N -M` on (vrf, prefix) of the RIB),
+never one per prefix. Fixtures: `dev/samples/ios_route_*.txt`, `panos_route.xml`, `panos_fib.xml`. Not handled: IPv6,
+a cap on a very large table (a full BGP table would be one row per route).
 
 ### Reachability
 
@@ -353,6 +364,10 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
     one on. A match applies only when exactly one device has the MAC or name, never to the reporting device itself,
     never over the poller's stored match or an interface-IP match, and is **never stored as an alias**
     (`devices.mgmt_mac` is not an identity; constraints 1 and 12). Checked by R31.
+17. **A routes poll that parses to nothing deletes nothing, and only the kinds it holds delete.** A router always has
+    connected routes, so an empty table means a parse failure; a FIB that could not be read must not wipe the stored
+    FIB. Route changes are one `routes_changed` event per poll, and none on a device's first `routes` poll
+    (constraint 11). Checked by R32.
 
 ## Regression gate
 
@@ -364,7 +379,7 @@ HTTP; `R21`..`R26` cover the ICMP state machine, `/metrics` format, LLDP crawl, 
 container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R27` checks the OpenSSH
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
-the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API. Output is one line per check
+the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

@@ -51,7 +51,7 @@ def _error_text(exc):
 
 
 def _run_command(conn, task, plat):
-    output = conn.send_command(plat["commands"][task], read_timeout=20)
+    output = conn.send_command(plat["commands"][task], read_timeout=30 if task == "routes" else 20)
     parsed = plat["parsers"][task](output)
     if task == "lldp" and plat.get("lldp_brief_command") and any(not row["local_if"] for row in parsed):
         # Older IOS leaves Local Intf out of the detail output; the brief
@@ -59,7 +59,15 @@ def _run_command(conn, task, plat):
         brief_out = conn.send_command(plat["lldp_brief_command"], read_timeout=20)
         output = output + "\n\n" + brief_out
         parsed = ios.fill_lldp_local_if(parsed, ios.parse_lldp_brief(brief_out))
+    if task == "routes" and plat.get("routes_fallback_command") and _is_cli_error(output):
+        # "vrf *" is not understood (an IOS without VRF support): the plain table is the whole answer.
+        output = conn.send_command(plat["routes_fallback_command"], read_timeout=30)
+        parsed = plat["parsers"][task](output)
     return output, parsed
+
+
+def _is_cli_error(output):
+    return output.lstrip().startswith("%") or "Invalid input" in output[:300]
 
 
 def run_tasks(device, creds, tasks=None):
@@ -138,6 +146,8 @@ def apply_result(conn, device_id, task, parsed):
         _apply_adjacencies(conn, device_id, "bgp", parsed, now)
     elif task == "ospf":
         _apply_adjacencies(conn, device_id, "ospf", parsed, now)
+    elif task == "routes":
+        _apply_routes(conn, device_id, parsed, now)
 
 
 def _apply_version(conn, device_id, parsed, now):
@@ -309,3 +319,35 @@ def _apply_adjacencies(conn, device_id, proto, parsed, now):
     # A peer that is merely down is still listed (Active/Idle) and stays.
     conn.execute("DELETE FROM adjacencies WHERE device_id = ? AND proto = ? AND last_seen <> ?",
                  (device_id, proto, now))
+
+
+def _apply_routes(conn, device_id, parsed, now):
+    """Store the routing table. One event per poll ("+N -M"), not one per prefix: a link flap can move
+    hundreds of routes. Compared on (vrf, prefix) of the RIB only; the FIB mirrors it."""
+    rib = [r for r in parsed if r["kind"] == "rib"]
+    if rib and not events.is_baseline(conn, device_id, "routes"):
+        old = {(r["vrf"], r["prefix"]) for r in conn.execute(
+            "SELECT vrf, prefix FROM routes WHERE device_id = ? AND kind = 'rib'", (device_id,))}
+        new = {(r["vrf"], r["prefix"]) for r in rib}
+        if old != new:
+            lines = (["+ {} {}".format(v, p) for v, p in sorted(new - old)]
+                     + ["- {} {}".format(v, p) for v, p in sorted(old - new)])
+            events.emit(conn, device_id, "routes_changed", "info",
+                        "{}: routes +{} -{}".format(_hostname(conn, device_id), len(new - old), len(old - new)),
+                        "\n".join(lines[:20]) + ("\n..." if len(lines) > 20 else ""))
+    for r in parsed:
+        conn.execute(
+            """INSERT INTO routes (device_id, vrf, kind, prefix, protocol, next_hop, interface,
+                   distance, metric, age, flags, last_seen)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(device_id, vrf, kind, prefix, next_hop, interface) DO UPDATE SET
+                   protocol=excluded.protocol, distance=excluded.distance, metric=excluded.metric,
+                   age=excluded.age, flags=excluded.flags, last_seen=excluded.last_seen""",
+            (device_id, r["vrf"], r["kind"], r["prefix"], r["protocol"], r["next_hop"], r["interface"],
+             r["distance"], r["metric"], r["age"], r["flags"], now),
+        )
+    # Only a table that has rows may remove rows (a router always has connected routes, so an empty answer is a
+    # parse failure), and only for the kind it holds: a FIB that failed to read must not wipe the stored FIB.
+    for kind in {r["kind"] for r in parsed}:
+        conn.execute("DELETE FROM routes WHERE device_id = ? AND kind = ? AND last_seen <> ?",
+                     (device_id, kind, now))

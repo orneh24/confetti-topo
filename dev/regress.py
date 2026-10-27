@@ -644,14 +644,16 @@ def _():
     m = app_modules()
     from app import platforms
     ios_tasks = tuple(platforms.IOS["commands"])
-    need(ios_tasks == ("version", "interfaces", "lldp", "bgp", "ospf"), "IOS tasks are %r" % (ios_tasks,), p)
+    need(ios_tasks == ("version", "interfaces", "lldp", "bgp", "ospf", "routes"), "IOS tasks are %r" % (ios_tasks,), p)
     for name, plat in platforms.PLATFORMS.items():
         need(tuple(plat["commands"]) == ios_tasks, "%s tasks are %r, expected %r" % (name, tuple(plat["commands"]), ios_tasks), p)
         need(set(plat["parsers"]) == set(plat["commands"]), "%s: commands and parsers differ" % name, p)
         # SSH platforms run `show ...`; the XML API platform sends `<show>...</show>` operations. Nothing else.
         prefix = "<show>" if plat.get("transport") == "xml_api" else "show "
         extra = [("lldp_brief", plat.get("lldp_brief_command", prefix + "x")),
-                 ("bgp_summary", plat.get("bgp_summary_command", prefix + "x"))]
+                 ("bgp_summary", plat.get("bgp_summary_command", prefix + "x")),
+                 ("routes_fallback", plat.get("routes_fallback_command", prefix + "x")),
+                 ("fib", plat.get("fib_command", prefix + "x"))]
         for task, cmd in list(plat["commands"].items()) + extra:
             need(cmd.startswith(prefix), "%s %s runs %r: only read-only 'show' commands are allowed" % (name, task, cmd), p)
     need(platforms.get(None) is platforms.IOS and platforms.get("no-such-os") is platforms.IOS, "unknown platform must fall back to IOS", p)
@@ -1032,7 +1034,8 @@ def _():
     FakeSession.answers = {cmds["version"]: sample("panos_version.xml"), cmds["interfaces"]: sample("panos_interfaces.xml"),
                            cmds["lldp"]: sample("panos_lldp.xml"), cmds["bgp"]: sample("panos_bgp.xml"),
                            cmds["ospf"]: sample("panos_ospf_neighbor.xml"),
-                           plat["bgp_summary_command"]: sample("panos_bgp_summary.xml")}
+                           plat["bgp_summary_command"]: sample("panos_bgp_summary.xml"),
+                           cmds["routes"]: sample("panos_route.xml"), plat["fib_command"]: sample("panos_fib.xml")}
     real = panos.requests.Session
     panos.requests.Session = FakeSession
     try:
@@ -1209,6 +1212,53 @@ def _():
 
 
 # ============================================================ live tier
+
+@check("R32", "routes: real-output fixtures parse, an empty table deletes nothing, one summary event per changed poll, none on baseline")
+def _():
+    p = []
+    m, conn = fresh_db()
+    from app.parsers import ios, panos
+    ssh = m["ssh"]
+    a = ios.parse_routes(read(SAMPLES + "ios_route_17_3.txt"))
+    need(len(a) == 12 and {r["vrf"] for r in a} == {"default", "MGMT"}, "ios_route_17_3: %d rows, vrfs %r" % (len(a), sorted({r["vrf"] for r in a})), p)
+    need(any(r["prefix"] == "203.0.113.0/25" and r["protocol"] == "ospf" and r["age"] == "2w5d" for r in a),
+         "a route under 'is subnetted' lost its mask or fields", p)
+    need(any(r["protocol"] == "bgp" and r["interface"] == "" and r["next_hop"] == "192.0.2.81" for r in a), "a BGP route without an interface did not parse", p)
+    b = ios.parse_routes(read(SAMPLES + "ios_route_not_captured.txt"))
+    need(len(b) == 4 and sorted(r["next_hop"] for r in b)[:2] == ["", "192.0.2.1"], "ECMP / long-prefix / summary lines: %d rows" % len(b), p)
+    rib, fib = panos.parse_routes(read(SAMPLES + "panos_route.xml")), panos.parse_fib(read(SAMPLES + "panos_fib.xml"))
+    need(len(rib) == 6 and {r["vrf"] for r in rib} == {"default", "vr-b"}, "panos_route: %d rows (multicast and IPv6 must be skipped)" % len(rib), p)
+    need(len(fib) == 4 and all(r["kind"] == "fib" for r in fib), "panos_fib: %d rows" % len(fib), p)
+    need(panos.parse_routes("") == [] and panos.parse_fib("<x/>") == [] and ios.parse_routes("") == [], "an empty answer must parse to []", p)
+
+    did = add_device(conn, "192.0.2.1", "rt")
+    count = lambda kind=None: conn.execute("SELECT COUNT(*) FROM routes WHERE device_id=?" + (" AND kind='%s'" % kind if kind else ""), (did,)).fetchone()[0]
+    events = lambda: conn.execute("SELECT subject FROM events WHERE kind='routes_changed'").fetchall()
+    def stale():
+        # Every apply here lands in the same second, which is the stamp a stored row carries; backdate them so
+        # "not seen in this poll" is true, as it is between two real polls.
+        conn.execute("UPDATE routes SET last_seen = '2000-01-01 00:00:00'")
+    def poll(rows):
+        stale()
+        ssh.apply_result(conn, did, "routes", rows)
+        conn.execute("INSERT INTO poll_history (device_id, transport, task, ok, started_at, received_at) VALUES (?, 'ssh', 'routes', 1, '', '')", (did,))
+        conn.commit()
+    ssh.apply_result(conn, did, "routes", a + fib)    # first poll: no poll_history row yet = baseline
+    conn.commit()
+    need(count() == 16 and not events(), "first poll: %d rows, %d events (baseline must be silent)" % (count(), len(events())), p)
+    poll(a + fib)
+    need(not events(), "an unchanged table emitted an event", p)
+    poll(a[:-1] + fib)
+    ev = events()
+    need(len(ev) == 1 and "+0 -1" in ev[0][0], "one removed prefix must give exactly one 'routes +0 -1' event, got %r" % ev, p)
+    stale()
+    ssh.apply_result(conn, did, "routes", []); conn.commit()
+    need(count("rib") == 11, "an empty routes answer deleted rows: %d left" % count("rib"), p)
+    stale()
+    ssh.apply_result(conn, did, "routes", a); conn.commit()   # RIB only, as when the FIB could not be read
+    need(count("fib") == 4, "a poll without FIB rows wiped the stored FIB", p)
+    return p
+
 
 def run_live():
     """Start the real server (serve.py) from a temp copy on free ports and

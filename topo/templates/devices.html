@@ -52,7 +52,7 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
                 <button type="button" id="poll-all-btn" class="primary" onclick="pollAll()">Poll all now</button>
                 <span class="msg" id="poll-msg"></span>
             </div>
-            <table class="striped compact">
+            <table data-sortable class="striped compact">
                 <thead>
                     <tr>
                         <th>Hostname</th><th>Poll</th><th>Role</th><th>Mgmt IP</th><th>Site</th>
@@ -68,7 +68,7 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
         <div class="section-header"><span>Unknown LLDP neighbors</span></div>
         <div class="section-body">
             <div class="hint">Neighbors that advertise a management IP no device owns. Adding one creates an inventory entry with polling off; enable it on its page once credentials are set.</div>
-            <table class="striped">
+            <table data-sortable class="striped">
                 <thead><tr><th>Mgmt IP</th><th>Name</th><th>Seen on</th><th></th></tr></thead>
                 <tbody id="lldp-unknown-rows"></tbody>
             </table>
@@ -150,7 +150,7 @@ function renderDevices(list) {
             '<td>' + esc(d.site || '') + '</td>' +
             '<td>' + esc(d.key) + '</td>' +
             '<td>' + pingCell(d.reachable) + '</td>' +
-            '<td>' + timeAgo(d.last_seen) + '</td>' +
+            '<td data-sort="' + attr(d.last_seen || '') + '">' + timeAgo(d.last_seen) + '</td>' +
             '<td>' + (d.role === 'node' || !d.enabled ? '' :
                 '<button onclick="pollDevice(' + d.id + ', this)">Poll now</button> ') +
                 '<button onclick="removeDevice(' + d.id + ')">delete</button></td>' +

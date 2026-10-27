@@ -69,6 +69,13 @@ def _keygen(session, host, creds):
 
 def _run_command(session, host, key, task, plat):
     output = _op(session, host, key, plat["commands"][task])
+    if task == "routes":
+        # The RIB is the answer; without the FIB (a role that may not run it) the RIB is still worth having.
+        try:
+            fib = _op(session, host, key, plat["fib_command"])
+        except Exception:
+            fib = ""
+        return output + "\n\n" + fib, plat["parsers"]["routes"](output) + parser.parse_fib(fib)
     if task != "bgp":
         return output, plat["parsers"][task](output)
     # The peer list has no local AS; the summary has it per virtual router. Without the summary (a role

@@ -403,6 +403,33 @@ def api_device_interfaces(device_id):
     return jsonify(out)
 
 
+@app.route("/api/routes", methods=["GET"])
+def api_routes():
+    """A device's routing table. ?device_id=N is required; ?vrf=, ?kind=rib|fib and ?prefix= (substring) narrow it."""
+    device_id = request.args.get("device_id", type=int)
+    if device_id is None:
+        return jsonify({"error": "device_id is required"}), 400
+    sql = ("SELECT vrf, kind, prefix, protocol, next_hop, interface, distance, metric, age, flags, last_seen "
+           "FROM routes WHERE device_id = ?")
+    args = [device_id]
+    if request.args.get("vrf"):
+        sql += " AND vrf = ?"
+        args.append(request.args["vrf"])
+    if request.args.get("kind") in ("rib", "fib"):
+        sql += " AND kind = ?"
+        args.append(request.args["kind"])
+    if request.args.get("prefix"):
+        sql += " AND prefix LIKE ? ESCAPE '\\'"
+        args.append(db.like_arg(request.args["prefix"]))
+    rows = db.get_db().execute(sql + " ORDER BY vrf, kind, prefix, next_hop", args).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["last_seen"] = db.iso(d["last_seen"])
+        out.append(d)
+    return jsonify(out)
+
+
 CREDENTIAL_FIELDS = ("username", "password", "enable_secret")
 CREDENTIAL_SECRETS = ("password", "enable_secret")
 

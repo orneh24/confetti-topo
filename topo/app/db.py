@@ -213,6 +213,26 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_events_at ON events(at);
         CREATE INDEX IF NOT EXISTS idx_events_device ON events(device_id, at);
 
+        -- A device's IPv4 routing table. kind is 'rib' or 'fib'; one row per next hop (ECMP).
+        -- Text columns use '' not NULL so the UNIQUE key works.
+        CREATE TABLE IF NOT EXISTS routes (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id  INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+            vrf        TEXT NOT NULL DEFAULT 'default',
+            kind       TEXT NOT NULL DEFAULT 'rib',
+            prefix     TEXT NOT NULL,
+            protocol   TEXT NOT NULL DEFAULT '',
+            next_hop   TEXT NOT NULL DEFAULT '',
+            interface  TEXT NOT NULL DEFAULT '',
+            distance   INTEGER,
+            metric     INTEGER,
+            age        TEXT,
+            flags      TEXT,
+            last_seen  TEXT NOT NULL,
+            UNIQUE(device_id, vrf, kind, prefix, next_hop, interface)
+        );
+        CREATE INDEX IF NOT EXISTS idx_routes_device ON routes(device_id, vrf, kind);
+
         -- Where each node sits on the topology page, shared by every viewer.
         -- node_id is the graph id ('dev:5', 'ghost:lldp:sw1'), not a devices FK.
         CREATE TABLE IF NOT EXISTS node_positions (

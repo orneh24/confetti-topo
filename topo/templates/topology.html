@@ -934,6 +934,7 @@ function openContextMenu(id, x, y) {
         spec = { title: node.mgmt_ip ? node.label + ' | ' + node.mgmt_ip : node.label,   // e.g. csr-1 | 192.0.2.1
                  items: [
             { label: 'Open device page', action: function () { window.location.href = '/devices/' + node.device_id; }, disabled: !isDevice },
+            { label: 'View routing table', action: function () { window.location.href = '/devices/' + node.device_id + '#routes'; }, disabled: !isDevice },
             { label: 'Hide this node', action: function () {
                 hiddenNodes[id] = true;
                 saveHiddenNodes();

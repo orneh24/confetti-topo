@@ -312,3 +312,80 @@ def parse_ospf_neighbors(text):
             "local_if": m.group("interface"),
         })
     return out
+
+
+# ---------------------------------------------------------------------------
+# show ip route vrf *     (the global table first, then "Routing Table: <vrf>" for each VRF)
+#
+# Under "172.16.0.0/24 is subnetted" the route lines carry no mask, so the header's mask is used.
+# A long prefix may sit alone on its line with "[110/2] via ..." on the next, and an equal-cost path is
+# a further indented "[d/m] via ..." line: both belong to the last prefix seen. Checked against real
+# IOS-XE 17.3 and 15.4 output; the continuation line is not in that output (see dev/samples/README.md).
+# ---------------------------------------------------------------------------
+
+_ROUTE_TABLE_RE = re.compile(r"^Routing Table:\s*(\S+)")
+_ROUTE_HEADER_RE = re.compile(r"^\s+\d{1,3}(?:\.\d{1,3}){3}/(\d+) is (?:variably )?subnetted")
+_ROUTE_LINE_RE = re.compile(
+    r"^(?P<code>\S.{0,7}?)\s+(?P<prefix>\d{1,3}(?:\.\d{1,3}){3}(?:/\d+)?)(?:\s+(?P<rest>\S.*))?$")
+_ROUTE_VIA_RE = re.compile(r"^\s*\[(\d+)/(\d+)\]\s+via\s+(\d{1,3}(?:\.\d{1,3}){3})(?:,\s*(.*))?$")
+_ROUTE_CONNECTED_RE = re.compile(r"is directly connected,\s*(\S+)")
+_ROUTE_SUMMARY_RE = re.compile(r"is a summary,\s*(?:(\d\S*),\s*)?(\S+)")
+_ROUTE_PROTOCOLS = {"C": "connected", "L": "local", "S": "static", "R": "rip", "B": "bgp", "D": "eigrp",
+                    "O": "ospf", "i": "isis", "o": "odr", "M": "mobile", "H": "nhrp", "P": "static"}
+
+
+def parse_routes(text):
+    """One row per next hop: vrf, kind ('rib'), prefix, protocol, next_hop, interface, distance, metric, age,
+    flags (the route code as printed, e.g. 'O E2'). Text columns are '' not None (the table's key)."""
+    out = []
+    vrf, mask, last = "default", None, None   # last = (code, prefix) for a continuation line
+
+    def row(code, prefix, next_hop="", interface="", distance=None, metric=None, age=None):
+        out.append({
+            "vrf": vrf, "kind": "rib", "prefix": prefix,
+            "protocol": _ROUTE_PROTOCOLS.get(code.replace("*", "").strip()[:1], code.strip()),
+            "next_hop": next_hop, "interface": interface, "distance": distance, "metric": metric,
+            "age": age, "flags": code.strip(),
+        })
+
+    def via(code, prefix, text_after):
+        m = _ROUTE_VIA_RE.match(text_after)
+        if not m:
+            return False
+        # After the next hop: an age (starts with a digit: 2w5d, 00:01:00), an interface (starts with a letter), or both.
+        age, interface = None, ""
+        for tok in [t.strip() for t in (m.group(4) or "").split(",") if t.strip()]:
+            if tok[0].isdigit():
+                age = tok
+            else:
+                interface = tok.split()[0]
+        row(code, prefix, m.group(3), interface, int(m.group(1)), int(m.group(2)), age)
+        return True
+
+    for line in text.splitlines():
+        t = _ROUTE_TABLE_RE.match(line)
+        if t:
+            vrf, mask, last = t.group(1), None, None
+            continue
+        h = _ROUTE_HEADER_RE.match(line)
+        if h:
+            mask = h.group(1)
+            continue
+        if last and line[:1].isspace() and via(last[0], last[1], line):
+            continue
+        m = _ROUTE_LINE_RE.match(line)
+        if not m:
+            continue
+        code, prefix, rest = m.group("code"), m.group("prefix"), m.group("rest") or ""
+        if "/" not in prefix and mask:
+            prefix += "/" + mask
+        last = (code, prefix)
+        c = _ROUTE_CONNECTED_RE.search(rest)
+        s = _ROUTE_SUMMARY_RE.search(rest)
+        if c:
+            row(code, prefix, interface=c.group(1))
+        elif s:
+            row(code, prefix, interface=s.group(2), age=s.group(1))
+        elif not via(code, prefix, rest):
+            pass   # prefix alone on its line: the next line carries "[d/m] via ..."
+    return out

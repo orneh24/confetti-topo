@@ -2,7 +2,7 @@
 
 A device's `platform` column picks its entry here. The poller itself does not
 care: every platform produces the same parsed shapes for the same task names
-(version, interfaces, lldp, bgp, ospf), so the apply steps, events and
+(version, interfaces, lldp, bgp, ospf, routes), so the apply steps, events and
 topology work unchanged for all of them. Adding a vendor means adding an entry
 here plus its parsers (Junos is planned, see docs/ROADMAP.md).
 
@@ -26,6 +26,8 @@ IOS = {
         "lldp": "show lldp neighbors detail",
         "bgp": "show bgp summary",
         "ospf": "show ip ospf neighbor",
+        # The global table, then each VRF's. IOS without VRF support answers "%": see routes_fallback_command.
+        "routes": "show ip route vrf *",
     },
     "parsers": {
         "version": ios.parse_version,
@@ -33,9 +35,11 @@ IOS = {
         "lldp": ios.parse_lldp_neighbors,
         "bgp": ios.parse_bgp_summary,
         "ospf": ios.parse_ospf_neighbors,
+        "routes": ios.parse_routes,
     },
     # Older IOS leaves "Local Intf" out of the detail output; this table has it.
     "lldp_brief_command": "show lldp neighbors",
+    "routes_fallback_command": "show ip route",
 }
 
 # Palo Alto PAN-OS over the XML API (collectors/panos.py): the commands are XML operations, read-only
@@ -48,6 +52,7 @@ PANOS = {
         "lldp": "<show><lldp><neighbors>all</neighbors></lldp></show>",
         "bgp": "<show><routing><protocol><bgp><peer/></bgp></protocol></routing></show>",
         "ospf": "<show><routing><protocol><ospf><neighbor/></ospf></protocol></routing></show>",
+        "routes": "<show><routing><route/></routing></show>",   # the RIB; the FIB is fib_command
     },
     "parsers": {
         "version": panos.parse_version,
@@ -55,8 +60,10 @@ PANOS = {
         "lldp": panos.parse_lldp_neighbors,
         "bgp": panos.parse_bgp_peers,
         "ospf": panos.parse_ospf_neighbors,
+        "routes": panos.parse_routes,
     },
     "bgp_summary_command": "<show><routing><protocol><bgp><summary/></bgp></protocol></routing></show>",
+    "fib_command": "<show><routing><fib/></routing></show>",
 }
 
 PLATFORMS = {
