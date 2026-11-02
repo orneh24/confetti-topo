@@ -45,6 +45,7 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
   on the graph.
 - **Events.** Neighbor, peer and interface changes, OS changes and devices going unreachable are listed on the
   dashboard, on each device page and on the Recent changes page (filters, sortable, Before and After states coloured green, yellow or red). There is no alerting; see the roadmap.
+- **Device page.** Interfaces, LLDP neighbors, BGP/OSPF sessions and the routing table (filter, "export CSV"). On a switch also VLANs, trunks, the spanning-tree summary and the learned MAC addresses (filter; a MAC that belongs to a known device names it).
 - **Metrics.** `GET /metrics` serves Prometheus text.
 - **Look.** Seven colour themes (or Shuffle) and five layouts, picked in the header.
 
