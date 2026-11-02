@@ -72,9 +72,9 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
 {% block content %}
 <div class="filters">
     <span class="hint">Show:</span>
-    <button class="active" data-layer="lldp" data-name="LLDP" aria-pressed="true" onclick="toggleLayer(this)">LLDP</button>
-    <button class="active" data-layer="bgp" data-name="BGP" aria-pressed="true" onclick="toggleLayer(this)">BGP</button>
-    <button class="active" data-layer="ospf" data-name="OSPF" aria-pressed="true" onclick="toggleLayer(this)">OSPF</button>
+    <button class="active" data-layer="lldp" data-name="LLDP" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide the cables the devices report over LLDP">LLDP</button>
+    <button class="active" data-layer="bgp" data-name="BGP" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide BGP sessions">BGP</button>
+    <button class="active" data-layer="ospf" data-name="OSPF" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide OSPF adjacencies">OSPF</button>
     <span class="hint">|</span>
     <button class="active" id="unknown-btn" aria-pressed="true" onclick="toggleUnknown(this)" title="Neighbors and peers that are not matched to a known device">Unknown nodes</button>
     <button class="active" id="icons-btn" aria-pressed="true" onclick="toggleIcons(this)" title="Draw devices as icons with a vendor mark. Off: plain boxes for every device">Device icons</button>
