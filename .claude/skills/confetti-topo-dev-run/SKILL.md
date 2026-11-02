@@ -19,6 +19,8 @@ cd topo && TOPO_PORT=8080 python serve.py
 - The database is `topo.db` in the working directory (`TOPO_DB_PATH` overrides). It holds plaintext device
   credentials; it is git-ignored. Check it is up: `curl http://127.0.0.1:8080/api/health`.
   `"rc-service not installed"` for every service is normal on Windows.
+- `topo/topo.db` is the user's working DB and normally holds real devices. After start, run
+  `GET /api/devices` and report the count. Never call it empty.
 - **Stopping on Windows:** stopping the background shell leaves `python serve.py` running and holding the
   port. Find it with `Get-NetTCPConnection -LocalPort 8080 -State Listen` and kill that PID before
   restarting. If an old server is still up, it (not the new code) answers requests.
