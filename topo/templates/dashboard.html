@@ -3,6 +3,20 @@
 {% block head %}
 <style>
 .note { margin-top: 10px; }
+/* Activity chart: one bar per hour, stacked by severity; colours come from the theme variables. */
+.act-bars { display: flex; align-items: flex-end; gap: 2px; height: 64px; }
+.act-bar { flex: 1 1 0; display: flex; flex-direction: column-reverse; min-width: 0; height: 100%; justify-content: flex-start; }
+.act-bar { border-bottom: 1px solid var(--border); }
+.act-bar i { display: block; width: 100%; min-height: 0; }
+.act-bar .s-info { background: var(--cyan); }
+.act-bar .s-warning { background: var(--yellow); }
+.act-bar .s-critical { background: var(--red); }
+/* The CRT layout's colours are close together: warnings are hatched so they read without colour. */
+:root[data-layout="greencrt"] .act-bar .s-warning { background: repeating-linear-gradient(45deg, var(--yellow) 0 2px, transparent 2px 5px); }
+.act-axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); margin-top: 3px; }
+.act-key { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+.act-key b { display: inline-block; width: 9px; height: 9px; margin: 0 3px 0 10px; vertical-align: baseline; }
+.act-key b:first-child { margin-left: 0; }
 </style>
 {% endblock %}
 {% block kpis %}
@@ -28,6 +42,14 @@
     <div class="section">
         <div class="section-header"><span>Services</span></div>
         <div class="section-body" id="services-body"><div class="kv"><span class="k">loading</span></div></div>
+    </div>
+    <div class="section wide">
+        <div class="section-header"><span>Activity, last 24 h <span id="act-count"></span></span></div>
+        <div class="section-body">
+            <div class="act-bars" id="act-bars" role="img" aria-label="Change events per hour for the last 24 hours"></div>
+            <div class="act-axis"><span>24 h ago</span><span>12 h ago</span><span>now</span></div>
+            <div class="act-key"><b class="s-info" style="background:var(--cyan)"></b>info<b style="background:var(--yellow)"></b>warning<b style="background:var(--red)"></b>critical</div>
+        </div>
     </div>
     <div class="section wide">
         <div class="section-header"><span>Devices <span id="dev-count"></span></span></div>
@@ -212,10 +234,37 @@ function loadEvents() {
     });
 }
 
+// Events per hour for the last 24 hours, newest bar on the right. Bar height is relative to the busiest hour.
+function loadActivity() {
+    fetch('/api/events?hours=24&limit=1000').then(function (r) { return r.json(); }).then(function (list) {
+        var now = Date.now(), buckets = [];
+        for (var i = 0; i < 24; i++) { buckets.push({ info: 0, warning: 0, critical: 0 }); }
+        list.forEach(function (e) {
+            var ago = Math.floor((now - new Date(e.at).getTime()) / 3600000);
+            if (ago >= 0 && ago < 24 && buckets[23 - ago][e.severity] !== undefined) { buckets[23 - ago][e.severity]++; }
+        });
+        var top = 1;
+        buckets.forEach(function (b) { top = Math.max(top, b.info + b.warning + b.critical); });
+        var html = '';
+        buckets.forEach(function (b, i) {
+            var total = b.info + b.warning + b.critical;
+            var label = (23 - i) + ' h ago: ' + total + (total === 1 ? ' event' : ' events');
+            html += '<div class="act-bar" title="' + label + '">';
+            ['info', 'warning', 'critical'].forEach(function (sev) {
+                if (b[sev]) { html += '<i class="s-' + sev + '" style="height:' + (b[sev] / top * 100) + '%"></i>'; }
+            });
+            html += '</div>';
+        });
+        document.getElementById('act-bars').innerHTML = html;
+        document.getElementById('act-count').textContent = '(' + list.length + ' events)';
+    });
+}
+
 function pollAll() {
     poll();
     loadKpis();
     loadEvents();
+    loadActivity();
 }
 
 pollAll();
