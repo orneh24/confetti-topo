@@ -79,6 +79,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <button id="changed-btn" aria-pressed="false" onclick="toggleChanged(this)" title="Glow around devices that had a change event in the last 24 hours">Changed 24h</button>
     <button id="tidy-btn" onclick="tidyAsAreas()" title="Move the routers so each BGP AS sits in its own block (changes the saved places)">Tidy AS areas</button>
     <button id="png-btn" onclick="exportPng()" title="Download the map as a PNG picture">Export PNG</button>
+    <button id="json-btn" onclick="exportJson()" title="Download the map data (devices, neighbors, sessions) as a JSON file">Export JSON</button>
 </div>
 <div class="net-wrap">
     <div id="net"></div>
@@ -381,6 +382,20 @@ function exportPng() {
         a.remove();
         setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
     }, 'image/png');
+}
+
+// Download the map data as it came from the server (nodes, edges with their link details, saved places). No secrets
+// are in it: the same data /api/topology serves to every viewer.
+function exportJson() {
+    if (!rawData) { toast('nothing to export'); return; }
+    var d = new Date(), pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(rawData, null, 2)], { type: 'application/json' }));
+    a.download = 'confetti-topo-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
 }
 
 // /topology?device=<id> (from the Recent changes page): select that device and centre on it, once.
@@ -1163,6 +1178,7 @@ function openContextMenu(id, x, y) {
             { label: 'Show all', action: showAllLayers },
             { label: 'Reset view', action: fitMap },
             { label: 'Export PNG', action: exportPng },
+            { label: 'Export JSON', action: exportJson },
             { label: 'Tidy AS areas', action: tidyAsAreas },
             { label: 'Re-arrange', action: rearrange },
         ] };
