@@ -7,3 +7,7 @@ Newest last. Times are local.
 - 2026-11-02 21:55 Topology: search box in the Devices list. Matches name, management IP or AS; the title shows "N of M"; Enter goes to the first match, Escape clears.
 - 2026-11-02 21:58 Topology: an LLDP cable is drawn red and dashed when a device reports the local port as not up (`topology.py`, exact port-name match only; an unmatched name stays normal). Legend updated.
 - 2026-11-02 22:00 Regression gate: CLEAR (32 checks).
+- 2026-11-02 22:35 Topology: cable link state now compares port names with the type spelled out ("Gi1" = "GigabitEthernet1"; `topology.py` `port_key`).
+- 2026-11-02 22:36 Topology: the search box also fades non-matching devices on the map (stays while it refreshes).
+- 2026-11-02 22:40 Dashboard: new Devices table (ping, poll state, last good poll), problems first, in every layout.
+- 2026-11-02 22:41 `topo-setup.sh`: example address in a comment changed to the documentation range (192.0.2.x).

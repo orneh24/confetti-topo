@@ -197,6 +197,7 @@ function toVisNodes(nodes) {
     var GROUP_COLOR = { router: themeColor('--blue'), node: themeColor('--text-dim'), unknown: themeColor('--border') };
     return nodes.map(function (n) {
         var o = oneVisNode(n, GROUP_COLOR);
+        o.opacity = searchOpacity(n);
         if (n.ghost) { o.mass = 0.5; }   // an unidentified neighbor is pushed around more than a router
         if (n.members) { o.title = n.members.join('\n'); }   // hover on a group lists what is in it
         if (n.x !== undefined) { o.x = n.x; o.y = n.y; }   // a place saved on the server
@@ -822,6 +823,7 @@ function renderDeviceList() {
         box.appendChild(row);
     });
     markDeviceList();
+    dimMap();
 }
 
 // The search box: a device matches on part of its name, management IP or "AS 65001" / "65001".
@@ -835,6 +837,20 @@ function devSearchKey(ev) {
     if (ev.key !== 'Enter') { return; }
     var first = document.querySelector('#dev-rows .dev-row');
     if (first) { pickFromList(first.getAttribute('data-id')); }
+}
+
+// While the search box has text, devices that do not match fade on the map (the matches stay clear).
+function searchOpacity(n) {
+    var q = devSearchText();
+    return !q || (!n.ghost && !n.members && devMatches(n, q)) ? 1 : 0.2;
+}
+function dimMap() {
+    if (!nodeSet || !rawData) { return; }
+    var byId = {};
+    rawData.nodes.forEach(function (n) { byId[n.id] = n; });
+    nodeSet.update(nodeSet.getIds().map(function (id) {
+        return { id: id, opacity: byId[id] ? searchOpacity(byId[id]) : (devSearchText() ? 0.2 : 1) };
+    }));
 }
 
 function markDeviceList() {

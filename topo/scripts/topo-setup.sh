@@ -58,7 +58,7 @@ case "$ANSWER" in
 esac
 
 # Checks an IP/prefix and prints the subnet's first address (network + 1),
-# the default offered for the gateway: 172.16.200.214/16 -> 172.16.0.1.
+# the default offered for the gateway: 192.0.2.10/24 -> 192.0.2.1.
 # Exits 1 if the input is not IP/prefix. Prints nothing for /31 and /32,
 # which have no separate gateway address. Integer arithmetic, since BusyBox
 # awk has no bitwise AND. Same function as the hub's setup script.

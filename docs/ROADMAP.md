@@ -8,8 +8,8 @@ Ideas only. Nothing here is built until the user picks it.
   sender thread (webhook / mail), or send events to butler.
 
 ## Topology
-- **Link state, follow-up:** match short port names ("Gi1" vs "GigabitEthernet1") so more cables can show down; show the state on the link card.
-- **Search, follow-up:** highlight the matches and their neighbors on the map, not only the list.
+- **Link state, follow-up:** show the port state on the link card.
+- **Search, follow-up:** also keep the matches' neighbors clear on the map.
 - **Routing table follow-ups:** IPv6 and a cap on a very large table; validate ECMP against a real router (the
   fixture `ios_route_not_captured.txt` is not a capture).
 - **Routing table docs and mock data:** update `docs/TOPOLOGY-MAPPING.md` (commands table, `routes` schema),
@@ -37,7 +37,5 @@ Ideas only. Nothing here is built until the user picks it.
 
 ## Operations
 - **Authentication** for the UI and API (the siblings have none either).
-- **Placeholder address:** `topo/scripts/topo-setup.sh:61` has a non-documentation private address in a comment
-  example; change it to a documentation-range one.
 - **Packer template** for vCenter, once one exists in butler that has actually run.
 - **vCenter discovery**, only together with a real vCenter to test against.

@@ -154,6 +154,25 @@ def resolve_lldp(ctx, device_id, stored_id, ip, chassis, sysname):
     return None, None
 
 
+_PORT_LONG = {"gi": "gigabitethernet", "te": "tengigabitethernet", "fa": "fastethernet", "tw": "twogigabitethernet",
+              "fo": "fortygigabitethernet", "hu": "hundredgige", "eth": "ethernet", "et": "ethernet",
+              "po": "port-channel", "lo": "loopback", "vl": "vlan"}
+
+
+def port_key(name):
+    """A port name with its type prefix spelled out, lower case: "Gi0/1" and "GigabitEthernet0/1" both give
+    "gigabitethernet0/1". A name that is not type + number comes back lower-cased as it is."""
+    m = re.fullmatch(r"([A-Za-z\-]+?)\s*(\d[\d/.:]*)", (name or "").strip())
+    if not m:
+        return (name or "").strip().lower()
+    kind = m.group(1).lower()
+    for short, long_ in _PORT_LONG.items():
+        if kind == short or (kind.startswith(short) and long_.startswith(kind)):
+            kind = long_
+            break
+    return kind + m.group(2)
+
+
 def port_text(port, descr):
     """The port name to show: a port id that is only a MAC address (Linux lldpd) is shown as the port description."""
     return descr if norm_mac(port) and descr else port
@@ -228,13 +247,13 @@ def build(conn, layer=None):
         # duplicate line is safer than hiding a real parallel link. Ghost
         # links are never de-duplicated.
         seen = {}   # cable (both ends) -> the edge already drawn for it
-        # A cable whose local port a device reports as not up is drawn red and dashed. Only an exact name match counts:
-        # a port spelled differently ("Gi1" vs "GigabitEthernet1") is unknown, not down.
-        oper = {(i["device_id"], i["name"].lower()): i["oper_status"]
+        # A cable whose local port a device reports as not up is drawn red and dashed. Names are compared with the
+        # type spelled out ("Gi1" = "GigabitEthernet1"); a port that matches no interface is unknown, not down.
+        oper = {(i["device_id"], port_key(i["name"])): i["oper_status"]
                 for i in conn.execute("SELECT device_id, name, oper_status FROM interfaces")}
 
         def port_down(device_id, port):
-            status = oper.get((device_id, (port or "").lower()))
+            status = oper.get((device_id, port_key(port)))
             return status is not None and status != "up"
         for r in rows:
             remote, how = resolve_lldp(ctx, r["device_id"], r["remote_device_id"], r["remote_mgmt_ip"],
