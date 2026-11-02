@@ -254,6 +254,7 @@ topo/
     discovery.py       — scheduled discovery thread (off by default)
     lldp_crawl.py      — adopt unknown LLDP neighbors as inventory-only devices
     metrics.py         — /metrics Prometheus text
+    auth.py            — optional access token (TOPO_AUTH_TOKEN): /login, cookie or bearer; off by default
     collectors/        — ssh.py, panos.py (XML API), sweep.py, confetti.py, butler.py, seedfile.py
     parsers/           — ios.py (regex only), panos.py (XML)
   templates/           — base.html (head, header/nav, theme + layout pickers, footer, Retro taskbar)
@@ -295,7 +296,8 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
   page also applies or removes per-device credentials on several devices at once. Plaintext in v1 —
   `topo.db` must be `0600` (`checkpath --directory --mode 0700` on `/var/lib/confetti-topo` in the OpenRC
   service is the current mitigation).
-- **The API is unauthenticated**, same trust model as the siblings; do not expose it. A sweep CIDR or a
+- **The API is unauthenticated unless `TOPO_AUTH_TOKEN` is set** (`app/auth.py`, constraint 18), same trust model as
+  the siblings; do not expose it either way. A sweep CIDR or a
   confetti-traffic or confetti-butler URL given to the API makes the server connect there.
 - **Keep code simplistic to avoid over-engineering.** A network engineer reading this at 2am should be able
   to follow it without decoding an abstraction.
@@ -370,6 +372,10 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
     connected routes, so an empty table means a parse failure; a FIB that could not be read must not wipe the stored
     FIB. Route changes are one `routes_changed` event per poll, and none on a device's first `routes` poll
     (constraint 11). Checked by R32.
+18. **The access token is optional, off by default, and never changes the poller.** With `TOPO_AUTH_TOKEN` empty nothing is
+    checked. With it set, pages redirect to `/login`, `/api/*` and `/metrics` answer 401, and `/api/health`, `/static`, `/login`
+    and `/logout` stay open. The cookie is HttpOnly, SameSite=Strict and holds a hash, never the token; `next` may only be a
+    path on this server. Checked by R33.
 
 ## Regression gate
 
@@ -381,7 +387,7 @@ HTTP; `R21`..`R26` cover the ICMP state machine, `/metrics` format, LLDP crawl, 
 container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R27` checks the OpenSSH
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
-the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll. Output is one line per check
+the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

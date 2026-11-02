@@ -1260,6 +1260,43 @@ def _():
     return p
 
 
+@check("R33", "optional access token: off by default; when set, pages redirect to /login, API and /metrics give 401, health and static stay open, bearer / header / cookie work, no open redirect")
+def _():
+    p = []
+    m, conn = fresh_db()
+    conn.close()
+    config = m["config"]
+    client = m["appmod"].app.test_client()
+    need(config.AUTH_TOKEN == "", "TOPO_AUTH_TOKEN must default to empty (no login)", p)
+    need(client.get("/api/devices").status_code == 200, "with no token set the API must stay open", p)
+    config.AUTH_TOKEN = "regress-token"
+    try:
+        r = client.get("/devices")
+        need(r.status_code == 302 and "/login" in r.headers.get("Location", ""), "a page must redirect to /login: %s" % r.status_code, p)
+        for url in ("/api/devices", "/metrics", "/api/topology"):
+            need(client.get(url).status_code == 401, "%s must be 401 without the token" % url, p)
+        need(client.get("/api/health").status_code == 200, "/api/health must stay open", p)
+        need(client.get("/static/theme.css").status_code == 200, "/static must stay open", p)
+        need(client.get("/login").status_code == 200, "/login page must render", p)
+        need(client.get("/api/devices", headers={"Authorization": "Bearer regress-token"}).status_code == 200, "bearer token rejected", p)
+        need(client.get("/api/devices", headers={"X-Topo-Token": "regress-token"}).status_code == 200, "X-Topo-Token rejected", p)
+        need(client.get("/api/devices", headers={"Authorization": "Bearer wrong"}).status_code == 401, "a wrong bearer token was accepted", p)
+        need(client.get("/api/devices", headers={"Authorization": "Bearer "}).status_code == 401, "an empty bearer token was accepted", p)
+        r = client.post("/login", data={"token": "wrong"})
+        need(r.status_code == 401 and "Set-Cookie" not in r.headers, "a wrong login must be 401 with no cookie", p)
+        r = client.post("/login", data={"token": "regress-token", "next": "//evil.example"})
+        cookie = r.headers.get("Set-Cookie", "")
+        need(r.status_code == 302 and r.headers.get("Location") == "/", "login must not redirect off-site: %s" % r.headers.get("Location"), p)
+        need("HttpOnly" in cookie and "SameSite=Strict" in cookie, "the cookie must be HttpOnly and SameSite=Strict: %s" % cookie, p)
+        need("regress-token" not in cookie, "the cookie must not hold the token itself", p)
+        need(client.get("/api/devices").status_code == 200, "the cookie from /login did not open the API", p)
+        client.get("/logout")
+        need(client.get("/api/devices").status_code == 401, "/logout did not close access", p)
+    finally:
+        config.AUTH_TOKEN = ""
+    return p
+
+
 def run_live():
     """Start the real server (serve.py) from a temp copy on free ports and
     drive it over HTTP and UDP."""

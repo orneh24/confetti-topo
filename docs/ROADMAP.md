@@ -34,6 +34,6 @@ Ideas only. Nothing here is built until the user picks it.
 - **SNMP LLDP-MIB** for devices without SSH.
 
 ## Operations
-- **Authentication** for the UI and API (the siblings have none either).
+- **Authentication, follow-up:** `TOPO_AUTH_TOKEN` gives one shared token (no users, no TLS). Per-user accounts and HTTPS would be next.
 - **Packer template** for vCenter, once one exists in butler that has actually run.
 - **vCenter discovery**, only together with a real vCenter to test against.

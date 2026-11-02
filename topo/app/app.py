@@ -12,6 +12,7 @@ import subprocess
 
 from flask import Flask, jsonify, render_template, request, Response
 
+from . import auth
 from . import config
 from . import db
 from . import discovery
@@ -31,6 +32,14 @@ app = Flask(
     template_folder=os.path.join(os.path.dirname(__file__), "..", "templates"),
     static_folder=os.path.join(os.path.dirname(__file__), "..", "static"),
 )
+
+
+auth.register(app)
+
+
+@app.context_processor
+def _auth_flag():
+    return {"auth_on": bool(config.AUTH_TOKEN)}
 
 
 @app.teardown_appcontext

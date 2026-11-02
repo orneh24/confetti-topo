@@ -78,3 +78,8 @@ HEALTH_SERVICES = [
     ).split(",") if s.strip()
 ]
 HEALTH_SERVICE_TIMEOUT_S = int(os.environ.get("TOPO_HEALTH_SERVICE_TIMEOUT_S", "3"))
+
+# Optional access token. Empty (the default) = no login, as before. When set, every page and API call needs it
+# (cookie from the /login page, or "Authorization: Bearer <token>" / "X-Topo-Token" for scripts and Prometheus).
+# /api/health and /static stay open. See app/auth.py.
+AUTH_TOKEN = os.environ.get("TOPO_AUTH_TOKEN", "")
