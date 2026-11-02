@@ -12,3 +12,6 @@ Newest last. Times are local.
 - 2026-11-02 22:40 Dashboard: new Devices table (ping, poll state, last good poll), problems first, in every layout.
 - 2026-11-02 22:41 `topo-setup.sh`: example address in a comment changed to the documentation range (192.0.2.x).
 - 2026-11-02 22:50 README: topology search and red cable noted.
+- 2026-11-02 23:10 Topology: the link card shows "local port state" for an LLDP cable and says when a port is down.
+- 2026-11-02 23:12 Topology: search keeps the match's linked devices half clear on the map.
+- 2026-11-02 23:20 Checked the down path on a scratch mock DB: cable gets up=false and port state down.

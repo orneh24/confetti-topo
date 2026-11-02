@@ -8,8 +8,6 @@ Ideas only. Nothing here is built until the user picks it.
   sender thread (webhook / mail), or send events to butler.
 
 ## Topology
-- **Link state, follow-up:** show the port state on the link card.
-- **Search, follow-up:** also keep the matches' neighbors clear on the map.
 - **Routing table follow-ups:** IPv6 and a cap on a very large table; validate ECMP against a real router (the
   fixture `ios_route_not_captured.txt` is not a capture).
 - **Routing table docs and mock data:** update `docs/TOPOLOGY-MAPPING.md` (commands table, `routes` schema),

@@ -194,6 +194,7 @@ function fillLegendIcons() {
 document.addEventListener('themechange', fillLegendIcons);
 
 function toVisNodes(nodes) {
+    findSearchNear();
     var GROUP_COLOR = { router: themeColor('--blue'), node: themeColor('--text-dim'), unknown: themeColor('--border') };
     return nodes.map(function (n) {
         var o = oneVisNode(n, GROUP_COLOR);
@@ -840,12 +841,27 @@ function devSearchKey(ev) {
 }
 
 // While the search box has text, devices that do not match fade on the map (the matches stay clear).
+// The devices a match is linked to stay half clear, so the match is seen in its place.
+var searchNear = {};
+function findSearchNear() {
+    searchNear = {};
+    var q = devSearchText();
+    if (!q || !rawData) { return; }
+    var hit = {};
+    rawData.nodes.forEach(function (n) { if (!n.ghost && !n.members && devMatches(n, q)) { hit[n.id] = true; } });
+    rawData.edges.forEach(function (e) {
+        if (hit[e.from]) { searchNear[e.to] = true; }
+        if (hit[e.to]) { searchNear[e.from] = true; }
+    });
+}
 function searchOpacity(n) {
     var q = devSearchText();
-    return !q || (!n.ghost && !n.members && devMatches(n, q)) ? 1 : 0.2;
+    if (!q || (!n.ghost && !n.members && devMatches(n, q))) { return 1; }
+    return searchNear[n.id] ? 0.6 : 0.2;
 }
 function dimMap() {
     if (!nodeSet || !rawData) { return; }
+    findSearchNear();
     var byId = {};
     rawData.nodes.forEach(function (n) { byId[n.id] = n; });
     nodeSet.update(nodeSet.getIds().map(function (id) {
@@ -978,7 +994,7 @@ var LINK_KIND = { lldp: 'LLDP link (cable)', bgp: 'BGP session', ospf: 'OSPF adj
 
 // The fields each protocol reports, in the order they are shown: [key in the report, label shown].
 var LINK_FIELDS = {
-    lldp: [['local_port', 'local port'], ['remote_port', 'remote port'], ['remote_name', 'remote name'],
+    lldp: [['local_port', 'local port'], ['local_port_state', 'local port state'], ['remote_port', 'remote port'], ['remote_name', 'remote name'],
            ['remote_chassis', 'chassis id'], ['remote_mgmt_ip', 'mgmt ip'], ['remote_descr', 'description'],
            ['matched_by', 'identified by']],
     bgp: [['peer_ip', 'neighbor'], ['local_as', 'own AS'], ['remote_as', 'neighbor AS'], ['state', 'state'], ['uptime', 'up for'],
@@ -997,7 +1013,7 @@ function showLinkPanel(edgeId) {
     document.getElementById('lp-sub').textContent = (label[edge.from] || '?') + '  <->  ' + (label[edge.to] || '?');
     var info = document.getElementById('lp-info');
     info.textContent = '';
-    addRow(info, 'status', edge.layer === 'lldp' ? 'cable seen' : (edge.up === false ? 'DOWN' : 'up'));
+    addRow(info, 'status', edge.layer === 'lldp' ? (edge.up === false ? 'cable seen, a port is DOWN' : 'cable seen') : (edge.up === false ? 'DOWN' : 'up'));
     if (edge.bgp_type) { addRow(info, 'type', edge.bgp_type === 'ibgp' ? 'iBGP (same AS at both ends)' : 'eBGP (between different ASes)'); }
     addRow(info, 'label', edge.label);
     var reports = document.getElementById('lp-reports');

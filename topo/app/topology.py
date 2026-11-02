@@ -178,11 +178,12 @@ def port_text(port, descr):
     return descr if norm_mac(port) and descr else port
 
 
-def _lldp_report(r, names, how=None):
+def _lldp_report(r, names, how=None, state=None):
     """What one end of a cable says about it, for the link details."""
     return {"reported_by": names.get(r["device_id"]), "local_port": r["local_if"], "remote_port": r["remote_port"],
             "remote_name": r["remote_sysname"], "remote_chassis": r["remote_chassis"], "remote_mgmt_ip": r["remote_mgmt_ip"],
-            "remote_descr": r["remote_descr"], "remote_port_descr": r["remote_port_descr"], "matched_by": how}
+            "remote_descr": r["remote_descr"], "remote_port_descr": r["remote_port_descr"], "matched_by": how,
+            "local_port_state": state}
 
 
 def _session_report(r, names):
@@ -252,8 +253,11 @@ def build(conn, layer=None):
         oper = {(i["device_id"], port_key(i["name"])): i["oper_status"]
                 for i in conn.execute("SELECT device_id, name, oper_status FROM interfaces")}
 
+        def port_state(device_id, port):
+            return oper.get((device_id, port_key(port)))
+
         def port_down(device_id, port):
-            status = oper.get((device_id, port_key(port)))
+            status = port_state(device_id, port)
             return status is not None and status != "up"
         for r in rows:
             remote, how = resolve_lldp(ctx, r["device_id"], r["remote_device_id"], r["remote_mgmt_ip"],
@@ -261,7 +265,7 @@ def build(conn, layer=None):
             if remote:
                 link = frozenset([(r["device_id"], r["local_if"]), (remote, r["remote_port"])])
                 if link in seen:
-                    seen[link]["details"].append(_lldp_report(r, names, how))   # the other end's view of the same cable
+                    seen[link]["details"].append(_lldp_report(r, names, how, port_state(r["device_id"], r["local_if"])))   # the other end's view of the same cable
                     if port_down(r["device_id"], r["local_if"]):
                         seen[link]["up"] = False
                     continue
@@ -271,7 +275,7 @@ def build(conn, layer=None):
             edge = {
                 "from": "dev:{}".format(r["device_id"]), "to": target, "layer": "lldp",
                 "label": "{} - {}".format(r["local_if"], port_text(r["remote_port"], r["remote_port_descr"]) or "?"),
-                "details": [_lldp_report(r, names, how)],
+                "details": [_lldp_report(r, names, how, port_state(r["device_id"], r["local_if"]))],
             }
             if port_down(r["device_id"], r["local_if"]):
                 edge["up"] = False
