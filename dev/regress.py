@@ -982,6 +982,7 @@ def _():
          and e1.get("network") == "198.51.100.0/24", "interface with an address: %r" % e1, p)
     need(ifs.get("ethernet1/1.3101", {}).get("oper_status") is None, "a sub-interface has no link state of its own, none must be invented", p)
     need(ifs.get("ethernet1/2", {}).get("ip") is None, "an interface with ip N/A must have no address", p)
+    need(e1.get("mac") == "0200.0000.000a" and ifs.get("ethernet1/1.3101", {}).get("mac") is None, "interface hardware MAC (dotted, none for a sub-interface): %r" % (e1.get("mac"),), p)
     ll = pp.parse_lldp_neighbors(sample("panos_lldp.xml"))
     sw = [r for r in ll if r["remote_port"] == "Gi0/7"]
     need(len(ll) == 9 and len(sw) == 1 and sw[0]["local_if"] == "ethernet1/1" and sw[0]["remote_mgmt_ip"] == "198.51.100.2",

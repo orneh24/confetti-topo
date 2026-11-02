@@ -151,8 +151,8 @@ VLANs or the blocking VLANs is one `stp_changed` warning event each (not on the 
 The `mac` task runs `show mac address-table` and keeps the **dynamic** (learned) entries in `mac_table` (VLAN, MAC, port; at most
 5000 per switch; `GET /api/mac?device_id=N&q=`, a MAC addresses box with a filter on the device page). The switch's own static
 rows are always in the answer, so an answer with no rows is a parse failure and deletes nothing. No events (addresses come and go
-all day). Fixture `dev/samples/ios_mac_table.txt` (real format, MACs replaced). `interfaces` now keeps each interface's hardware MAC (`interfaces.mac`, IOS only); `/api/mac` names a learned MAC's device when exactly
-one other device owns it (query time only, never stored, never an alias; same rule as constraint 12). Not handled: PAN-OS interface MACs.
+all day). Fixture `dev/samples/ios_mac_table.txt` (real format, MACs replaced). `interfaces` now keeps each interface's hardware MAC (`interfaces.mac`, IOS and PAN-OS); `/api/mac` names a learned MAC's device when exactly
+one other device owns it (query time only, never stored, never an alias; same rule as constraint 12).
 
 The `trunks` task runs `show interfaces trunk` the same way (`trunks` table, `GET /api/trunks?device_id=N`, a Trunks table on
 the device page). A switch may have no trunks, so an empty answer clears the table; a `%` answer fails the task and

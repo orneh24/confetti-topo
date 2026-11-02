@@ -98,6 +98,7 @@ def _interface_row(name, ifnet, hw):
     state = _text(hw, "state") if hw is not None else None
     speed = _text(hw, "speed") if hw is not None else None
     duplex = _text(hw, "duplex") if hw is not None else None
+    mac = (_text(hw, "mac") or "").lower().replace(":", "") if hw is not None else ""
     return {
         "name": name,
         "admin_status": None,   # the firewall does not say
@@ -111,6 +112,8 @@ def _interface_row(name, ifnet, hw):
         "mtu": None,
         "input_errors": None,
         "crc_errors": None,
+        # the hardware address in the dotted form IOS prints (0200.0000.000a), so a MAC table can name this device
+        "mac": "{}.{}.{}".format(mac[0:4], mac[4:8], mac[8:12]) if re.fullmatch(r"[0-9a-f]{12}", mac) else None,
     }
 
 
