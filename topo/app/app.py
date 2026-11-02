@@ -413,6 +413,22 @@ def api_device_interfaces(device_id):
     return jsonify(out)
 
 
+@app.route("/api/vlans", methods=["GET"])
+def api_vlans():
+    """A switch's VLANs (show vlan brief). ?device_id=N is required."""
+    device_id = request.args.get("device_id", type=int)
+    if device_id is None:
+        return jsonify({"error": "device_id is required"}), 400
+    rows = db.get_db().execute(
+        "SELECT vlan_id, name, status, ports, last_seen FROM vlans WHERE device_id = ? ORDER BY vlan_id", (device_id,)).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["last_seen"] = db.iso(d["last_seen"])
+        out.append(d)
+    return jsonify(out)
+
+
 @app.route("/api/routes", methods=["GET"])
 def api_routes():
     """A device's routing table. ?device_id=N is required; ?vrf=, ?kind=rib|fib and ?prefix= (substring) narrow it."""

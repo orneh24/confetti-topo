@@ -638,15 +638,19 @@ def sample(name):
     return read(SAMPLES + name)
 
 
-@check("R19", "platform registry: same tasks everywhere, unknown platform = IOS, every command read-only")
+@check("R19", "platform registry: same core tasks everywhere (vlans is IOS-only), unknown platform = IOS, every command read-only")
 def _():
     p = []
     m = app_modules()
     from app import platforms
     ios_tasks = tuple(platforms.IOS["commands"])
-    need(ios_tasks == ("version", "interfaces", "lldp", "bgp", "ospf", "routes"), "IOS tasks are %r" % (ios_tasks,), p)
+    core = ("version", "interfaces", "lldp", "bgp", "ospf", "routes")
+    need(ios_tasks == core + ("vlans",), "IOS tasks are %r" % (ios_tasks,), p)
     for name, plat in platforms.PLATFORMS.items():
-        need(tuple(plat["commands"]) == ios_tasks, "%s tasks are %r, expected %r" % (name, tuple(plat["commands"]), ios_tasks), p)
+        # "vlans" is a switch task of the IOS entry only; every platform has the six core tasks.
+        have = tuple(t for t in plat["commands"] if t != "vlans")
+        need(have == core, "%s tasks are %r, expected the core %r" % (name, tuple(plat["commands"]), core), p)
+        need("vlans" not in plat["commands"] or plat is platforms.IOS, "%s: vlans is only for the IOS entry" % name, p)
         need(set(plat["parsers"]) == set(plat["commands"]), "%s: commands and parsers differ" % name, p)
         # SSH platforms run `show ...`; the XML API platform sends `<show>...</show>` operations. Nothing else.
         prefix = "<show>" if plat.get("transport") == "xml_api" else "show "
@@ -1294,6 +1298,59 @@ def _():
         need(client.get("/api/devices").status_code == 401, "/logout did not close access", p)
     finally:
         config.AUTH_TOKEN = ""
+    return p
+
+
+@check("R34", "vlans (switches only): parses the real output, a router is never asked, an empty answer deletes nothing, a real list replaces the old one")
+def _():
+    p = []
+    m, conn = fresh_db()
+    from app.parsers import ios
+    ssh = m["ssh"]
+    text = read(SAMPLES + "ios_vlan_brief.txt")
+    v = ios.parse_vlans(text)
+    need(len(v) == 11 and v[0]["vlan_id"] == 1 and v[0]["ports"].startswith("Gi0/1, Gi0/2"), "ios_vlan_brief: %d rows, first %r" % (len(v), v[:1]), p)
+    need([x["status"] for x in v if x["vlan_id"] == 1002] == ["act/unsup"], "act/unsup status lost", p)
+    cont = ios.parse_vlans(text + "                                                Gi0/11, Gi0/12\n")   # written from IOS's documented format
+    need(cont[-1]["ports"] == "Gi0/11, Gi0/12", "a continuation line must add to the row above: %r" % cont[-1], p)
+    need("vlans" in ssh.TASKS, "vlans missing from the IOS tasks", p)
+    sw = {"role": "router", "model": "WS-C3560CG-8TC-S", "hostname": "sw1", "platform": "cisco_ios"}
+    rt = {"role": "router", "model": "CSR1000V", "hostname": "csr1", "platform": "cisco_ios"}
+    need(ssh._is_switch(sw) and not ssh._is_switch(rt), "only a switch may be asked for VLANs", p)
+    asked = []
+    class _Conn:
+        def send_command(self, cmd, **kw):
+            asked.append(cmd)
+            return ""
+        def disconnect(self):
+            pass
+        def check_enable_mode(self):
+            return True
+    real = ssh.ConnectHandler
+    ssh.ConnectHandler = lambda **kw: _Conn()
+    try:
+        for dev in (sw, rt):
+            asked.clear()
+            list(ssh.run_tasks(dict(dev, mgmt_ip="192.0.2.9"), {"username": "u", "password": "p", "secret": ""}))
+            need(("show vlan brief" in asked) == (dev is sw), "show vlan brief asked=%s for %s" % ("show vlan brief" in asked, dev["model"]), p)
+    finally:
+        ssh.ConnectHandler = real
+    did = add_device(conn, "192.0.2.9", "sw1")
+    ssh.apply_result(conn, did, "vlans", v)
+    conn.commit()
+    n = lambda: conn.execute("SELECT COUNT(*) FROM vlans WHERE device_id = ?", (did,)).fetchone()[0]
+    need(n() == 11, "stored %d vlans" % n(), p)
+    ssh.apply_result(conn, did, "vlans", [])
+    conn.commit()
+    need(n() == 11, "an empty answer must delete nothing", p)
+    import time
+    time.sleep(1.1)
+    ssh.apply_result(conn, did, "vlans", [x for x in v if x["vlan_id"] != 12])
+    conn.commit()
+    need(n() == 10, "a real list must replace the old one (VLAN 12 should be gone): %d" % n(), p)
+    r = m["appmod"].app.test_client().get("/api/vlans?device_id=%d" % did)
+    need(r.status_code == 200 and len(r.get_json()) == 10, "GET /api/vlans: %s" % r.status_code, p)
+    need(m["appmod"].app.test_client().get("/api/vlans").status_code == 400, "/api/vlans needs device_id", p)
     return p
 
 

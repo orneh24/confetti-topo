@@ -389,3 +389,24 @@ def parse_routes(text):
         elif not via(code, prefix, rest):
             pass   # prefix alone on its line: the next line carries "[d/m] via ..."
     return out
+
+
+# ---------------------------------------------------------------------------
+# show vlan brief (switches)
+# ---------------------------------------------------------------------------
+
+_VLAN_RE = re.compile(r"^(\d{1,4})\s+(\S+)\s+(\S+)\s*(.*)$")
+
+
+def parse_vlans(text):
+    """Parse 'show vlan brief' into {vlan_id, name, status, ports} rows. Ports stay one text ("Gi0/1, Gi0/2").
+    A long port list continues on indented lines under the Ports column; those are added to the row above."""
+    out = []
+    for line in text.splitlines():
+        m = _VLAN_RE.match(line)
+        if m:
+            out.append({"vlan_id": int(m.group(1)), "name": m.group(2), "status": m.group(3),
+                        "ports": m.group(4).strip()})
+        elif out and line[:1].isspace() and line.strip():
+            out[-1]["ports"] = (out[-1]["ports"] + ", " if out[-1]["ports"] else "") + line.strip()
+    return out

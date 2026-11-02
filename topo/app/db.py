@@ -233,6 +233,17 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_routes_device ON routes(device_id, vrf, kind);
 
+        -- A switch's VLANs (show vlan brief). ports is the device's own text, e.g. 'Gi0/1, Gi0/2'.
+        CREATE TABLE IF NOT EXISTS vlans (
+            device_id  INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+            vlan_id    INTEGER NOT NULL,
+            name       TEXT NOT NULL DEFAULT '',
+            status     TEXT NOT NULL DEFAULT '',
+            ports      TEXT NOT NULL DEFAULT '',
+            last_seen  TEXT NOT NULL,
+            PRIMARY KEY (device_id, vlan_id)
+        );
+
         -- Where each node sits on the topology page, shared by every viewer.
         -- node_id is the graph id ('dev:5', 'ghost:lldp:sw1'), not a devices FK.
         CREATE TABLE IF NOT EXISTS node_positions (

@@ -18,6 +18,7 @@ from .. import events
 from .. import identity
 from .. import lldp_crawl
 from .. import platforms
+from .. import topology
 from ..parsers import ios
 
 # The IOS entry, kept under these names: it is the default platform, and
@@ -66,6 +67,12 @@ def _run_command(conn, task, plat):
     return output, parsed
 
 
+def _is_switch(device):
+    """Only a device the topology draws as a switch is asked for its VLANs. The model is known from the first poll on,
+    so a new switch gets its VLANs from its second poll."""
+    return topology.device_type(device.get("role"), device.get("model"), device.get("hostname"), device.get("platform")) == "switch"
+
+
 def _is_cli_error(output):
     return output.lstrip().startswith("%") or "Invalid input" in output[:300]
 
@@ -86,6 +93,8 @@ def run_tasks(device, creds, tasks=None):
     """
     plat = platforms.get(device.get("platform"))
     tasks = tasks or platforms.tasks(plat)
+    if "vlans" in tasks and not _is_switch(device):
+        tasks = tuple(t for t in tasks if t != "vlans")   # a router answers "Invalid input": do not ask
 
     host = device.get("mgmt_ip")
     if not host:
@@ -148,6 +157,8 @@ def apply_result(conn, device_id, task, parsed):
         _apply_adjacencies(conn, device_id, "ospf", parsed, now)
     elif task == "routes":
         _apply_routes(conn, device_id, parsed, now)
+    elif task == "vlans":
+        _apply_vlans(conn, device_id, parsed, now)
 
 
 def _apply_version(conn, device_id, parsed, now):
@@ -351,3 +362,17 @@ def _apply_routes(conn, device_id, parsed, now):
     for kind in {r["kind"] for r in parsed}:
         conn.execute("DELETE FROM routes WHERE device_id = ? AND kind = ? AND last_seen <> ?",
                      (device_id, kind, now))
+
+
+def _apply_vlans(conn, device_id, parsed, now):
+    """Store the VLAN list. A switch always has VLAN 1, so an answer with no rows is a parse failure (or a "%" error)
+    and deletes nothing; a real list replaces the old one."""
+    for v in parsed:
+        conn.execute(
+            """INSERT INTO vlans (device_id, vlan_id, name, status, ports, last_seen) VALUES (?, ?, ?, ?, ?, ?)
+               ON CONFLICT(device_id, vlan_id) DO UPDATE SET
+                   name=excluded.name, status=excluded.status, ports=excluded.ports, last_seen=excluded.last_seen""",
+            (device_id, v["vlan_id"], v["name"], v["status"], v["ports"], now),
+        )
+    if parsed:
+        conn.execute("DELETE FROM vlans WHERE device_id = ? AND last_seen <> ?", (device_id, now))

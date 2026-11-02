@@ -146,6 +146,16 @@
             <div class="empty" id="route-empty" style="display:none">no routes polled yet</div>
         </div>
     </div>
+    <!-- Switches only: shown once the device has VLAN rows. -->
+    <div class="section wide" id="vlans" style="display:none">
+        <div class="section-header"><span>VLANs <span id="vlan-count"></span></span></div>
+        <div class="section-body">
+            <table data-sortable class="striped compact">
+                <thead><tr><th>VLAN</th><th>Name</th><th>Status</th><th>Ports</th></tr></thead>
+                <tbody id="vlan-rows"></tbody>
+            </table>
+        </div>
+    </div>
 </div>
 {% endblock %}
 {% block scripts %}
@@ -372,6 +382,19 @@ function renderRoutes() {
     empty.style.display = list.length ? 'none' : 'block';
 }
 
+function loadVlans() {
+    fetch('/api/vlans?device_id=' + deviceId).then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '';
+        list.forEach(function (v) {
+            rows += '<tr><td data-sort="' + v.vlan_id + '">' + v.vlan_id + '</td><td>' + esc(v.name) + '</td><td>' +
+                '<span class="pill ' + (v.status === 'active' ? 'ok' : 'idle') + '">' + esc(v.status) + '</span></td><td>' + esc(v.ports) + '</td></tr>';
+        });
+        document.getElementById('vlan-rows').innerHTML = rows;
+        document.getElementById('vlan-count').textContent = list.length ? '(' + list.length + ')' : '';
+        document.getElementById('vlans').style.display = list.length ? '' : 'none';
+    });
+}
+
 function loadLldp() {
     fetch('/api/lldp-neighbors?device_id=' + deviceId).then(function (r) { return r.json(); }).then(function (list) {
         var rows = '';
@@ -441,6 +464,7 @@ function pollNow() {
         loadDevice();
         loadInterfaces();
         loadRoutes();
+        loadVlans();
         loadLldp();
         loadAdjacencies();
         loadEvents();
@@ -453,6 +477,7 @@ function pollNow() {
 loadDevice();
 loadInterfaces();
 loadRoutes();
+loadVlans();
 loadLldp();
 loadAdjacencies();
 loadEvents();

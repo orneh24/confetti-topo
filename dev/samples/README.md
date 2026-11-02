@@ -10,6 +10,11 @@ Used by `dev/regress.py`.
   PAN-OS 11.1.10-h1: version, interfaces, LLDP, BGP peers, BGP summary (the router's own AS) and OSPF neighbors.
   Hostnames, addresses, MACs, serial and UUID were replaced with placeholders. See the `panos-xml-api` skill.
 
+- `ios_vlan_brief.txt` has the **real format** of `show vlan brief` from a Catalyst 3560 (VLAN 1 with its port list, an
+  empty port column, `act/unsup` rows); names were replaced with neutral ones. The continuation line for a long port
+  list is **not** in a real capture (the lab switch's list fits on one line); `regress.py` R34 adds one in the format
+  IOS documents.
+
 - `ios_route_17_3.txt` has the **real format** of `show ip route vrf *` from IOS-XE 17.3 (global table, then
   `Routing Table: MGMT`; a route under `is subnetted` with no mask; `O E2` with age and interface; a BGP route
   with no interface). `panos_route.xml` and `panos_fib.xml` have the real shape of the PAN-OS RIB and FIB answers
