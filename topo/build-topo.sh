@@ -233,6 +233,9 @@ TOPO_POLL_HISTORY_RETENTION_HOURS=168
 
 # --- Retention ---------------------------------------------------------
 TOPO_EVENT_RETENTION_DAYS=30
+# Topology history: look for a changed map this often (0 = off); keep snapshots this many days.
+TOPO_SNAPSHOT_INTERVAL_S=300
+TOPO_SNAPSHOT_RETENTION_DAYS=14
 # Nightly database backups kept (/var/lib/confetti-topo/backups).
 TOPO_BACKUP_KEEP=7
 

@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from . import config
 from . import db
 from . import events
+from . import history
 from . import identity
 from . import platforms
 from .collectors import panos as panos_collector
@@ -100,6 +101,11 @@ def _tick(executor):
             "DELETE FROM events WHERE at < datetime('now', ? || ' days')",
             ("-{:d}".format(config.EVENT_RETENTION_DAYS),),
         )
+        try:
+            history.maybe_snapshot(conn)
+            history.prune(conn)
+        except Exception:
+            pass   # history is an extra; a failure here must never stop polling
         conn.commit()
     finally:
         conn.close()

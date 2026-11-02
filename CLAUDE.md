@@ -157,6 +157,14 @@ hostname) and stores one row per VLAN in `vlans` (`GET /api/vlans?device_id=N`, 
 has VLAN 1, so an answer with no rows deletes nothing; a real list replaces the old one. No events. Fixture
 `dev/samples/ios_vlan_brief.txt` (real format, Catalyst 3560). Not handled: the MAC table.
 
+### Topology history
+
+`app/history.py`: the poller tick (every `TOPO_SNAPSHOT_INTERVAL_S`, default 300; 0 = off) builds the whole map and stores it in
+`topology_snapshots` only when its shape (nodes, links, link up/down, reachable) differs from the newest snapshot; snapshots older
+than `TOPO_SNAPSHOT_RETENTION_DAYS` (14) are pruned. `GET /api/topology/snapshots` (list, newest first) and
+`GET /api/topology/snapshots/<id>` are read-only. The topology page's History dropdown shows one with a banner and "Back to live".
+A snapshot is the `/api/topology` answer, so it holds nothing the page does not already show.
+
 ### Reachability
 
 `app/reach.py` (a daemon thread, `TOPO_PING_*`) pings every enabled device with a `mgmt_ip`, including
@@ -396,6 +404,9 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
 19. **VLANs, trunks and spanning tree are asked of switches only, and a failed answer deletes nothing.** A router answers `show vlan brief` with
     `Invalid input`, so `ssh.run_tasks` drops the `vlans` task unless `_is_switch`; PAN-OS has none. A switch always has VLAN 1,
     so an empty VLAN parse is a failure, not a real answer (constraint 14); a `%` answer fails all three tasks. Checked by R34.
+20. **Topology history is written only when the map changed, pruned by age, read-only over the API, and holds no secrets.** A snapshot
+    is the `/api/topology` data and nothing else (no credentials, no device output). An unchanged map adds no row, and
+    `TOPO_SNAPSHOT_INTERVAL_S=0` stores nothing. A history failure must never stop the poller tick. Checked by R35.
 
 ## Regression gate
 
@@ -407,7 +418,7 @@ HTTP; `R21`..`R26` cover the ICMP state machine, `/metrics` format, LLDP crawl, 
 container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R27` checks the OpenSSH
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
-the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll. Output is one line per check
+the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

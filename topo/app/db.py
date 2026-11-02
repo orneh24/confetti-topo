@@ -268,6 +268,14 @@ def init_db():
             last_seen      TEXT NOT NULL
         );
 
+        -- Whole-map snapshots (history.py), one per change of shape. data is the /api/topology answer.
+        CREATE TABLE IF NOT EXISTS topology_snapshots (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            taken_at TEXT NOT NULL,
+            shape    TEXT NOT NULL,
+            data     TEXT NOT NULL
+        );
+
         -- Where each node sits on the topology page, shared by every viewer.
         -- node_id is the graph id ('dev:5', 'ghost:lldp:sw1'), not a devices FK.
         CREATE TABLE IF NOT EXISTS node_positions (

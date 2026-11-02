@@ -6,6 +6,7 @@ file, a section that outgrows a screenful moves to its own module under app/
 only the @app.route wiring for it.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -980,6 +981,27 @@ def api_topology():
     """?layer= limits the edges to one source or a comma list (lldp,bgp);
     default overlays all three on the same device nodes."""
     return jsonify(topology.build(db.get_db(), request.args.get("layer")))
+
+
+@app.route("/api/topology/snapshots", methods=["GET"])
+def api_topology_snapshots():
+    """Newest first: id, taken_at, node and link counts. ?limit= (default 100)."""
+    limit = min(max(request.args.get("limit", 100, type=int), 1), 500)
+    out = []
+    for r in db.get_db().execute("SELECT id, taken_at, data FROM topology_snapshots ORDER BY id DESC LIMIT ?", (limit,)):
+        d = json.loads(r["data"])
+        out.append({"id": r["id"], "taken_at": db.iso(r["taken_at"]), "nodes": len(d["nodes"]), "edges": len(d["edges"])})
+    return jsonify(out)
+
+
+@app.route("/api/topology/snapshots/<int:snap_id>", methods=["GET"])
+def api_topology_snapshot(snap_id):
+    row = db.get_db().execute("SELECT taken_at, data FROM topology_snapshots WHERE id = ?", (snap_id,)).fetchone()
+    if row is None:
+        return jsonify({"error": "no such snapshot"}), 404
+    data = json.loads(row["data"])
+    data["taken_at"] = db.iso(row["taken_at"])
+    return jsonify(data)
 
 
 @app.route("/api/topology/positions", methods=["PUT"])

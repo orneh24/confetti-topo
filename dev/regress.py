@@ -1403,6 +1403,48 @@ def _():
     return p
 
 
+@check("R35", "topology history: a snapshot only when the map's shape changed, none with the interval at 0, old ones pruned, read-only API, no secrets in it")
+def _():
+    p = []
+    m, conn = fresh_db()
+    from app import history
+    config = m["config"]
+    need(config.SNAPSHOT_INTERVAL_S > 0 and config.SNAPSHOT_RETENTION_DAYS > 0, "history must be on by default", p)
+    need(history.maybe_snapshot(conn, force=True) is None, "an empty map must not be stored", p)
+    did = add_device(conn, "192.0.2.10", "h1")
+    conn.execute("INSERT INTO credentials (device_id, username, password, updated_at) VALUES (?, 'u', 'SECRET-PW-123', datetime('now'))", (did,))
+    conn.commit()
+    first = history.maybe_snapshot(conn, force=True)
+    conn.commit()
+    need(first is not None, "the first map must be stored", p)
+    need(history.maybe_snapshot(conn, force=True) is None, "an unchanged map must not add a snapshot", p)
+    add_device(conn, "192.0.2.11", "h2")
+    second = history.maybe_snapshot(conn, force=True)
+    conn.commit()
+    need(second is not None and second != first, "a new device must add a snapshot", p)
+    old = config.SNAPSHOT_INTERVAL_S
+    config.SNAPSHOT_INTERVAL_S = 0
+    try:
+        add_device(conn, "192.0.2.12", "h3")
+        need(history.maybe_snapshot(conn) is None, "with the interval at 0 nothing may be stored", p)
+    finally:
+        config.SNAPSHOT_INTERVAL_S = old
+    need("SECRET-PW-123" not in " ".join(r[0] for r in conn.execute("SELECT data FROM topology_snapshots")), "a snapshot must not hold a credential", p)
+    client = m["appmod"].app.test_client()
+    lst = client.get("/api/topology/snapshots").get_json()
+    need([x["id"] for x in lst] == [second, first], "snapshot list (newest first): %r" % (lst,), p)
+    one = client.get("/api/topology/snapshots/%d" % first).get_json()
+    need(len(one["nodes"]) == 1 and one.get("taken_at"), "GET snapshot: %r" % (one,), p)
+    need(client.get("/api/topology/snapshots/99999").status_code == 404, "a missing snapshot must be 404", p)
+    need(client.post("/api/topology/snapshots").status_code == 405 and client.delete("/api/topology/snapshots/%d" % first).status_code == 405,
+         "snapshots must be read-only over the API", p)
+    conn.execute("UPDATE topology_snapshots SET taken_at = datetime('now', '-400 days') WHERE id = ?", (first,))
+    history.prune(conn)
+    conn.commit()
+    need([r[0] for r in conn.execute("SELECT id FROM topology_snapshots")] == [second], "an old snapshot must be pruned, a new one kept", p)
+    return p
+
+
 def run_live():
     """Start the real server (serve.py) from a temp copy on free ports and
     drive it over HTTP and UDP."""

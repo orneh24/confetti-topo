@@ -63,6 +63,10 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
 .filter-marker { flex: 0 1 auto; max-width: 260px; display: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px;
     font-size: 12px; font-weight: bold; color: var(--yellow); background: var(--yellow-bg);
     border: 2px solid var(--yellow); border-radius: 4px; padding: 6px 10px; }
+.hist-label { font-size: 12px; margin-left: 6px; }
+.hist-label select { max-width: 260px; }
+.hist-bar { font-size: 12px; font-weight: bold; color: var(--yellow); background: var(--yellow-bg);
+    border: 2px solid var(--yellow); border-radius: 4px; padding: 6px 10px; margin: 6px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 </style>
 {% endblock %}
 {% block content %}
@@ -78,8 +82,14 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <button class="active" id="as-btn" aria-pressed="true" onclick="toggleAsAreas(this)" title="Draw a box around the routers of each BGP AS (needs BGP shown)">AS areas</button>
     <button id="changed-btn" aria-pressed="false" onclick="toggleChanged(this)" title="Glow around devices that had a change event in the last 24 hours">Changed 24h</button>
     <button id="tidy-btn" onclick="tidyAsAreas()" title="Move the routers so each BGP AS sits in its own block (changes the saved places)">Tidy AS areas</button>
+    <label class="hist-label" title="Look at the map as it was when it last changed. Read-only; pick Live to go back">History
+        <select id="hist-sel" onchange="pickHistory(this.value)"><option value="">Live</option></select></label>
     <button id="png-btn" onclick="exportPng()" title="Download the map as a PNG picture">Export PNG</button>
     <button id="json-btn" onclick="exportJson()" title="Download the map data (devices, neighbors, sessions) as a JSON file">Export JSON</button>
+</div>
+<div class="hist-bar" id="hist-bar" role="status" style="display:none">
+    History view, read-only: the map as it was on <b id="hist-when"></b>.
+    <button type="button" onclick="document.getElementById('hist-sel').value=''; pickHistory('')">Back to live</button>
 </div>
 <div class="net-wrap">
     <div id="net"></div>
@@ -423,11 +433,45 @@ var selectedNode = null;
 var selectedLink = null;
 var focusNode = null;     // right-click "show only this node's links" (not remembered)
 
+// History: a saved snapshot of the whole map (server side, /api/topology/snapshots). While one is picked the page shows
+// it instead of the live map, with a banner. Nothing is written to a device or to the snapshot.
+var viewSnap = '';
+function pickHistory(id) {
+    viewSnap = id;
+    var bar = document.getElementById('hist-bar');
+    if (!id) { bar.style.display = 'none'; }
+    load();
+}
+function loadHistory() {
+    fetch('/api/topology/snapshots').then(function (r) { return r.json(); }).then(function (list) {
+        var sel = document.getElementById('hist-sel');
+        sel.innerHTML = '';
+        var opts = [['', 'Live']];
+        list.forEach(function (s) {
+            opts.push([String(s.id), new Date(s.taken_at).toLocaleString() + ' (' + s.nodes + ' nodes, ' + s.edges + ' links)']);
+        });
+        opts.forEach(function (o) {
+            var el = document.createElement('option');
+            el.value = o[0];
+            el.textContent = o[1];
+            sel.appendChild(el);
+        });
+        sel.value = viewSnap;
+        if (sel.value !== viewSnap) { viewSnap = ''; document.getElementById('hist-bar').style.display = 'none'; }
+    }).catch(function () { /* the list is optional */ });
+}
+
 function load() {
-    var url = '/api/topology?layer=' + (shownLayers().join(',') || 'none');
+    var url = viewSnap ? '/api/topology/snapshots/' + viewSnap : '/api/topology?layer=' + (shownLayers().join(',') || 'none');
     var seq = ++loadSeq;
     fetch(url).then(function (r) { return r.json(); }).then(function (data) {
         if (seq !== loadSeq) { return; }   // a newer toggle already asked: drop this older answer
+        if (viewSnap) {
+            var want = shownLayers();
+            data.edges = data.edges.filter(function (e) { return want.indexOf(e.layer) >= 0; });
+            document.getElementById('hist-when').textContent = new Date(data.taken_at).toLocaleString();
+            document.getElementById('hist-bar').style.display = '';
+        }
         rawData = data;                    // the node card reads this, so a hidden node can still be shown and un-hidden
         renderDeviceList();
         data = groupUnknown(hideFiltered(data));
@@ -1241,6 +1285,8 @@ try { setLayerButton(document.getElementById('changed-btn'), localStorage.getIte
 updateFilterMarker();
 load();
 loadChanged();
+loadHistory();
+setInterval(loadHistory, 60000);
 setInterval(load, 20000);
 setInterval(loadChanged, 20000);
 document.addEventListener('themechange', load);
