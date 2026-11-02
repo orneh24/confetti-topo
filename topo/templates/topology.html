@@ -320,13 +320,21 @@ function settled() {
     // The default first layout: a map with no saved places at all gets one block per BGP AS (saved places are never moved).
     if (tidyOnSettle) { tidyOnSettle = false; tidyAsAreas(); }
     savePositions(nodeSet.getIds());
-    network.fit();
-    // The legend sits over the left of the map: move the fitted picture right by half its width.
-    var legend = document.querySelector('.legend-box');
-    if (legend && legend.offsetWidth) {
-        network.moveTo({ position: network.getViewPosition(), scale: network.getScale(), offset: { x: legend.offsetWidth / 2, y: 0 } });
-    }
+    fitMap();
     centerPending();
+}
+
+// Fit the whole map in the part of the page the panels leave free: the legend sits over the left of the map (shift the
+// picture right by half its width) and the Devices list takes the right edge (shrink the picture and shift it left).
+function fitMap() {
+    network.fit();
+    var legend = document.querySelector('.legend-box');
+    var list = document.getElementById('dev-list');
+    var legendW = legend && legend.offsetWidth ? legend.offsetWidth : 0;
+    var listW = list && list.offsetWidth ? list.offsetWidth + 24 : 0;   // 12px edge gap on each side
+    var wrapW = document.getElementById('net').offsetWidth || 1;
+    network.moveTo({ position: network.getViewPosition(), scale: network.getScale() * Math.max(0.3, (wrapW - listW) / wrapW),
+                     offset: { x: (legendW - listW) / 2, y: 0 } });
 }
 
 // /topology?device=<id> (from the Recent changes page): select that device and centre on it, once.
@@ -401,7 +409,7 @@ function load() {
         };
         network = new vis.Network(container, { nodes: nodeSet, edges: edgeSet }, options);
         if (anyFree) { network.once('stabilizationIterationsDone', settled); }
-        else { setTimeout(centerPending, 100); }
+        else { setTimeout(function () { fitMap(); centerPending(); }, 100); }
         network.on('dragEnd', function (params) {
             if (params.nodes.length) { savePositions(params.nodes); }
         });
@@ -627,7 +635,7 @@ function tidyAsAreas() {
     var ry = y + rowH + GAP;
     rest.forEach(function (id, i) { network.moveNode(id, x0 + (i % 8) * CW, y0 + ry + Math.floor(i / 8) * CH); });
     savePositions(nodeSet.getIds());
-    network.fit();
+    fitMap();
     network.redraw();
 }
 
@@ -1024,7 +1032,7 @@ function openContextMenu(id, x, y) {
     } else if (!node) {
         spec = { title: 'Map', items: [
             { label: 'Show all', action: showAllLayers },
-            { label: 'Reset view', action: function () { network.fit(); } },
+            { label: 'Reset view', action: fitMap },
             { label: 'Tidy AS areas', action: tidyAsAreas },
             { label: 'Re-arrange', action: rearrange },
         ] };
