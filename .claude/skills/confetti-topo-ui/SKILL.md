@@ -37,7 +37,7 @@ CDN.
 - Refresh every 20 s by **updating the DataSets in place** (`syncSet`: `remove` ids that vanished, `update`
   the rest). Creating a new `vis.Network` resets layout and zoom. Edge ids are stable: `from|to|layer|label` (`edgeKey()`); clicking a link opens a card built from the edge's `details`.
 - Known devices are drawn as SVG icons by `device_type` (router, switch, firewall, linux, host); ghosts get a "?" icon. A vendor mark and name sit to the right (`VENDOR_MARKS`, `VENDOR_NAMES`, `VENDOR_ALIASES` in topology.html; add a vendor to the ones that apply). The legend's icon row is `fillLegendIcons`.
-- With icons off, ghost nodes are dashed dots; unreachable devices (ping) get a red outline; a BGP/OSPF edge with `up === false`
+- With icons off, ghost nodes are dashed dots; unreachable devices (ping) get a red outline; an edge with `up === false` (BGP/OSPF down, or an LLDP cable with a down port)
   is red and dashed. BGP and OSPF edges bend opposite ways (`curvedCW`, roundness ±0.25) so lines between the
   same two devices do not sit on top of each other. Keep the legend in step with any new style.
 - Empty state: a plain message and `network.destroy()`.

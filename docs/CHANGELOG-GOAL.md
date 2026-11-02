@@ -15,3 +15,5 @@ Newest last. Times are local.
 - 2026-11-02 23:10 Topology: the link card shows "local port state" for an LLDP cable and says when a port is down.
 - 2026-11-02 23:12 Topology: search keeps the match's linked devices half clear on the map.
 - 2026-11-02 23:20 Checked the down path on a scratch mock DB: cable gets up=false and port state down.
+- 2026-11-03 00:05 Docs brought in line (TOPOLOGY-MAPPING, CLAUDE.md, two skills): cable state, `local_port_state`, search and fade.
+- 2026-11-03 00:10 Search box placeholder shortened so it fits. README images re-recorded at 1280x900 (new Devices table, search box).

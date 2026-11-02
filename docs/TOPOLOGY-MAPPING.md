@@ -100,8 +100,10 @@ Returns `{nodes: [...], edges: [...]}` in the shape vis.js wants. Optional `?lay
 `reachable` (ping state, optional), `ghost: false`.
 
 **Edges:** `{from, to, layer, label, up?, details}`. `details` is a list with one report per end that saw the
-link (`reported_by` plus the fields that end stored: LLDP ports, chassis, mgmt IP, `matched_by` (null, `chassis` or `name`: how the far end was identified); BGP/OSPF neighbor, state, uptime,
-prefixes, area, AS). The page shows it in a card when you click a link.
+link (`reported_by` plus the fields that end stored: LLDP ports, chassis, mgmt IP, `matched_by` (null, `chassis` or `name`: how the far end was identified), `local_port_state` (that end's oper status for its local port, null when no interface matches); BGP/OSPF neighbor, state, uptime,
+prefixes, area, AS). `up` is `false` on a BGP/OSPF edge that is not Established/FULL and on an LLDP cable where either end
+reports its local port as not up (names compared with the type spelled out, `Gi1` = `GigabitEthernet1`; a port that matches no polled
+interface is unknown, not down). The page shows it in a card when you click a link.
 - LLDP label: `"<local port> - <remote port>"`.
 - OSPF label: `"ospf FULL"`; `up = (state == FULL)`.
 - BGP label: `"eBGP AS65001 - AS65002 Established"` or `"iBGP AS65001 Established"`; `up = (state == Established)`.
@@ -212,7 +214,7 @@ against them.
   "Add" button first; auto-adding should be an opt-in setting. Add it through the same identity
   function as every other discovery path, so duplicates are caught.
 - **State colouring:** red outline on a node that stops answering ping (an ICMP checker thread
-  sets `devices.reachable`); BGP/OSPF edges that are not Established/FULL drawn red and dashed.
+  sets `devices.reachable`); BGP/OSPF edges that are not Established/FULL, and LLDP cables with a local port reported down, drawn red and dashed.
 - **Events:** peer state change, peer added/removed, neighbor added/removed, from the same apply
   step that already holds the old rows.
 
@@ -246,6 +248,8 @@ against them.
 - Physics: `barnesHut` with `gravitationalConstant -4000`, `springLength 140` worked for a lab-size
   graph. Double-click a device node to open its detail page (ghosts have no page).
 - Empty state: show a plain message ("no devices yet") and destroy the network object.
+- A Devices list on the right with a search box (name, management IP or AS; Enter selects the first match, Escape clears):
+  non-matching devices fade to 0.2 opacity on the map and the match's linked devices to 0.6.
 - Include a legend: node colours, ghost meaning, one swatch per link layer, the red dashed style.
 
 ## 10. Pitfalls (each one happened or nearly did)
@@ -266,6 +270,7 @@ against them.
 - Two devices that see each other: exactly one LLDP edge.
 - A neighbor with an unknown management IP: one ghost node, dashed.
 - A neighbor with no advertised IP: still a ghost, labelled by system name or chassis id.
+- LLDP cable whose local interface is oper down: red dashed, the link card shows `local port state: down`.
 - BGP peer shut down: stays on the map as `Idle (Admin)`, drawn red dashed. Peer removed from the
   config: disappears after the next successful poll.
 - LLDP turned off on a device: its neighbors disappear, other tasks stay OK.

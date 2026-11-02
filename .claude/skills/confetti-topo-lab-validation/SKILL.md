@@ -21,7 +21,7 @@ The user prefers real routers over mocks. Real addresses are in the auto-memory 
    `show ip ospf neighbor` over SSH), not only with confetti-topo's own view.
 5. **Work through `docs/TOPOLOGY-MAPPING.md` section 11**, plus: BGP/OSPF peers on a loopback or link address
    now resolve to the neighbor device (compare `/api/adjacencies` `peer_device_id` with what the router shows);
-   a session both routers report is one edge on `/topology`, red and dashed when one end is not
+   a session both routers report is one edge on `/topology`, red and dashed (an LLDP cable too, when a local port is down) when one end is not
    Established/FULL.
 6. **Change a router only with a revert ready** (shut a peer, turn LLDP off, a description line). Always undo it
    and confirm confetti-topo sees the revert.

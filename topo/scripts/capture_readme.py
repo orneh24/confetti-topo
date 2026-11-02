@@ -35,7 +35,7 @@ def free_port():
 
 PORT = free_port()
 BASE = "http://127.0.0.1:{}".format(PORT)
-SIZE = {"width": 1280, "height": 720}
+SIZE = {"width": 1280, "height": 900}
 
 THEMES = ["light", "monokai", "confetti-night", "rainbow"]      # themes.png, in order
 LAYOUTS = ["classic", "modern", "retro95", "msdos", "greencrt"]           # layouts.png, in order

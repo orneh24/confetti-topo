@@ -147,7 +147,9 @@ a cap on a very large table (a full BGP table would be one row per route).
 `TOPO_PING_FAILS_TO_DOWN` (2) failures in a row; the first result is a baseline and emits no event.
 `_ping` refuses any string that is not an IP address before it reaches a subprocess. Shown on the Devices
 and device pages and as a red outline on the topology; BGP/OSPF sessions that are not Established / FULL
-are drawn red and dashed.
+are drawn red and dashed, and so is an LLDP cable when a device reports its local port not up (`topology.port_key`
+name match; a port that matches nothing is unknown, not down). The topology page's Devices list has a search box that
+fades non-matching devices on the map; link details carry `local_port_state`.
 
 ### Discovery on a timer, and the LLDP crawl
 
