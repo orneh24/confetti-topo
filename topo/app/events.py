@@ -83,6 +83,8 @@ def describe(kind, subject, detail, hostname):
     elif kind == "routes_changed":
         m = re.search(r"routes (\+\d+ -\d+)", rest)
         out.update(type="Routes", change="changed", item=m.group(1) if m else rest)
+    elif kind == "stp_changed":
+        out.update(type="Spanning tree", change="changed", item=rest.replace("spanning tree ", "", 1), before=before, after=after)
     elif kind == "os_version_changed":
         out.update(type="OS version", change="changed", before=before, after=after)
     elif kind in ("device_unreachable", "device_recovered"):

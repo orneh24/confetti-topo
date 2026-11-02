@@ -16,7 +16,7 @@ Ideas only. Nothing here is built until the user picks it.
 - **IOS 15.2 `vrf *` check:** confirm whether the Catalyst 3560 switch answers `show ip route vrf *` or uses the `show ip route`
   fallback.
 - **CDP** next to LLDP (many Cisco switches speak only CDP). Checked 2026-11-03: `show cdp neighbors detail` answers `% CDP is not enabled` on every reachable lab IOS device, so there is no real output to build a parser from. Enable CDP on one lab switch first, capture, then add it (merge into the lldp task, never duplicate a cable that LLDP already shows).
-- **L2 view, rest:** MAC table and spanning tree (VLANs and trunks are done: the `vlans` and `trunks` tasks, switches only). Each needs its own command, verified on a real switch first.
+- **L2 view, rest:** MAC table and per-port spanning-tree roles (VLANs, trunks and the spanning-tree summary are done: the `vlans`, `trunks` and `stp` tasks, switches only). Each needs its own command, verified on a real switch first.
 - **Pair parallel sessions properly** by the local address of each session instead of by position.
 - **History:** keep the last N topologies so "what changed since yesterday" can be drawn.
 - **Label crowding:** LLDP labels show only on hover or selection now; BGP/OSPF labels and the vendor mark can

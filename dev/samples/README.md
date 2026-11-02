@@ -19,6 +19,10 @@ Used by `dev/regress.py`.
   blocks; the VLAN lists were shortened). A VLAN list that wraps onto an indented line is **not** in a real capture;
   `regress.py` R34 checks it with one written from the documented format.
 
+- `ios_stp_summary.txt` has the **real format** of `show spanning-tree summary` from a Catalyst 3560 (the "Root bridge for"
+  list running over an indented line, the per-VLAN table). The lists were shortened and one VLAN was given a blocking
+  port by hand, since the lab switch has none.
+
 - `ios_route_17_3.txt` has the **real format** of `show ip route vrf *` from IOS-XE 17.3 (global table, then
   `Routing Table: MGMT`; a route under `is subnetted` with no mask; `O E2` with age and interface; a BGP route
   with no interface). `panos_route.xml` and `panos_fib.xml` have the real shape of the PAN-OS RIB and FIB answers

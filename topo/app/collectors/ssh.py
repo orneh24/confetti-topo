@@ -164,6 +164,8 @@ def apply_result(conn, device_id, task, parsed):
         _apply_vlans(conn, device_id, parsed, now)
     elif task == "trunks":
         _apply_trunks(conn, device_id, parsed, now)
+    elif task == "stp":
+        _apply_stp(conn, device_id, parsed, now)
 
 
 def _apply_version(conn, device_id, parsed, now):
@@ -398,3 +400,25 @@ def _apply_trunks(conn, device_id, parsed, now):
              t["allowed"], t["active"], now),
         )
     conn.execute("DELETE FROM trunks WHERE device_id = ? AND last_seen <> ?", (device_id, now))
+
+
+def _apply_stp(conn, device_id, parsed, now):
+    """Store the spanning-tree summary. An answer with no mode line parses to nothing and changes nothing. A change in the
+    VLANs this switch is root for, or in the VLANs with blocking ports, is an event (not on the first poll)."""
+    if not parsed:
+        return
+    new = parsed[0]
+    old = conn.execute("SELECT root_for, blocking_vlans FROM stp WHERE device_id = ?", (device_id,)).fetchone()
+    if old is not None and not events.is_baseline(conn, device_id, "stp"):
+        host = _hostname(conn, device_id)
+        for column, label in (("root_for", "root VLANs"), ("blocking_vlans", "blocking VLANs")):
+            if old[column] != new[column]:
+                events.emit(conn, device_id, "stp_changed", "warning",
+                            "{}: spanning tree {}".format(host, label),
+                            "{} -> {}".format(old[column] or "none", new[column] or "none"))
+    conn.execute(
+        """INSERT INTO stp (device_id, mode, root_for, blocking_vlans, instances, last_seen) VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(device_id) DO UPDATE SET mode=excluded.mode, root_for=excluded.root_for,
+               blocking_vlans=excluded.blocking_vlans, instances=excluded.instances, last_seen=excluded.last_seen""",
+        (device_id, new["mode"], new["root_for"], new["blocking_vlans"], new["instances"], now),
+    )

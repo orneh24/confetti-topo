@@ -638,19 +638,19 @@ def sample(name):
     return read(SAMPLES + name)
 
 
-@check("R19", "platform registry: same core tasks everywhere (vlans and trunks are IOS-only), unknown platform = IOS, every command read-only")
+@check("R19", "platform registry: same core tasks everywhere (vlans, trunks and stp are IOS-only), unknown platform = IOS, every command read-only")
 def _():
     p = []
     m = app_modules()
     from app import platforms
     ios_tasks = tuple(platforms.IOS["commands"])
     core = ("version", "interfaces", "lldp", "bgp", "ospf", "routes")
-    need(ios_tasks == core + ("vlans", "trunks"), "IOS tasks are %r" % (ios_tasks,), p)
+    need(ios_tasks == core + ("vlans", "trunks", "stp"), "IOS tasks are %r" % (ios_tasks,), p)
     for name, plat in platforms.PLATFORMS.items():
         # "vlans" is a switch task of the IOS entry only; every platform has the six core tasks.
         have = tuple(t for t in plat["commands"] if t not in platforms.SWITCH_TASKS)
         need(have == core, "%s tasks are %r, expected the core %r" % (name, tuple(plat["commands"]), core), p)
-        need(not (set(plat["commands"]) & set(platforms.SWITCH_TASKS)) or plat is platforms.IOS, "%s: vlans and trunks are only for the IOS entry" % name, p)
+        need(not (set(plat["commands"]) & set(platforms.SWITCH_TASKS)) or plat is platforms.IOS, "%s: vlans, trunks and stp are only for the IOS entry" % name, p)
         need(set(plat["parsers"]) == set(plat["commands"]), "%s: commands and parsers differ" % name, p)
         # SSH platforms run `show ...`; the XML API platform sends `<show>...</show>` operations. Nothing else.
         prefix = "<show>" if plat.get("transport") == "xml_api" else "show "
@@ -1301,7 +1301,7 @@ def _():
     return p
 
 
-@check("R34", "vlans and trunks (switches only): parse the real output, a router is never asked, an empty VLAN list deletes nothing, a \"%\" answer fails the task, a real list replaces the old one")
+@check("R34", "vlans, trunks and stp (switches only): parse the real output, a router is never asked, an empty VLAN list deletes nothing, a \"%\" answer fails the task, a real list replaces the old one")
 def _():
     p = []
     m, conn = fresh_db()
@@ -1313,7 +1313,11 @@ def _():
     need([x["status"] for x in v if x["vlan_id"] == 1002] == ["act/unsup"], "act/unsup status lost", p)
     cont = ios.parse_vlans(text + "                                                Gi0/11, Gi0/12\n")   # written from IOS's documented format
     need(cont[-1]["ports"] == "Gi0/11, Gi0/12", "a continuation line must add to the row above: %r" % cont[-1], p)
-    need("vlans" in ssh.TASKS and "trunks" in ssh.TASKS, "vlans / trunks missing from the IOS tasks", p)
+    need({"vlans", "trunks", "stp"} <= set(ssh.TASKS), "vlans / trunks / stp missing from the IOS tasks", p)
+    stp = ios.parse_stp(read(SAMPLES + "ios_stp_summary.txt"))
+    need(stp == [{"mode": "pvst", "root_for": "1,10-12,15,100,156,170,200", "blocking_vlans": "11", "instances": 6}],
+         "ios_stp_summary: %r" % (stp,), p)
+    need(ios.parse_stp("% Invalid input") == [], "an answer with no mode line must parse to nothing", p)
     tr = ios.parse_trunks(read(SAMPLES + "ios_trunk.txt"))
     need([(t["port"], t["native_vlan"], t["status"]) for t in tr] == [("Gi0/3", 253, "trunking"), ("Gi0/7", 1, "trunking"), ("Gi0/8", 253, "trunking")],
          "ios_trunk: %r" % [(t["port"], t["native_vlan"]) for t in tr], p)
@@ -1338,7 +1342,7 @@ def _():
         for dev in (sw, rt):
             asked.clear()
             list(ssh.run_tasks(dict(dev, mgmt_ip="192.0.2.9"), {"username": "u", "password": "p", "secret": ""}))
-            need(("show vlan brief" in asked) == (dev is sw) and ("show interfaces trunk" in asked) == (dev is sw),
+            need(all((c in asked) == (dev is sw) for c in ("show vlan brief", "show interfaces trunk", "show spanning-tree summary")),
                  "switch-only commands asked=%r for %s" % (asked, dev["model"]), p)
     finally:
         ssh.ConnectHandler = real
@@ -1378,7 +1382,24 @@ def _():
         res = {t: ok for t, ok, *_ in ssh.run_tasks(dict(sw, mgmt_ip="192.0.2.9"), {"username": "u", "password": "p", "secret": ""})}
     finally:
         ssh.ConnectHandler = real
-    need(res.get("vlans") is False and res.get("trunks") is False, "an error answer must fail vlans and trunks: %r" % res, p)
+    need(res.get("vlans") is False and res.get("trunks") is False and res.get("stp") is False, "an error answer must fail vlans, trunks and stp: %r" % res, p)
+    # stp: stored; a change of root VLANs or blocking VLANs is one event each, none on the first poll or when nothing changed
+    ev = lambda: conn.execute("SELECT subject, detail FROM events WHERE device_id = ? AND kind = 'stp_changed' ORDER BY id", (did,)).fetchall()
+    ssh.apply_result(conn, did, "stp", stp)
+    conn.commit()
+    need(conn.execute("SELECT blocking_vlans FROM stp WHERE device_id = ?", (did,)).fetchone()[0] == "11", "stp row not stored", p)
+    need(ev() == [], "the first stp poll must emit nothing: %r" % [tuple(e) for e in ev()], p)
+    ssh.apply_result(conn, did, "stp", [])
+    need(conn.execute("SELECT COUNT(*) FROM stp WHERE device_id = ?", (did,)).fetchone()[0] == 1, "an empty stp parse must change nothing", p)
+    conn.execute("INSERT INTO poll_history (device_id, transport, task, ok, started_at, received_at) VALUES (?, 'ssh', 'stp', 1, datetime('now'), datetime('now'))", (did,))
+    ssh.apply_result(conn, did, "stp", stp)
+    need(ev() == [], "an unchanged stp answer must emit nothing", p)
+    ssh.apply_result(conn, did, "stp", [dict(stp[0], blocking_vlans="", root_for="1,10")])
+    conn.commit()
+    got = [tuple(e) for e in ev()]
+    need(len(got) == 2 and got[0][1] == "1,10-12,15,100,156,170,200 -> 1,10" and got[1][1] == "11 -> none", "stp change events: %r" % (got,), p)
+    r = m["appmod"].app.test_client().get("/api/stp?device_id=%d" % did)
+    need(r.status_code == 200 and r.get_json().get("root_for") == "1,10", "GET /api/stp: %s %r" % (r.status_code, r.get_json()), p)
     return p
 
 

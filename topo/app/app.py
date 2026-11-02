@@ -429,6 +429,21 @@ def api_vlans():
     return jsonify(out)
 
 
+@app.route("/api/stp", methods=["GET"])
+def api_stp():
+    """A switch's spanning-tree summary (one object, or {} when none is stored). ?device_id=N is required."""
+    device_id = request.args.get("device_id", type=int)
+    if device_id is None:
+        return jsonify({"error": "device_id is required"}), 400
+    row = db.get_db().execute(
+        "SELECT mode, root_for, blocking_vlans, instances, last_seen FROM stp WHERE device_id = ?", (device_id,)).fetchone()
+    if row is None:
+        return jsonify({})
+    out = dict(row)
+    out["last_seen"] = db.iso(out["last_seen"])
+    return jsonify(out)
+
+
 @app.route("/api/trunks", methods=["GET"])
 def api_trunks():
     """A switch's trunk ports (show interfaces trunk). ?device_id=N is required."""

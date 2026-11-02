@@ -451,3 +451,42 @@ def parse_trunks(text):
             elif last is not None and line[:1].isspace() and line.strip():
                 last[section] += line.strip()
     return list(rows.values())
+
+
+# ---------------------------------------------------------------------------
+# show spanning-tree summary (switches)
+# ---------------------------------------------------------------------------
+
+_STP_MODE_RE = re.compile(r"^Switch is in (\S+) mode", re.MULTILINE)
+_STP_ROW_RE = re.compile(r"^VLAN(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*$")
+
+
+def _vlan_list(text):
+    """'VLAN0001, VLAN0010-VLAN0012, VLAN0015' -> '1,10-12,15' (the spelling every other VLAN list here uses)."""
+    return re.sub(r"\s+", "", re.sub(r"VLAN0*(\d+)", r"\1", text))
+
+
+def parse_stp(text):
+    """Parse 'show spanning-tree summary' into one row {mode, root_for, blocking_vlans, instances}, or [] when the
+    answer has no "Switch is in <mode> mode" line (a failure, not an answer).
+
+    root_for: the VLANs this switch is root bridge for ("Root bridge for:" runs over indented lines).
+    blocking_vlans: VLANs with at least one port in the Blocking column. instances: how many VLAN rows the table has."""
+    mode = _STP_MODE_RE.search(text)
+    if not mode:
+        return []
+    root, in_root, blocking, instances = "", False, [], 0
+    for line in text.splitlines():
+        if line.startswith("Root bridge for:"):
+            root, in_root = line.split(":", 1)[1], True
+            continue
+        if in_root and line[:1].isspace() and line.strip():
+            root = root.rstrip().rstrip(",") + ", " + line.strip()   # IOS wraps without a comma at the break
+            continue
+        in_root = False
+        m = _STP_ROW_RE.match(line)
+        if m:
+            instances += 1
+            if int(m.group(2)) > 0:
+                blocking.append(m.group(1).lstrip("0") or "0")
+    return [{"mode": mode.group(1), "root_for": _vlan_list(root), "blocking_vlans": ",".join(blocking), "instances": instances}]

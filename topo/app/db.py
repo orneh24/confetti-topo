@@ -258,6 +258,16 @@ def init_db():
             PRIMARY KEY (device_id, port)
         );
 
+        -- A switch's spanning-tree summary (show spanning-tree summary): one row per switch.
+        CREATE TABLE IF NOT EXISTS stp (
+            device_id      INTEGER PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
+            mode           TEXT NOT NULL DEFAULT '',
+            root_for       TEXT NOT NULL DEFAULT '',
+            blocking_vlans TEXT NOT NULL DEFAULT '',
+            instances      INTEGER NOT NULL DEFAULT 0,
+            last_seen      TEXT NOT NULL
+        );
+
         -- Where each node sits on the topology page, shared by every viewer.
         -- node_id is the graph id ('dev:5', 'ghost:lldp:sw1'), not a devices FK.
         CREATE TABLE IF NOT EXISTS node_positions (

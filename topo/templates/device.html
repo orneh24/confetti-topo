@@ -146,6 +146,11 @@
             <div class="empty" id="route-empty" style="display:none">no routes polled yet</div>
         </div>
     </div>
+    <!-- Switches only: shown once the device has a spanning-tree summary. -->
+    <div class="section wide" id="stp" style="display:none">
+        <div class="section-header"><span>Spanning tree</span></div>
+        <div class="section-body" id="stp-body"></div>
+    </div>
     <!-- Switches only: shown once the device has trunk rows. -->
     <div class="section wide" id="trunks" style="display:none">
         <div class="section-header"><span>Trunks <span id="trunk-count"></span></span></div>
@@ -419,6 +424,19 @@ function loadTrunks() {
     });
 }
 
+function loadStp() {
+    fetch('/api/stp?device_id=' + deviceId).then(function (r) { return r.json(); }).then(function (s) {
+        var box = document.getElementById('stp');
+        if (!s.mode) { box.style.display = 'none'; return; }
+        function row(k, v, cls) { return '<div class="kv"><span class="k">' + k + '</span><span class="v' + (cls ? ' ' + cls : '') + '">' + esc(v) + '</span></div>'; }
+        document.getElementById('stp-body').innerHTML =
+            row('mode', s.mode) + row('root bridge for', s.root_for || 'no VLAN') +
+            row('VLANs with blocking ports', s.blocking_vlans || 'none', s.blocking_vlans ? 'warn' : 'ok') +
+            row('spanning-tree instances', s.instances);
+        box.style.display = '';
+    });
+}
+
 function loadLldp() {
     fetch('/api/lldp-neighbors?device_id=' + deviceId).then(function (r) { return r.json(); }).then(function (list) {
         var rows = '';
@@ -490,6 +508,7 @@ function pollNow() {
         loadRoutes();
         loadVlans();
         loadTrunks();
+        loadStp();
         loadLldp();
         loadAdjacencies();
         loadEvents();
@@ -504,6 +523,7 @@ loadInterfaces();
 loadRoutes();
 loadVlans();
 loadTrunks();
+loadStp();
 loadLldp();
 loadAdjacencies();
 loadEvents();
