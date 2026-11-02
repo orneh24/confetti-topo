@@ -5,7 +5,8 @@
 .changes-wrap { display: flex; gap: 12px; align-items: flex-start; }
 .changes-wrap .section { flex: 1 1 auto; min-width: 0; }
 tr.row { cursor: pointer; }
-tr.band td { background: var(--stripe); }
+tr.band td { background: color-mix(in srgb, var(--stripe), var(--text) 8%); }
+tr.devstart td { border-top: 2px solid var(--border); }
 tbody tr.selected td { background: var(--bg-hover); font-weight: bold; box-shadow: inset 0 2px 0 var(--blue), inset 0 -2px 0 var(--blue); }
 tbody tr.selected td:first-child { box-shadow: inset 4px 0 0 var(--blue), inset 0 2px 0 var(--blue), inset 0 -2px 0 var(--blue); }
 td.when { white-space: nowrap; }
@@ -124,9 +125,10 @@ function render() {
     var prev;
     for (var i = 0; i < list.length; i++) {
         var e = list[i];
-        if (i > 0 && e.device_id !== prev) { band = !band; }   // a run of rows from one device keeps one colour
+        var newDevice = i > 0 && e.device_id !== prev;
+        if (newDevice) { band = !band; }   // a run of rows from one device keeps one colour
         prev = e.device_id;
-        var cls = 'row' + (band ? ' band' : '') + (e.id === selectedId ? ' selected' : '');
+        var cls = 'row' + (band ? ' band' : '') + (newDevice ? ' devstart' : '') + (e.id === selectedId ? ' selected' : '');
         html += '<tr class="' + cls + '" data-ctx="event" data-id="' + e.id + '">' +
             '<td class="when" title="' + esc(new Date(e.at).toLocaleString()) + '">' + esc(timeCell(e)) + '</td>' +
             '<td>' + esc(deviceName(e)) + '</td>' +
