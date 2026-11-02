@@ -202,16 +202,27 @@ function confettiBlast(btn) {
             w: 6 + Math.random() * 6, h: 3 + Math.random() * 5,
             rot: Math.random() * 6.28, spin: (Math.random() - 0.5) * 0.3,
             sway: Math.random() * 6.28,
+            ch: dos ? CHARS.charAt(Math.floor(Math.random() * CHARS.length)) : null,
             color: colors[Math.floor(Math.random() * colors.length)] });
     }
     var fired = false;
     var left = Math.random() < 0.5, dir = left ? 1 : -1, size = 72;
-    var gun = document.createElement('div');
-    gun.textContent = '🎉';
-    gun.style.cssText = 'position:fixed;bottom:12px;' + (left ? 'left' : 'right') + ':0;font-size:' + size +
-        'px;line-height:1;pointer-events:none;z-index:10000;transition:transform .3s ease-out';
+    // MS-DOS layout: an ASCII cannon (barrel at 45 degrees) and ASCII confetti.
+    var dos = document.documentElement.getAttribute('data-layout') === 'msdos';
+    var CHARS = '*+o.#%@~^:';
+    var art = ['      //', '     //', '    //', ' __//__', '|______|', ' (O)(O)'];
+    if (!left) art = art.map(function (l) {
+        return l.padEnd(8).split('').reverse().join('').replace(/[\/\\]/g, function (c) { return c === '/' ? '\\' : '/'; });
+    });
+    var gun = document.createElement(dos ? 'pre' : 'div');
+    gun.textContent = dos ? art.join('\n') :'🎉';
+    var keys = dos ? document.querySelector('.dos-fkeys') : null;   // the bottom key line; it can wrap to two rows
+    var floor = keys ? keys.offsetHeight + 6 : 12;
+    gun.style.cssText = 'position:fixed;bottom:' + floor + 'px;' + (left ? 'left' : 'right') + ':0;margin:0;' +
+        (dos ? 'font:bold 40px/1 monospace;white-space:pre;' :'font-size:' + size + 'px;line-height:1;') +
+        'pointer-events:none;z-index:10000;transition:transform .3s ease-out';
     function pose(x, extra) {
-        gun.style.transform = 'translateX(' + x + ') ' + (left ? '' : 'scaleX(-1) ') + extra;
+        gun.style.transform = 'translateX(' + x + ') ' + (left || dos ? '' : 'scaleX(-1) ') + extra;
     }
     pose(left ? '-130%' : '130%', '');
     document.body.appendChild(gun);
@@ -219,15 +230,20 @@ function confettiBlast(btn) {
     function fire(n) {
         fired = true;
         var mx = left ? size * 0.85 : W - size * 0.85, my = H - 12 - size * 0.85;
+        if (dos) {
+            var r = gun.getBoundingClientRect();
+            mx = r.left + r.width * (left ? 0.95 : 0.05);
+            my = r.top + r.height * 0.08;
+        }
         for (var i = 0; i < n; i++) {
-            var a = (60 + (Math.random() - 0.5) * 120) * Math.PI / 180;
-            var s = 24 + Math.random() * 20;
+            var a = (dos ? 45 + (Math.random() - 0.5) * 40 : 60 + (Math.random() - 0.5) * 120) * Math.PI / 180;
+            var s = dos ? 10 + Math.random() * 40 : 24 + Math.random() * 20;
             add(mx, my, dir * Math.cos(a) * s, -Math.sin(a) * s);
         }
     }
     gun.offsetWidth;
     pose('0', '');
-    setTimeout(function () { fire(1400); pose('0', 'rotate(' + (-8 * dir) + 'deg) scale(1.15)'); }, 350);
+    setTimeout(function () { fire(1400); pose('0', dos ? '' : 'rotate(' + (-8 * dir) + 'deg) scale(1.15)'); }, 350);
     setTimeout(function () { pose('0', ''); }, 500);
     setTimeout(function () { fire(400); }, 550);
     setTimeout(function () { pose(left ? '-130%' : '130%', ''); }, 4500);
@@ -245,6 +261,12 @@ function confettiBlast(btn) {
             b.x += (b.vx + Math.sin(b.sway)) * dt;
             b.y += b.vy * dt;
             b.rot += b.spin * dt;
+            if (b.ch) {
+                ctx.font = 'bold 16px monospace';
+                ctx.fillStyle = b.color;
+                ctx.fillText(b.ch, b.x, b.y);
+                return b.y < H + 30;
+            }
             ctx.save();
             ctx.translate(b.x, b.y);
             ctx.rotate(b.rot);
