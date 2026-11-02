@@ -88,7 +88,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <button id="json-btn" onclick="exportJson()" title="Download the map data (devices, neighbors, sessions) as a JSON file">Export JSON</button>
 </div>
 <div class="hist-bar" id="hist-bar" role="status" style="display:none">
-    History view, read-only: the map as it was on <b id="hist-when"></b>.
+    <span>History view, read-only: the map as it was on <b id="hist-when"></b>. <span id="hist-diff"></span></span>
     <button type="button" onclick="document.getElementById('hist-sel').value=''; pickHistory('')">Back to live</button>
 </div>
 <div class="net-wrap">
@@ -442,6 +442,23 @@ function pickHistory(id) {
     if (!id) { bar.style.display = 'none'; }
     load();
 }
+// Compare the picked snapshot with the live map: what is there now that was not then, and what was there then and is gone.
+function showHistoryDiff(snap) {
+    var id = viewSnap;
+    fetch('/api/topology').then(function (r) { return r.json(); }).then(function (live) {
+        if (id !== viewSnap) { return; }
+        function names(d) { var o = {}; d.nodes.forEach(function (n) { o[n.id] = n.label || n.id; }); return o; }
+        function keys(d) { var o = {}; d.edges.forEach(function (e) { o[edgeKey(e)] = true; }); return o; }
+        var a = names(snap), b = names(live), ka = keys(snap), kb = keys(live);
+        function count(x, y) { return Object.keys(x).filter(function (k) { return !y[k]; }); }
+        var nodeNew = count(b, a), nodeGone = count(a, b), linkNew = count(kb, ka).length, linkGone = count(ka, kb).length;
+        var txt = 'Since then: ' + nodeNew.length + ' device(s) added, ' + nodeGone.length + ' gone, ' + linkNew + ' link(s) added, ' + linkGone + ' gone';
+        var gone = nodeGone.map(function (k) { return a[k]; }).slice(0, 5).join(', ');
+        if (gone) { txt += ' (gone: ' + gone + ')'; }
+        document.getElementById('hist-diff').textContent = txt + '.';
+    }).catch(function () { document.getElementById('hist-diff').textContent = ''; });
+}
+
 function loadHistory() {
     fetch('/api/topology/snapshots').then(function (r) { return r.json(); }).then(function (list) {
         var sel = document.getElementById('hist-sel');
@@ -471,6 +488,7 @@ function load() {
             data.edges = data.edges.filter(function (e) { return want.indexOf(e.layer) >= 0; });
             document.getElementById('hist-when').textContent = new Date(data.taken_at).toLocaleString();
             document.getElementById('hist-bar').style.display = '';
+            showHistoryDiff(data);
         }
         rawData = data;                    // the node card reads this, so a hidden node can still be shown and un-hidden
         renderDeviceList();

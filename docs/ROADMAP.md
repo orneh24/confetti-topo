@@ -18,7 +18,7 @@ Ideas only. Nothing here is built until the user picks it.
 - **CDP** next to LLDP (many Cisco switches speak only CDP). Checked 2026-11-03: `show cdp neighbors detail` answers `% CDP is not enabled` on every reachable lab IOS device, so there is no real output to build a parser from. Enable CDP on one lab switch first, capture, then add it (merge into the lldp task, never duplicate a cable that LLDP already shows).
 - **L2 view, rest:** MAC table and per-port spanning-tree roles (VLANs, trunks and the spanning-tree summary are done: the `vlans`, `trunks` and `stp` tasks, switches only). Each needs its own command, verified on a real switch first.
 - **Pair parallel sessions properly** by the local address of each session instead of by position.
-- **History, rest:** compare two snapshots (draw what was added or removed between them); snapshots keep the shape only when it changes, so a link that flaps within one interval is not seen.
+- **History, rest:** the banner counts what changed since a snapshot, but the map does not mark it; snapshots keep the shape only when it changes, so a link that flaps within one interval is not seen.
 - **Label crowding:** LLDP labels show only on hover or selection now; BGP/OSPF labels and the vendor mark can
   still overlap on a dense map.
 - **Linux detection on real hosts:** the "LLDP says Linux" rule and the System Description parser are only
