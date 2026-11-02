@@ -19,3 +19,4 @@ Newest last. Times are local.
 - 2026-11-03 00:10 Search box placeholder shortened so it fits. README images re-recorded at 1280x900 (new Devices table, search box).
 - 2026-11-03 00:30 Topology: "Export PNG" button and map right-click item download the map as a PNG (page colour behind it).
 - 2026-11-03 00:32 Leak scan: one lab hostname in ROADMAP.md replaced by a model name (it is also in older commits on origin/routing-table). README capture viewport raised to 1280x1000.
+- 2026-11-03 01:00 Recent changes: "export CSV" downloads the events shown now (filters applied); cells that start with = + - @ are prefixed with ' so a spreadsheet does not run them.

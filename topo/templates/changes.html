@@ -70,6 +70,7 @@ td.notes .pill { margin-right: 4px; }
                 <label>Severity <select id="f-severity"><option value="">All</option></select></label>
                 <label>Search <input type="search" id="f-q" placeholder="device, interface, peer, value"></label>
                 <button type="button" class="linklike" onclick="resetFilters()">reset filters</button>
+                <button type="button" class="linklike" onclick="exportCsv()" title="Download the events shown now as a CSV file">export CSV</button>
             </div>
             <div class="chg-tiles" id="tiles"></div>
         </div>
@@ -243,6 +244,28 @@ function visibleEvents() {
 }
 
 function setDeviceFilter(id) { document.getElementById('f-device').value = id === null ? '' : String(id); render(); }
+
+// The events shown now (filters applied) as a CSV file. A cell that starts with = + - or @ gets a leading ' so a
+// spreadsheet does not run it as a formula.
+function exportCsv() {
+    function cell(v) {
+        v = v === null || v === undefined ? '' : String(v);
+        if (/^[=+\-@\t\r]/.test(v)) { v = "'" + v; }
+        return '"' + v.replace(/"/g, '""') + '"';
+    }
+    var head = ['time', 'device', 'severity', 'type', 'change', 'item', 'before', 'after', 'detail'];
+    var lines = [head.join(',')];
+    visibleEvents().forEach(function (e) {
+        lines.push([e.at, deviceName(e), e.severity, e.type, e.change, e.item, e.before, e.after, e.detail].map(cell).join(','));
+    });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\ufeff' + lines.join('\r\n') + '\r\n'], { type: 'text/csv' }));
+    a.download = 'confetti-topo-events.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+}
 
 function resetFilters() {
     ['f-device', 'f-type', 'f-change', 'f-severity', 'f-q'].forEach(function (id) { document.getElementById(id).value = ''; });
