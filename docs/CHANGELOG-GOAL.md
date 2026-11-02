@@ -26,3 +26,5 @@ Newest last. Times are local.
 - 2026-11-03 02:20 Verified on a scratch mock lab: a down port shows a red dashed cable and the link card text; "Changed 24h" leaves a device with no events unlit; CSV formula prefix checked.
 - 2026-11-03 02:40 Topology: a vendor with no mark of its own (Fortinet, Arista...) gets a grey letter chip and its name. alpine, linux and unknown get none. Plain characters only go into the SVG.
 - 2026-11-03 02:42 Checked IPv6 on the real lab (read-only `show ipv6 route`): one route on one router, none on another, so no parser built. Noted in ROADMAP.
+- 2026-11-03 03:10 Devices page: filter box (name, IP, site, role, vendor, platform, model, key) with an "N of M" count; it survives re-renders and sorting. Not checked at 390px width.
+- 2026-11-03 03:12 Looked at a VLAN/L2 poll task: not built. On a router, `show vlan brief` answers "Invalid input", which the poller counts as a failed task, so it needs a switch-only gate and a new table; left on the roadmap.

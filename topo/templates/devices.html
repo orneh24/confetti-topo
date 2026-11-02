@@ -51,6 +51,9 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
             <div class="bulk-row">
                 <button type="button" id="poll-all-btn" class="primary" onclick="pollAll()">Poll all now</button>
                 <span class="msg" id="poll-msg"></span>
+                <input type="search" id="dev-filter" placeholder="Filter: name, IP, site, role, vendor" aria-label="Filter devices"
+                       oninput="renderDevices()" style="margin-left:auto;min-width:240px">
+                <span class="msg" id="dev-filter-count"></span>
             </div>
             <table data-sortable class="striped compact">
                 <thead>
@@ -136,7 +139,19 @@ function adoptNeighbor(btn) {
     }).then(function () { loadDevices(); loadUnknownNeighbors(); });
 }
 
-function renderDevices(list) {
+// The last list from the server; the filter box narrows it without asking again.
+var allDevices = [];
+var EMPTY_TEXT = document.getElementById('device-empty').textContent;
+
+function deviceMatches(d, q) {
+    return [d.hostname, d.mgmt_ip, d.site, d.role, d.vendor, d.platform, d.model, d.key].join(' ').toLowerCase().indexOf(q) >= 0;
+}
+
+function renderDevices(fresh) {
+    if (fresh) { allDevices = fresh; }
+    var q = document.getElementById('dev-filter').value.trim().toLowerCase();
+    var list = q ? allDevices.filter(function (d) { return deviceMatches(d, q); }) : allDevices;
+    document.getElementById('dev-filter-count').textContent = q ? list.length + ' of ' + allDevices.length : '';
     var rows = '';
     for (var i = 0; i < list.length; i++) {
         var d = list[i];
@@ -157,7 +172,9 @@ function renderDevices(list) {
             '</tr>';
     }
     document.getElementById('device-rows').innerHTML = rows;
-    document.getElementById('device-empty').style.display = list.length ? 'none' : 'block';
+    var empty = document.getElementById('device-empty');
+    empty.style.display = list.length ? 'none' : 'block';
+    empty.textContent = allDevices.length ? 'No device matches the filter.' : EMPTY_TEXT;
 }
 
 function loadDevices() {
