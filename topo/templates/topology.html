@@ -23,7 +23,21 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     font-size: 12px; color: var(--text); background: var(--bg-card); border: 1px solid var(--text-dim); border-radius: 4px; padding: 6px 12px; }
 /* Click a node: this card shows what is known about it, with a checkbox to hide it. */
 /* Top-left: the node or link card with the FILTERED marker on its right. On a narrow map the marker wraps under the card. */
-.left-stack { position: absolute; top: 12px; left: 12px; right: 12px; z-index: 6; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 8px; pointer-events: none; }
+/* Right side: every known device, one row each; click a row to select it on the map. */
+.dev-list { position: absolute; top: 12px; right: 12px; bottom: 12px; width: 240px; z-index: 5; display: flex; flex-direction: column;
+    font-size: 12px; color: var(--text); background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; }
+.dev-list h3 { margin: 0; padding: 6px 10px; font-size: 12px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.dev-list .dev-rows { overflow-y: auto; flex: 1 1 auto; }
+.dev-row { display: flex; align-items: center; gap: 6px; padding: 4px 10px; cursor: pointer; border-bottom: 1px solid var(--border-soft); }
+.dev-row:hover, .dev-row:focus { background: var(--bg-hover); outline: none; }
+.dev-row.sel { background: var(--yellow-bg); font-weight: bold; }
+.dev-row .dot { flex: 0 0 9px; height: 9px; border-radius: 50%; background: var(--gray); }
+.dev-row .dot.up { background: var(--green); }
+.dev-row .dot.down { background: var(--red); }
+.dev-row .nm { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-row .meta { flex: 0 0 auto; color: var(--text-dim); font-size: 11px; font-weight: normal; }
+@media (max-width: 900px) { .dev-list { display: none; } }
+.left-stack { position: absolute; top: 12px; left: 12px; right: 264px; z-index: 6; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 8px; pointer-events: none; }
 .left-stack > * { pointer-events: auto; }
 .node-panel { position: relative; flex: none; width: 300px; overflow-y: auto;
     display: none; font-size: 12px; color: var(--text); background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; padding: 8px 12px; }
@@ -61,6 +75,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <button class="active" id="icons-btn" aria-pressed="true" onclick="toggleIcons(this)" title="Draw devices as icons with a vendor mark. Off: plain boxes for every device">Device icons</button>
     <button class="active" id="vendor-btn" aria-pressed="true" onclick="toggleVendor(this)" title="Show the vendor mark and name beside each device icon">Vendor icons</button>
     <button class="active" id="as-btn" aria-pressed="true" onclick="toggleAsAreas(this)" title="Draw a box around the routers of each BGP AS (needs BGP shown)">AS areas</button>
+    <button id="tidy-btn" onclick="tidyAsAreas()" title="Move the routers so each BGP AS sits in its own block (changes the saved places)">Tidy AS areas</button>
 </div>
 <div class="net-wrap">
     <div id="net"></div>
@@ -86,6 +101,10 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
         <span id="filter-text"></span>
         <button type="button" onclick="showAllLayers()">Show all</button>
     </div>
+    </div>
+    <div class="dev-list" id="dev-list" aria-label="Devices">
+        <h3 id="dev-list-title">Devices</h3>
+        <div class="dev-rows" id="dev-rows"></div>
     </div>
     <div class="toast" id="toast" role="status"></div>
     <details class="legend-box" id="legend-box">
@@ -298,6 +317,8 @@ function startSettling(pinIds) {
 function settled() {
     network.setOptions({ physics: { enabled: false } });
     nodeSet.update(nodeSet.getIds().map(function (id) { return { id: id, fixed: false }; }));
+    // The default first layout: a map with no saved places at all gets one block per BGP AS (saved places are never moved).
+    if (tidyOnSettle) { tidyOnSettle = false; tidyAsAreas(); }
     savePositions(nodeSet.getIds());
     network.fit();
     // The legend sits over the left of the map: move the fitted picture right by half its width.
@@ -328,6 +349,7 @@ function rearrange() {
 
 var loadSeq = 0;
 var rawData = null;      // the last answer from the API, before the viewer's hiding
+var tidyOnSettle = false;   // set by load() when no node has a saved place
 var selectedNode = null;
 var selectedLink = null;
 var focusNode = null;     // right-click "show only this node's links" (not remembered)
@@ -338,6 +360,7 @@ function load() {
     fetch(url).then(function (r) { return r.json(); }).then(function (data) {
         if (seq !== loadSeq) { return; }   // a newer toggle already asked: drop this older answer
         rawData = data;                    // the node card reads this, so a hidden node can still be shown and un-hidden
+        renderDeviceList();
         data = groupUnknown(hideFiltered(data));
         nodeAs = {};
         data.nodes.forEach(function (n) { if (n.asn !== null && n.asn !== undefined) { nodeAs[n.id] = n.asn; } });
@@ -362,6 +385,7 @@ function load() {
         var items = toVisNodes(data.nodes);
         var anyFree = false;
         items.forEach(function (it) { if (it.x === undefined) { anyFree = true; } });
+        tidyOnSettle = items.length > 0 && items.every(function (it) { return it.x === undefined; }) && Object.keys(nodeAs).length > 0;
         // Saved places stand still while physics lays out the new ones. With no new node physics is off, and a
         // fixed node could not be dragged.
         if (anyFree) { items.forEach(function (it) { if (it.x !== undefined) { it.fixed = true; } }); }
@@ -577,6 +601,36 @@ function toggleAsAreas(btn) {
     if (network) { network.redraw(); }
 }
 
+// "Tidy AS areas": put the routers of each AS in a block of their own so the boxes do not overlap, then save the
+// places. Blocks are packed left to right in rows; nodes with no AS go in a row below them.
+function tidyAsAreas() {
+    if (!network || !nodeSet) { return; }
+    var groups = {}, rest = [];
+    nodeSet.getIds().forEach(function (id) {
+        if (nodeAs[id] !== undefined) { (groups[nodeAs[id]] = groups[nodeAs[id]] || []).push(id); } else { rest.push(id); }
+    });
+    var asns = Object.keys(groups);
+    if (!asns.length) { toast('no BGP AS on the map'); return; }
+    asns.sort(function (a, b) { return groups[b].length - groups[a].length; });
+    var CW = 170, CH = 140, GAP = 110, MAXW = 1400;
+    var all = network.getPositions(nodeSet.getIds());
+    var x0 = Infinity, y0 = Infinity;
+    Object.keys(all).forEach(function (id) { x0 = Math.min(x0, all[id].x); y0 = Math.min(y0, all[id].y); });
+    var x = 0, y = 0, rowH = 0;
+    asns.forEach(function (asn) {
+        var ids = groups[asn], cols = Math.ceil(Math.sqrt(ids.length)), rows = Math.ceil(ids.length / cols);
+        var w = cols * CW, h = rows * CH;
+        if (x > 0 && x + w > MAXW) { x = 0; y += rowH + GAP; rowH = 0; }
+        ids.forEach(function (id, i) { network.moveNode(id, x0 + x + (i % cols) * CW, y0 + y + Math.floor(i / cols) * CH); });
+        x += w + GAP; rowH = Math.max(rowH, h);
+    });
+    var ry = y + rowH + GAP;
+    rest.forEach(function (id, i) { network.moveNode(id, x0 + (i % 8) * CW, y0 + ry + Math.floor(i / 8) * CH); });
+    savePositions(nodeSet.getIds());
+    network.fit();
+    network.redraw();
+}
+
 function drawAsAreas(ctx) {
     if (!asAreasOn() || !nodeSet) { return; }
     var boxes = {};   // AS number -> bounding box of its nodes
@@ -723,6 +777,51 @@ function portSpan(e) {
     return sp;
 }
 
+// The right-hand list: all known devices (not unknown neighbors), by name. A click selects the device on the map.
+function renderDeviceList() {
+    var box = document.getElementById('dev-rows');
+    var devs = (rawData ? rawData.nodes : []).filter(function (n) { return !n.ghost; });
+    devs.sort(function (a, b) { return a.label.toLowerCase() < b.label.toLowerCase() ? -1 : 1; });
+    document.getElementById('dev-list-title').textContent = 'Devices (' + devs.length + ')';
+    box.textContent = '';
+    devs.forEach(function (n) {
+        var row = document.createElement('div');
+        row.className = 'dev-row';
+        row.tabIndex = 0;
+        row.setAttribute('role', 'button');
+        row.setAttribute('data-id', n.id);
+        row.title = n.mgmt_ip ? n.label + ' | ' + n.mgmt_ip : n.label;
+        var dot = document.createElement('span');
+        dot.className = 'dot' + (n.reachable === 1 ? ' up' : n.reachable === 0 ? ' down' : '');
+        var nm = document.createElement('span');
+        nm.className = 'nm';
+        nm.textContent = n.label;
+        row.appendChild(dot);
+        row.appendChild(nm);
+        if (n.asn) {
+            var meta = document.createElement('span');
+            meta.className = 'meta';
+            meta.textContent = 'AS ' + n.asn;
+            row.appendChild(meta);
+        }
+        row.onclick = function () { pickFromList(n.id); };
+        row.onkeydown = function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pickFromList(n.id); } };
+        box.appendChild(row);
+    });
+    markDeviceList();
+}
+
+function markDeviceList() {
+    Array.prototype.forEach.call(document.querySelectorAll('#dev-rows .dev-row'), function (r) {
+        r.classList.toggle('sel', r.getAttribute('data-id') === selectedNode);
+    });
+}
+
+function pickFromList(id) {
+    if (!nodeSet || !nodeSet.get(id)) { toast('device not on the map (hidden or filtered)'); return; }
+    goToNode(id);
+}
+
 function goToNode(id) {
     if (!nodeSet || !nodeSet.get(id)) { return; }
     showNodePanel(id);
@@ -733,6 +832,7 @@ function goToNode(id) {
 function showNodePanel(id) {
     hideLinkPanel();
     selectedNode = id;
+    markDeviceList();
     var node = rawData && rawData.nodes.filter(function (n) { return n.id === id; })[0];
     if (!node) { return; }
     var label = {};
@@ -803,6 +903,7 @@ function fitNodePanel() {
 
 function closeNodePanel() {
     selectedNode = null;
+    markDeviceList();
     document.getElementById('node-panel').style.display = 'none';
 }
 
@@ -924,6 +1025,7 @@ function openContextMenu(id, x, y) {
         spec = { title: 'Map', items: [
             { label: 'Show all', action: showAllLayers },
             { label: 'Reset view', action: function () { network.fit(); } },
+            { label: 'Tidy AS areas', action: tidyAsAreas },
             { label: 'Re-arrange', action: rearrange },
         ] };
     } else {

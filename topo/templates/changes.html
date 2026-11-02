@@ -22,6 +22,12 @@ tbody tr.selected td { background: var(--yellow-bg); font-weight: bold; box-shad
 tbody tr.selected td:first-child { box-shadow: inset 4px 0 0 var(--blue), inset 0 2px 0 var(--blue), inset 0 -2px 0 var(--blue); }
 td.when { white-space: nowrap; }
 td.notes .pill { margin-right: 4px; }
+/* Before / After: a state word is coloured by what it means - green good, yellow warning, red bad. */
+.st { display: inline-block; padding: 0 7px; border-radius: 10px; border: 1px solid currentColor; font-weight: bold; }
+.st-ok { color: var(--green); background: var(--green-bg); }
+.st-warn { color: var(--yellow); background: var(--yellow-bg); }
+.st-bad { color: var(--red); background: var(--red-bg); }
+.st-na { color: var(--text-dim); }
 :root .linklike { display: inline; background: none; border: 0; box-shadow: none; transform: none; border-radius: 0;
     padding: 0; margin: 0; font: inherit; text-transform: none; text-shadow: none; color: var(--blue); text-decoration: underline; cursor: pointer; text-align: left; }
 :root .linklike:hover { background: none; color: var(--text); }
@@ -131,6 +137,19 @@ function timeCell(e) {
 
 function sevClass(sev) { return sev === 'info' ? 'ok' : (sev === 'warning' ? 'running' : 'bad'); }
 function changeClass(c) { return c === 'added' ? 'ok' : (c === 'removed' ? 'bad' : (c === 'changed' ? 'running' : 'idle')); }
+
+// A Before / After value as a coloured word when it is a known state (BGP, OSPF, interface, ping, polling), else plain text.
+var STATE_OK = ['established', 'full', 'up', 'ok', 'answering'];
+var STATE_WARN = ['idle', 'idle (admin)', 'active', 'connect', 'opensent', 'openconfirm', 'init', 'attempt', '2way', '2-way',
+                  'exstart', 'exchange', 'loading', 'down (admin)'];
+var STATE_BAD = ['down', 'failing', 'not answering'];
+function stateCell(v) {
+    if (!v) { return ''; }
+    var k = String(v).toLowerCase().trim();
+    var cls = STATE_OK.indexOf(k) !== -1 ? 'st-ok' : STATE_WARN.indexOf(k) !== -1 ? 'st-warn'
+            : STATE_BAD.indexOf(k) !== -1 ? 'st-bad' : k === 'n/a' ? 'st-na' : '';
+    return cls ? '<span class="st ' + cls + '">' + esc(v) + '</span>' : esc(v);
+}
 
 function deviceName(e) { return e.hostname || (e.device_id ? 'device ' + e.device_id : '-'); }
 
@@ -286,8 +305,8 @@ function render() {
             '<td>' + esc(e.type) + '</td>' +
             '<td>' + (e.change ? '<span class="pill ' + changeClass(e.change) + '">' + esc(e.change) + '</span>' : '') + '</td>' +
             '<td><button type="button" class="linklike" data-id="' + e.id + '">' + esc(subjectText(e)) + '</button></td>' +
-            '<td>' + esc(e.before) + '</td>' +
-            '<td>' + esc(e.after) + '</td>' +
+            '<td>' + stateCell(e.before) + '</td>' +
+            '<td>' + stateCell(e.after) + '</td>' +
             '<td class="notes"><span class="pill ' + sevClass(e.severity) + '">' + esc(e.severity) + '</span>' + esc(note) + '</td></tr>';
     }
     document.getElementById('rows').innerHTML = html;
