@@ -88,7 +88,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <button id="json-btn" onclick="exportJson()" title="Download the map data (devices, neighbors, sessions) as a JSON file">Export JSON</button>
 </div>
 <div class="hist-bar" id="hist-bar" role="status" style="display:none">
-    <span>History view, read-only: the map as it was on <b id="hist-when"></b>. <span id="hist-diff"></span></span>
+    <span>History view, read-only: the map as it was on <b id="hist-when"></b>. <span id="hist-diff"></span> Red glow: gone since.</span>
     <button type="button" onclick="document.getElementById('hist-sel').value=''; pickHistory('')">Back to live</button>
 </div>
 <div class="net-wrap">
@@ -436,7 +436,15 @@ var focusNode = null;     // right-click "show only this node's links" (not reme
 // History: a saved snapshot of the whole map (server side, /api/topology/snapshots). While one is picked the page shows
 // it instead of the live map, with a banner. Nothing is written to a device or to the snapshot.
 var viewSnap = '';
+var markedGone = [];   // node ids glowing red in a history view: on that map, gone from the live one
+function clearGoneMarks() {
+    if (nodeSet) {
+        nodeSet.update(markedGone.filter(function (i) { return nodeSet.get(i); }).map(function (i) { return { id: i, shadow: false, title: undefined }; }));
+    }
+    markedGone = [];
+}
 function pickHistory(id) {
+    clearGoneMarks();
     viewSnap = id;
     var bar = document.getElementById('hist-bar');
     if (!id) { bar.style.display = 'none'; }
@@ -447,7 +455,7 @@ function showHistoryDiff(snap) {
     var id = viewSnap;
     fetch('/api/topology').then(function (r) { return r.json(); }).then(function (live) {
         if (id !== viewSnap) { return; }
-        function names(d) { var o = {}; d.nodes.forEach(function (n) { o[n.id] = n.label || n.id; }); return o; }
+        function names(d) { var o = {}; d.nodes.forEach(function (n) { if (!n.ghost) { o[n.id] = n.label || n.id; } }); return o; }
         function keys(d) { var o = {}; d.edges.forEach(function (e) { o[edgeKey(e)] = true; }); return o; }
         var a = names(snap), b = names(live), ka = keys(snap), kb = keys(live);
         function count(x, y) { return Object.keys(x).filter(function (k) { return !y[k]; }); }
@@ -456,6 +464,14 @@ function showHistoryDiff(snap) {
         var gone = nodeGone.map(function (k) { return a[k]; }).slice(0, 5).join(', ');
         if (gone) { txt += ' (gone: ' + gone + ')'; }
         document.getElementById('hist-diff').textContent = txt + '.';
+        // Devices that are gone from the live map glow red on this one.
+        clearGoneMarks();
+        if (nodeSet) {
+            markedGone = nodeGone.filter(function (i) { return nodeSet.get(i); });
+            nodeSet.update(markedGone.map(function (i) {
+                return { id: i, shadow: { enabled: true, color: themeColor('--red'), size: 22, x: 0, y: 0 }, title: a[i] + '\ngone since this snapshot' };
+            }));
+        }
     }).catch(function () { document.getElementById('hist-diff').textContent = ''; });
 }
 
