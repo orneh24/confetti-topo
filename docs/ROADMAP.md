@@ -8,7 +8,7 @@ Ideas only. Nothing here is built until the user picks it.
   sender thread (webhook / mail), or send events to butler.
 
 ## Topology
-- **Routing table follow-ups:** IPv6 and a cap on a very large table; validate ECMP against a real router (the
+- **Routing table follow-ups:** IPv6 (checked 2026-11-03: the lab has one IPv6 route on one router and none on another, so there is no real table to build from yet) and a cap on a very large table; validate ECMP against a real router (the
   fixture `ios_route_not_captured.txt` is not a capture).
 - **Routing table docs and mock data:** update `docs/TOPOLOGY-MAPPING.md` (commands table, `routes` schema),
   `docs/HANDOFF.md`, and the skills `confetti-topo-add-platform` and `confetti-topo-api` (sixth task); add routes to
@@ -25,7 +25,7 @@ Ideas only. Nothing here is built until the user picks it.
   tested on sample text. Check them against a real Linux host's `show lldp neighbors detail`.
 - **Selection outline** is a wide rectangle that includes the vendor mark. A tighter outline around the icon alone
   would look better.
-- **More vendor marks** (Fortinet, Arista, Aruba, ...): add to `VENDOR_MARKS` and `VENDOR_NAMES` in topology.html.
+- **Real vendor marks** (Fortinet, Arista, Aruba, ...): an unknown vendor now gets a grey letter chip and its name; add a brand mark to `VENDOR_MARKS` and `VENDOR_NAMES` in topology.html when wanted.
 
 ## Platforms
 - **PAN-OS** (XML API) is done and polled on a real PA-VM (11.1); to do: other versions, Panorama, more than the

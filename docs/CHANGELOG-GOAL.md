@@ -24,3 +24,5 @@ Newest last. Times are local.
 - 2026-11-03 01:45 README images re-recorded at 1280x1000: no tile is cut off now.
 - 2026-11-03 02:10 Checked CDP on the real lab (read-only): not enabled on any reachable IOS device, so not built. Noted in ROADMAP.
 - 2026-11-03 02:20 Verified on a scratch mock lab: a down port shows a red dashed cable and the link card text; "Changed 24h" leaves a device with no events unlit; CSV formula prefix checked.
+- 2026-11-03 02:40 Topology: a vendor with no mark of its own (Fortinet, Arista...) gets a grey letter chip and its name. alpine, linux and unknown get none. Plain characters only go into the SVG.
+- 2026-11-03 02:42 Checked IPv6 on the real lab (read-only `show ipv6 route`): one route on one router, none on another, so no parser built. Noted in ROADMAP.
