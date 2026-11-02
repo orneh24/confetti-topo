@@ -13,7 +13,7 @@ Ideas only. Nothing here is built until the user picks it.
 - **Routing table docs and mock data:** update `docs/TOPOLOGY-MAPPING.md` (commands table, `routes` schema),
   `docs/HANDOFF.md`, and the skills `confetti-topo-add-platform` and `confetti-topo-api` (sixth task); add routes to
   `topo/scripts/seed_mock_lab.py`; run `docs-drift-checker`.
-- **IOS 15.2 `vrf *` check:** confirm whether `c3560g` answers `show ip route vrf *` or uses the `show ip route`
+- **IOS 15.2 `vrf *` check:** confirm whether the Catalyst 3560 switch answers `show ip route vrf *` or uses the `show ip route`
   fallback.
 - **CDP** next to LLDP (many Cisco switches speak only CDP).
 - **L2 view:** MAC table, VLANs, spanning tree. Needs its own commands, verified on real devices first.

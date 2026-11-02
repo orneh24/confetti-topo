@@ -77,6 +77,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <button class="active" id="vendor-btn" aria-pressed="true" onclick="toggleVendor(this)" title="Show the vendor mark and name beside each device icon">Vendor icons</button>
     <button class="active" id="as-btn" aria-pressed="true" onclick="toggleAsAreas(this)" title="Draw a box around the routers of each BGP AS (needs BGP shown)">AS areas</button>
     <button id="tidy-btn" onclick="tidyAsAreas()" title="Move the routers so each BGP AS sits in its own block (changes the saved places)">Tidy AS areas</button>
+    <button id="png-btn" onclick="exportPng()" title="Download the map as a PNG picture">Export PNG</button>
 </div>
 <div class="net-wrap">
     <div id="net"></div>
@@ -340,6 +341,30 @@ function fitMap() {
     var wrapW = document.getElementById('net').offsetWidth || 1;
     network.moveTo({ position: network.getViewPosition(), scale: network.getScale() * Math.max(0.3, (wrapW - listW) / wrapW),
                      offset: { x: (legendW - listW) / 2, y: 0 } });
+}
+
+// Download the map as it is on screen (the canvas is transparent, so paint the page colour under it first).
+function exportPng() {
+    if (!network) { toast('nothing to export'); return; }
+    var src = network.canvas.frame.canvas;
+    var out = document.createElement('canvas');
+    out.width = src.width;
+    out.height = src.height;
+    var ctx = out.getContext('2d');
+    ctx.fillStyle = themeColor('--bg') || '#000';
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(src, 0, 0);
+    out.toBlob(function (blob) {
+        if (!blob) { toast('export failed'); return; }
+        var d = new Date(), pad = function (n) { return (n < 10 ? '0' : '') + n; };
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'confetti-topo-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.png';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+    }, 'image/png');
 }
 
 // /topology?device=<id> (from the Recent changes page): select that device and centre on it, once.
@@ -1083,6 +1108,7 @@ function openContextMenu(id, x, y) {
         spec = { title: 'Map', items: [
             { label: 'Show all', action: showAllLayers },
             { label: 'Reset view', action: fitMap },
+            { label: 'Export PNG', action: exportPng },
             { label: 'Tidy AS areas', action: tidyAsAreas },
             { label: 'Re-arrange', action: rearrange },
         ] };

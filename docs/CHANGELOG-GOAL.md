@@ -17,3 +17,5 @@ Newest last. Times are local.
 - 2026-11-02 23:20 Checked the down path on a scratch mock DB: cable gets up=false and port state down.
 - 2026-11-03 00:05 Docs brought in line (TOPOLOGY-MAPPING, CLAUDE.md, two skills): cable state, `local_port_state`, search and fade.
 - 2026-11-03 00:10 Search box placeholder shortened so it fits. README images re-recorded at 1280x900 (new Devices table, search box).
+- 2026-11-03 00:30 Topology: "Export PNG" button and map right-click item download the map as a PNG (page colour behind it).
+- 2026-11-03 00:32 Leak scan: one lab hostname in ROADMAP.md replaced by a model name (it is also in older commits on origin/routing-table). README capture viewport raised to 1280x1000.
