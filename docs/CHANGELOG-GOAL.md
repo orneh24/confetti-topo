@@ -11,3 +11,4 @@ Newest last. Times are local.
 - 2026-11-02 22:36 Topology: the search box also fades non-matching devices on the map (stays while it refreshes).
 - 2026-11-02 22:40 Dashboard: new Devices table (ping, poll state, last good poll), problems first, in every layout.
 - 2026-11-02 22:41 `topo-setup.sh`: example address in a comment changed to the documentation range (192.0.2.x).
+- 2026-11-02 22:50 README: topology search and red cable noted.
