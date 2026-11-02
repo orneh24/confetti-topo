@@ -28,3 +28,4 @@ Newest last. Times are local.
 - 2026-11-03 02:42 Checked IPv6 on the real lab (read-only `show ipv6 route`): one route on one router, none on another, so no parser built. Noted in ROADMAP.
 - 2026-11-03 03:10 Devices page: filter box (name, IP, site, role, vendor, platform, model, key) with an "N of M" count; it survives re-renders and sorting. Not checked at 390px width.
 - 2026-11-03 03:12 Looked at a VLAN/L2 poll task: not built. On a router, `show vlan brief` answers "Invalid input", which the poller counts as a failed task, so it needs a switch-only gate and a new table; left on the roadmap.
+- 2026-11-03 03:40 Dashboard: disk used is yellow from 85% and red from 95%, memory from 80% / 90%; the Server tile says "degraded, disk N% full" at 95%. Neon Green CRT underlines the warning, since its colours are close. Checked in 5 layouts (disk was 91% here, so the red case was only checked in code).

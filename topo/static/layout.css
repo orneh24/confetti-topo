@@ -151,6 +151,7 @@ table.compact th, table.compact td { padding: 3px 12px 3px 6px; text-align: left
 .v.ok { color: var(--green); }
 .v.bad { color: var(--red); }
 .v.unknown { color: var(--gray); }
+.v.warn { color: var(--yellow); }
 .note, .hint { color: var(--text-dim); font-size: 11px; }
 .empty { color: var(--text-dim); padding: 8px 0; font-size: 12px; }
 .msg.ok { color: var(--green); }
@@ -628,6 +629,7 @@ button.primary:hover { color: var(--bg); filter: brightness(1.15); }
 :root:is([data-layout="msdos"], [data-layout="greencrt"]) .pill.bad,
 :root:is([data-layout="msdos"], [data-layout="greencrt"]) .v.bad,
 :root:is([data-layout="msdos"], [data-layout="greencrt"]) .msg.err { background: var(--crt-fail); color: var(--crt-bg); text-shadow: none; padding: 0 4px; }
+:root:is([data-layout="msdos"], [data-layout="greencrt"]) .v.warn { color: var(--crt-slow); text-decoration: underline; }
 :root:is([data-layout="msdos"], [data-layout="greencrt"]) button,
 :root:is([data-layout="msdos"], [data-layout="greencrt"]) .btn-small,
 :root:is([data-layout="msdos"], [data-layout="greencrt"]) .btn-nav,

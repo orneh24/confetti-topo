@@ -72,6 +72,11 @@ function fmtBytes(n) {
     return n.toFixed(1) + ' ' + units[i];
 }
 
+// A used-percentage as a colour: yellow from `warn`, red from `bad` (the disk and memory lines).
+function fullness(pct, warn, bad) {
+    return pct >= bad ? 'bad' : (pct >= warn ? 'warn' : '');
+}
+
 function renderTime(data) {
     var html = kv('server utc', data.utc);
     if (data.chrony) {
@@ -109,12 +114,12 @@ window.onHealth = function (data) {
         system += kv('load', 'unknown', 'unknown');
     }
     if (data.memory) {
-        system += kv('memory used', data.memory.used_pct + '%');
+        system += kv('memory used', data.memory.used_pct + '%', fullness(data.memory.used_pct, 80, 90));
     } else {
         system += kv('memory', 'unknown', 'unknown');
     }
     if (data.disk) {
-        system += kv('disk used', data.disk.used_pct + '% (' + fmtBytes(data.disk.free_bytes) + ' free)');
+        system += kv('disk used', data.disk.used_pct + '% (' + fmtBytes(data.disk.free_bytes) + ' free)', fullness(data.disk.used_pct, 85, 95));
     } else {
         system += kv('disk', 'unknown', 'unknown');
     }
@@ -131,8 +136,10 @@ function setKpi(id, value, cls, sub) {
 
 function renderKpiServer(data) {
     if (!data) { setKpi('srv', 'down', 'bad', 'unreachable'); return; }
-    var bad = !data.poller_running;
-    setKpi('srv', bad ? 'degraded' : 'up', bad ? 'warn' : 'good', bad ? 'poller down' : 'poller running');
+    var full = data.disk && data.disk.used_pct >= 95;
+    var bad = !data.poller_running || full;
+    setKpi('srv', bad ? 'degraded' : 'up', bad ? 'warn' : 'good',
+        !data.poller_running ? 'poller down' : (full ? 'disk ' + data.disk.used_pct + '% full' : 'poller running'));
 }
 
 function timeAgo(iso) {
