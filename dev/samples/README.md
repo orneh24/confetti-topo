@@ -15,6 +15,10 @@ Used by `dev/regress.py`.
   list is **not** in a real capture (the lab switch's list fits on one line); `regress.py` R34 adds one in the format
   IOS documents.
 
+- `ios_trunk.txt` has the **real format** of `show interfaces trunk` from a Catalyst 3560 (three trunk ports, the four
+  blocks; the VLAN lists were shortened). A VLAN list that wraps onto an indented line is **not** in a real capture;
+  `regress.py` R34 checks it with one written from the documented format.
+
 - `ios_route_17_3.txt` has the **real format** of `show ip route vrf *` from IOS-XE 17.3 (global table, then
   `Routing Table: MGMT`; a route under `is subnetted` with no mask; `O E2` with age and interface; a BGP route
   with no interface). `panos_route.xml` and `panos_fib.xml` have the real shape of the PAN-OS RIB and FIB answers

@@ -146,6 +146,16 @@
             <div class="empty" id="route-empty" style="display:none">no routes polled yet</div>
         </div>
     </div>
+    <!-- Switches only: shown once the device has trunk rows. -->
+    <div class="section wide" id="trunks" style="display:none">
+        <div class="section-header"><span>Trunks <span id="trunk-count"></span></span></div>
+        <div class="section-body">
+            <table data-sortable class="striped compact">
+                <thead><tr><th>Port</th><th>Mode</th><th>Encapsulation</th><th>Status</th><th>Native VLAN</th><th>VLANs allowed and active</th></tr></thead>
+                <tbody id="trunk-rows"></tbody>
+            </table>
+        </div>
+    </div>
     <!-- Switches only: shown once the device has VLAN rows. -->
     <div class="section wide" id="vlans" style="display:none">
         <div class="section-header"><span>VLANs <span id="vlan-count"></span></span></div>
@@ -395,6 +405,20 @@ function loadVlans() {
     });
 }
 
+function loadTrunks() {
+    fetch('/api/trunks?device_id=' + deviceId).then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '';
+        list.forEach(function (t) {
+            rows += '<tr><td>' + esc(t.port) + '</td><td>' + esc(t.mode) + '</td><td>' + esc(t.encapsulation) + '</td><td>' +
+                '<span class="pill ' + (t.status === 'trunking' ? 'ok' : 'bad') + '">' + esc(t.status) + '</span></td><td>' +
+                esc(t.native_vlan === null ? '' : t.native_vlan) + '</td><td>' + esc(t.active) + '</td></tr>';
+        });
+        document.getElementById('trunk-rows').innerHTML = rows;
+        document.getElementById('trunk-count').textContent = list.length ? '(' + list.length + ')' : '';
+        document.getElementById('trunks').style.display = list.length ? '' : 'none';
+    });
+}
+
 function loadLldp() {
     fetch('/api/lldp-neighbors?device_id=' + deviceId).then(function (r) { return r.json(); }).then(function (list) {
         var rows = '';
@@ -465,6 +489,7 @@ function pollNow() {
         loadInterfaces();
         loadRoutes();
         loadVlans();
+        loadTrunks();
         loadLldp();
         loadAdjacencies();
         loadEvents();
@@ -478,6 +503,7 @@ loadDevice();
 loadInterfaces();
 loadRoutes();
 loadVlans();
+loadTrunks();
 loadLldp();
 loadAdjacencies();
 loadEvents();

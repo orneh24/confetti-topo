@@ -638,19 +638,19 @@ def sample(name):
     return read(SAMPLES + name)
 
 
-@check("R19", "platform registry: same core tasks everywhere (vlans is IOS-only), unknown platform = IOS, every command read-only")
+@check("R19", "platform registry: same core tasks everywhere (vlans and trunks are IOS-only), unknown platform = IOS, every command read-only")
 def _():
     p = []
     m = app_modules()
     from app import platforms
     ios_tasks = tuple(platforms.IOS["commands"])
     core = ("version", "interfaces", "lldp", "bgp", "ospf", "routes")
-    need(ios_tasks == core + ("vlans",), "IOS tasks are %r" % (ios_tasks,), p)
+    need(ios_tasks == core + ("vlans", "trunks"), "IOS tasks are %r" % (ios_tasks,), p)
     for name, plat in platforms.PLATFORMS.items():
         # "vlans" is a switch task of the IOS entry only; every platform has the six core tasks.
-        have = tuple(t for t in plat["commands"] if t != "vlans")
+        have = tuple(t for t in plat["commands"] if t not in platforms.SWITCH_TASKS)
         need(have == core, "%s tasks are %r, expected the core %r" % (name, tuple(plat["commands"]), core), p)
-        need("vlans" not in plat["commands"] or plat is platforms.IOS, "%s: vlans is only for the IOS entry" % name, p)
+        need(not (set(plat["commands"]) & set(platforms.SWITCH_TASKS)) or plat is platforms.IOS, "%s: vlans and trunks are only for the IOS entry" % name, p)
         need(set(plat["parsers"]) == set(plat["commands"]), "%s: commands and parsers differ" % name, p)
         # SSH platforms run `show ...`; the XML API platform sends `<show>...</show>` operations. Nothing else.
         prefix = "<show>" if plat.get("transport") == "xml_api" else "show "
@@ -1301,7 +1301,7 @@ def _():
     return p
 
 
-@check("R34", "vlans (switches only): parses the real output, a router is never asked, an empty answer deletes nothing, a real list replaces the old one")
+@check("R34", "vlans and trunks (switches only): parse the real output, a router is never asked, an empty VLAN list deletes nothing, a \"%\" answer fails the task, a real list replaces the old one")
 def _():
     p = []
     m, conn = fresh_db()
@@ -1313,7 +1313,13 @@ def _():
     need([x["status"] for x in v if x["vlan_id"] == 1002] == ["act/unsup"], "act/unsup status lost", p)
     cont = ios.parse_vlans(text + "                                                Gi0/11, Gi0/12\n")   # written from IOS's documented format
     need(cont[-1]["ports"] == "Gi0/11, Gi0/12", "a continuation line must add to the row above: %r" % cont[-1], p)
-    need("vlans" in ssh.TASKS, "vlans missing from the IOS tasks", p)
+    need("vlans" in ssh.TASKS and "trunks" in ssh.TASKS, "vlans / trunks missing from the IOS tasks", p)
+    tr = ios.parse_trunks(read(SAMPLES + "ios_trunk.txt"))
+    need([(t["port"], t["native_vlan"], t["status"]) for t in tr] == [("Gi0/3", 253, "trunking"), ("Gi0/7", 1, "trunking"), ("Gi0/8", 253, "trunking")],
+         "ios_trunk: %r" % [(t["port"], t["native_vlan"]) for t in tr], p)
+    need(tr[0]["allowed"] == "1-4094" and tr[0]["active"] == "1,10-12,15,100,3961-3963", "trunk VLAN lists: %r %r" % (tr[0]["allowed"], tr[0]["active"]), p)
+    wrapped = ios.parse_trunks(read(SAMPLES + "ios_trunk.txt").replace("1,10-12,15,100,3961-3963", "1,10-12,15,\n            100,3961-3963", 1))
+    need(wrapped[0]["active"] == "1,10-12,15,100,3961-3963", "a wrapped VLAN list must be joined: %r" % wrapped[0]["active"], p)
     sw = {"role": "router", "model": "WS-C3560CG-8TC-S", "hostname": "sw1", "platform": "cisco_ios"}
     rt = {"role": "router", "model": "CSR1000V", "hostname": "csr1", "platform": "cisco_ios"}
     need(ssh._is_switch(sw) and not ssh._is_switch(rt), "only a switch may be asked for VLANs", p)
@@ -1321,7 +1327,7 @@ def _():
     class _Conn:
         def send_command(self, cmd, **kw):
             asked.append(cmd)
-            return ""
+            return ""   # an empty answer
         def disconnect(self):
             pass
         def check_enable_mode(self):
@@ -1332,7 +1338,8 @@ def _():
         for dev in (sw, rt):
             asked.clear()
             list(ssh.run_tasks(dict(dev, mgmt_ip="192.0.2.9"), {"username": "u", "password": "p", "secret": ""}))
-            need(("show vlan brief" in asked) == (dev is sw), "show vlan brief asked=%s for %s" % ("show vlan brief" in asked, dev["model"]), p)
+            need(("show vlan brief" in asked) == (dev is sw) and ("show interfaces trunk" in asked) == (dev is sw),
+                 "switch-only commands asked=%r for %s" % (asked, dev["model"]), p)
     finally:
         ssh.ConnectHandler = real
     did = add_device(conn, "192.0.2.9", "sw1")
@@ -1351,6 +1358,27 @@ def _():
     r = m["appmod"].app.test_client().get("/api/vlans?device_id=%d" % did)
     need(r.status_code == 200 and len(r.get_json()) == 10, "GET /api/vlans: %s" % r.status_code, p)
     need(m["appmod"].app.test_client().get("/api/vlans").status_code == 400, "/api/vlans needs device_id", p)
+    # trunks: stored, replaced, and an empty list (a switch with no trunks) is a real answer that clears them
+    ssh.apply_result(conn, did, "trunks", tr)
+    conn.commit()
+    nt = lambda: conn.execute("SELECT COUNT(*) FROM trunks WHERE device_id = ?", (did,)).fetchone()[0]
+    need(nt() == 3, "stored %d trunks" % nt(), p)
+    time.sleep(1.1)
+    ssh.apply_result(conn, did, "trunks", tr[:2])
+    conn.commit()
+    need(nt() == 2, "a real trunk list must replace the old one: %d" % nt(), p)
+    r = m["appmod"].app.test_client().get("/api/trunks?device_id=%d" % did)
+    need(r.status_code == 200 and len(r.get_json()) == 2, "GET /api/trunks: %s" % r.status_code, p)
+    # a "%" answer must fail the task (so nothing is deleted), not come back as an empty list
+    class _Err(_Conn):
+        def send_command(self, cmd, **kw):
+            return "% Invalid input detected at the '^' marker."
+    ssh.ConnectHandler = lambda **kw: _Err()
+    try:
+        res = {t: ok for t, ok, *_ in ssh.run_tasks(dict(sw, mgmt_ip="192.0.2.9"), {"username": "u", "password": "p", "secret": ""})}
+    finally:
+        ssh.ConnectHandler = real
+    need(res.get("vlans") is False and res.get("trunks") is False, "an error answer must fail vlans and trunks: %r" % res, p)
     return p
 
 

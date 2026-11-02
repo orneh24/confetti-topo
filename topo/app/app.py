@@ -429,6 +429,23 @@ def api_vlans():
     return jsonify(out)
 
 
+@app.route("/api/trunks", methods=["GET"])
+def api_trunks():
+    """A switch's trunk ports (show interfaces trunk). ?device_id=N is required."""
+    device_id = request.args.get("device_id", type=int)
+    if device_id is None:
+        return jsonify({"error": "device_id is required"}), 400
+    rows = db.get_db().execute(
+        "SELECT port, mode, encapsulation, status, native_vlan, allowed, active, last_seen FROM trunks "
+        "WHERE device_id = ? ORDER BY port", (device_id,)).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["last_seen"] = db.iso(d["last_seen"])
+        out.append(d)
+    return jsonify(out)
+
+
 @app.route("/api/routes", methods=["GET"])
 def api_routes():
     """A device's routing table. ?device_id=N is required; ?vrf=, ?kind=rib|fib and ?prefix= (substring) narrow it."""

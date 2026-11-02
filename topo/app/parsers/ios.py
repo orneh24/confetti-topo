@@ -410,3 +410,44 @@ def parse_vlans(text):
         elif out and line[:1].isspace() and line.strip():
             out[-1]["ports"] = (out[-1]["ports"] + ", " if out[-1]["ports"] else "") + line.strip()
     return out
+
+
+# ---------------------------------------------------------------------------
+# show interfaces trunk (switches)
+# ---------------------------------------------------------------------------
+
+_TRUNK_ROW_RE = re.compile(r"^(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\d+)\s*$")
+_TRUNK_LIST_RE = re.compile(r"^(\S+)\s+(\S+)\s*$")
+
+
+def parse_trunks(text):
+    """Parse 'show interfaces trunk' into {port, mode, encapsulation, status, native_vlan, allowed, active} rows.
+
+    The answer is four blocks, each with its own header line: the port table, "Vlans allowed on trunk",
+    "Vlans allowed and active in management domain" and a spanning-tree one (not stored). A VLAN list has no spaces, so
+    a list that wraps onto an indented line is joined to the one above without any separator."""
+    rows = {}
+    section = None
+    last = None
+    for line in text.splitlines():
+        if line.startswith("Port") and "Mode" in line:
+            section, last = "table", None
+        elif line.startswith("Port") and "allowed on trunk" in line:
+            section, last = "allowed", None
+        elif line.startswith("Port") and "allowed and active" in line:
+            section, last = "active", None
+        elif line.startswith("Port"):
+            section, last = None, None   # the spanning-tree block: not stored
+        elif section == "table":
+            m = _TRUNK_ROW_RE.match(line)
+            if m:
+                rows[m.group(1)] = {"port": m.group(1), "mode": m.group(2), "encapsulation": m.group(3),
+                                    "status": m.group(4), "native_vlan": int(m.group(5)), "allowed": "", "active": ""}
+        elif section in ("allowed", "active"):
+            m = _TRUNK_LIST_RE.match(line)
+            if m and m.group(1) in rows and not line[:1].isspace():
+                last = rows[m.group(1)]
+                last[section] = m.group(2)
+            elif last is not None and line[:1].isspace() and line.strip():
+                last[section] += line.strip()
+    return list(rows.values())

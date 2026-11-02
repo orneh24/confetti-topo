@@ -53,6 +53,9 @@ def _error_text(exc):
 
 def _run_command(conn, task, plat):
     output = conn.send_command(plat["commands"][task], read_timeout=30 if task == "routes" else 20)
+    if task in platforms.SWITCH_TASKS and _is_cli_error(output):
+        # "% Invalid input" is not an empty list: fail the task so nothing stored is deleted.
+        raise RuntimeError("device answered: " + output.strip().splitlines()[0][:80])
     parsed = plat["parsers"][task](output)
     if task == "lldp" and plat.get("lldp_brief_command") and any(not row["local_if"] for row in parsed):
         # Older IOS leaves Local Intf out of the detail output; the brief
@@ -93,8 +96,8 @@ def run_tasks(device, creds, tasks=None):
     """
     plat = platforms.get(device.get("platform"))
     tasks = tasks or platforms.tasks(plat)
-    if "vlans" in tasks and not _is_switch(device):
-        tasks = tuple(t for t in tasks if t != "vlans")   # a router answers "Invalid input": do not ask
+    if not _is_switch(device):
+        tasks = tuple(t for t in tasks if t not in platforms.SWITCH_TASKS)   # a router answers "Invalid input": do not ask
 
     host = device.get("mgmt_ip")
     if not host:
@@ -159,6 +162,8 @@ def apply_result(conn, device_id, task, parsed):
         _apply_routes(conn, device_id, parsed, now)
     elif task == "vlans":
         _apply_vlans(conn, device_id, parsed, now)
+    elif task == "trunks":
+        _apply_trunks(conn, device_id, parsed, now)
 
 
 def _apply_version(conn, device_id, parsed, now):
@@ -376,3 +381,20 @@ def _apply_vlans(conn, device_id, parsed, now):
         )
     if parsed:
         conn.execute("DELETE FROM vlans WHERE device_id = ? AND last_seen <> ?", (device_id, now))
+
+
+def _apply_trunks(conn, device_id, parsed, now):
+    """Store the trunk ports. A switch can have none, so an empty answer is real and clears the table (a "%" error
+    never gets here: _run_command fails the task for it, and a failed task deletes nothing)."""
+    for t in parsed:
+        conn.execute(
+            """INSERT INTO trunks (device_id, port, mode, encapsulation, status, native_vlan, allowed, active, last_seen)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(device_id, port) DO UPDATE SET
+                   mode=excluded.mode, encapsulation=excluded.encapsulation, status=excluded.status,
+                   native_vlan=excluded.native_vlan, allowed=excluded.allowed, active=excluded.active,
+                   last_seen=excluded.last_seen""",
+            (device_id, t["port"], t["mode"], t["encapsulation"], t["status"], t["native_vlan"],
+             t["allowed"], t["active"], now),
+        )
+    conn.execute("DELETE FROM trunks WHERE device_id = ? AND last_seen <> ?", (device_id, now))

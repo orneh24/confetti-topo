@@ -244,6 +244,20 @@ def init_db():
             PRIMARY KEY (device_id, vlan_id)
         );
 
+        -- A switch's trunk ports (show interfaces trunk). allowed / active are the device's own VLAN lists, e.g. '1,10-12'.
+        CREATE TABLE IF NOT EXISTS trunks (
+            device_id     INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+            port          TEXT NOT NULL,
+            mode          TEXT NOT NULL DEFAULT '',
+            encapsulation TEXT NOT NULL DEFAULT '',
+            status        TEXT NOT NULL DEFAULT '',
+            native_vlan   INTEGER,
+            allowed       TEXT NOT NULL DEFAULT '',
+            active        TEXT NOT NULL DEFAULT '',
+            last_seen     TEXT NOT NULL,
+            PRIMARY KEY (device_id, port)
+        );
+
         -- Where each node sits on the topology page, shared by every viewer.
         -- node_id is the graph id ('dev:5', 'ghost:lldp:sw1'), not a devices FK.
         CREATE TABLE IF NOT EXISTS node_positions (

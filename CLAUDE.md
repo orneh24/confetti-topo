@@ -58,13 +58,13 @@ Each tick (`TOPO_POLL_TICK_S`, default 15s): claim devices with `poll_state='idl
 `next_poll_at <= now`, mark them `'running'` (this is the per-device lock — a device whose SSH hangs is never
 queued twice), and hand each to a `ThreadPoolExecutor` (`TOPO_POLL_WORKERS`, default 8).
 
-Per device, seven tasks run independently, **each committing its own transaction**: `version`, `interfaces`,
-`lldp`, `bgp`, `ospf`, `routes`, and `vlans` (IOS **switches** only: `ssh.run_tasks` leaves it out for a router, which answers
+Per device, eight tasks run independently, **each committing its own transaction**: `version`, `interfaces`,
+`lldp`, `bgp`, `ospf`, `routes`, and `vlans` and `trunks` (IOS **switches** only: `ssh.run_tasks` leaves it out for a router, which answers
 `Invalid input`, and PAN-OS has none; a new switch gets it from its second poll, once its model is known). Partial failure is the normal case — an LLDP timeout must never discard interface data
 collected 200ms earlier. `role='node'` devices (confetti-traffic's imported Alpine fleet) are never polled —
 `poller.py`'s device-selection query filters `role != 'node'`.
 
-All seven tasks share **one SSH session** per poll (PAN-OS: one keygen per poll) (`ssh.run_tasks` is a generator, so each task still commits
+All eight tasks share **one SSH session** per poll (PAN-OS: one keygen per poll) (`ssh.run_tasks` is a generator, so each task still commits
 before the next command runs). Each apply step deletes that device's rows not seen in this poll — a removed
 peer or cable must not stay on the topology forever. But **only a successful task deletes**: a timeout or a
 failed login applies nothing (constraint 14). `interfaces` skips the delete on an empty result, since empty
@@ -141,12 +141,16 @@ mask and takes the header's. `emit()` writes one `routes_changed` event per poll
 never one per prefix. Fixtures: `dev/samples/ios_route_*.txt`, `panos_route.xml`, `panos_fib.xml`. Not handled: IPv6,
 a cap on a very large table (a full BGP table would be one row per route).
 
-### VLANs (switches)
+### VLANs and trunks (switches)
+
+The `trunks` task runs `show interfaces trunk` the same way (`trunks` table, `GET /api/trunks?device_id=N`, a Trunks table on
+the device page). A switch may have no trunks, so an empty answer clears the table; a `%` answer fails the task and
+deletes nothing (both switch tasks). Fixture `dev/samples/ios_trunk.txt`.
 
 The `vlans` task runs `show vlan brief` on a device the topology draws as a switch (`ssh._is_switch`, from role, model and
 hostname) and stores one row per VLAN in `vlans` (`GET /api/vlans?device_id=N`, shown on the device page). A switch always
 has VLAN 1, so an answer with no rows deletes nothing; a real list replaces the old one. No events. Fixture
-`dev/samples/ios_vlan_brief.txt` (real format, Catalyst 3560). Not handled: spanning tree, the MAC table, trunks.
+`dev/samples/ios_vlan_brief.txt` (real format, Catalyst 3560). Not handled: spanning tree and the MAC table.
 
 ### Reachability
 
@@ -384,9 +388,9 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
     checked. With it set, pages redirect to `/login`, `/api/*` and `/metrics` answer 401, and `/api/health`, `/static`, `/login`
     and `/logout` stay open. The cookie is HttpOnly, SameSite=Strict and holds a hash, never the token; `next` may only be a
     path on this server. Checked by R33.
-19. **VLANs are asked of switches only, and an empty answer deletes nothing.** A router answers `show vlan brief` with
+19. **VLANs and trunks are asked of switches only, and a failed answer deletes nothing.** A router answers `show vlan brief` with
     `Invalid input`, so `ssh.run_tasks` drops the `vlans` task unless `_is_switch`; PAN-OS has none. A switch always has VLAN 1,
-    so an empty parse is a failure, not a real answer (constraint 14). Checked by R34.
+    so an empty VLAN parse is a failure, not a real answer (constraint 14); a `%` answer fails both tasks. Checked by R34.
 
 ## Regression gate
 
