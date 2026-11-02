@@ -112,7 +112,7 @@
             <div class="hint">
                 Show only:
                 <label><input type="checkbox" class="if-filter" value="down" onchange="renderInterfaces()"> Down (oper not up)</label>
-                <label><input type="checkbox" class="if-filter" value="unused" onchange="renderInterfaces()"> Unused (admin down)</label>
+                <label id="if-unused-label"><input type="checkbox" class="if-filter" value="unused" onchange="renderInterfaces()"> Unused (admin down)</label>
                 <label><input type="checkbox" class="if-filter" value="noip" onchange="renderInterfaces()"> No IP configured</label>
                 <span class="msg" id="if-count"></span>
             </div>
@@ -289,6 +289,9 @@ var interfaceList = [];   // last polled interfaces; the filter works on this, n
 function loadInterfaces() {
     fetch('/api/devices/' + deviceId + '/interfaces').then(function (r) { return r.json(); }).then(function (list) {
         interfaceList = list;
+        // PAN-OS reports no admin status: the "Unused" box would match every interface, so hide it there.
+        var hasAdmin = list.some(function (f) { return f.admin_status; });
+        document.getElementById('if-unused-label').style.display = (!list.length || hasAdmin) ? '' : 'none';
         renderInterfaces();
     });
 }
@@ -310,7 +313,7 @@ function renderInterfaces() {
             var sd = (f.speed || f.duplex) ? ((f.duplex || '') + ' ' + (f.speed || '')).trim() : '';
             rows += '<tr>' +
                 '<td>' + esc(f.name) + '</td>' +
-                '<td><span class="pill ' + (f.admin_status === 'up' ? 'ok' : 'bad') + '">' + esc(f.admin_status) + '</span></td>' +
+                '<td>' + (f.admin_status ? '<span class="pill ' + (f.admin_status === 'up' ? 'ok' : 'bad') + '">' + esc(f.admin_status) + '</span>' : '') + '</td>' +
                 '<td><span class="pill ' + (f.oper_status === 'up' ? 'ok' : 'bad') + '">' + esc(f.oper_status) + '</span></td>' +
                 '<td>' + esc(f.ip ? f.ip + '/' + f.prefix_len : '') + '</td>' +
                 '<td>' + esc(sd) + '</td>' +
@@ -325,6 +328,7 @@ function renderInterfaces() {
     }
 }
 
+var routesScrolled = false;
 var routeList = [];   // all polled routes of this device; the pickers filter this list
 
 function loadRoutes() {
@@ -340,6 +344,11 @@ function loadRoutes() {
         fibOpt.hidden = !list.some(function (r) { return r.kind === 'fib'; });
         if (fibOpt.hidden) { document.getElementById('rt-kind').value = 'rib'; }
         renderRoutes();
+        // /device/<id>#routes: the section is only tall enough to scroll to once the rows exist.
+        if (!routesScrolled && location.hash === '#routes') {
+            routesScrolled = true;
+            document.getElementById('routes').scrollIntoView();
+        }
     });
 }
 

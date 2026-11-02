@@ -228,6 +228,14 @@ def build(conn, layer=None):
         # duplicate line is safer than hiding a real parallel link. Ghost
         # links are never de-duplicated.
         seen = {}   # cable (both ends) -> the edge already drawn for it
+        # A cable whose local port a device reports as not up is drawn red and dashed. Only an exact name match counts:
+        # a port spelled differently ("Gi1" vs "GigabitEthernet1") is unknown, not down.
+        oper = {(i["device_id"], i["name"].lower()): i["oper_status"]
+                for i in conn.execute("SELECT device_id, name, oper_status FROM interfaces")}
+
+        def port_down(device_id, port):
+            status = oper.get((device_id, (port or "").lower()))
+            return status is not None and status != "up"
         for r in rows:
             remote, how = resolve_lldp(ctx, r["device_id"], r["remote_device_id"], r["remote_mgmt_ip"],
                                        r["remote_chassis"], r["remote_sysname"])
@@ -235,6 +243,8 @@ def build(conn, layer=None):
                 link = frozenset([(r["device_id"], r["local_if"]), (remote, r["remote_port"])])
                 if link in seen:
                     seen[link]["details"].append(_lldp_report(r, names, how))   # the other end's view of the same cable
+                    if port_down(r["device_id"], r["local_if"]):
+                        seen[link]["up"] = False
                     continue
             target = ("dev:{}".format(remote) if remote
                       else ghost_id("lldp", r["remote_sysname"] or r["remote_chassis"] or "unknown",
@@ -244,6 +254,8 @@ def build(conn, layer=None):
                 "label": "{} - {}".format(r["local_if"], port_text(r["remote_port"], r["remote_port_descr"]) or "?"),
                 "details": [_lldp_report(r, names, how)],
             }
+            if port_down(r["device_id"], r["local_if"]):
+                edge["up"] = False
             edges.append(edge)
             if remote:
                 seen[link] = edge

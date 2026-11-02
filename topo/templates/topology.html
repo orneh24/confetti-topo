@@ -27,6 +27,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
 .dev-list { position: absolute; top: 12px; right: 12px; bottom: 12px; width: 240px; z-index: 5; display: flex; flex-direction: column;
     font-size: 12px; color: var(--text); background: var(--bg-card); border: 1px solid var(--border); border-radius: 4px; }
 .dev-list h3 { margin: 0; padding: 6px 10px; font-size: 12px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.dev-list input { margin: 6px 8px; padding: 3px 6px; font: inherit; flex: 0 0 auto; }
 .dev-list .dev-rows { overflow-y: auto; flex: 1 1 auto; }
 .dev-row { display: flex; align-items: center; gap: 6px; padding: 4px 10px; cursor: pointer; border-bottom: 1px solid var(--border-soft); }
 .dev-row:hover, .dev-row:focus { background: var(--bg-hover); outline: none; }
@@ -104,6 +105,8 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     </div>
     <div class="dev-list" id="dev-list" aria-label="Devices">
         <h3 id="dev-list-title">Devices</h3>
+        <input id="dev-search" type="search" placeholder="Find name, IP or AS (Enter = go)" aria-label="Find a device"
+               oninput="renderDeviceList()" onkeydown="devSearchKey(event)">
         <div class="dev-rows" id="dev-rows"></div>
     </div>
     <div class="toast" id="toast" role="status"></div>
@@ -122,7 +125,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
         <div class="row"><span class="ln" style="border-color:var(--purple)"></span>eBGP session (different AS): both AS numbers and state</div>
         <div class="row"><span class="sw" style="background:var(--bg-muted);border:1px dashed var(--text-dim)"></span>AS area: the routers of one BGP AS</div>
         <div class="row"><span class="ln" style="border-color:var(--blue)"></span>OSPF adjacency and its state</div>
-        <div class="row"><span class="ln" style="border-color:var(--red);border-top-style:dashed"></span>BGP/OSPF session that is not Established / FULL</div>
+        <div class="row"><span class="ln" style="border-color:var(--red);border-top-style:dashed"></span>BGP/OSPF session that is not Established / FULL, or a cable whose port is down</div>
         <div class="hint">Double-click a router to open its page. Drag to move, scroll to zoom.</div>
     </details>
 </div>
@@ -790,7 +793,9 @@ function renderDeviceList() {
     var box = document.getElementById('dev-rows');
     var devs = (rawData ? rawData.nodes : []).filter(function (n) { return !n.ghost; });
     devs.sort(function (a, b) { return a.label.toLowerCase() < b.label.toLowerCase() ? -1 : 1; });
-    document.getElementById('dev-list-title').textContent = 'Devices (' + devs.length + ')';
+    var total = devs.length, q = devSearchText();
+    if (q) { devs = devs.filter(function (n) { return devMatches(n, q); }); }
+    document.getElementById('dev-list-title').textContent = 'Devices (' + (q ? devs.length + ' of ' : '') + total + ')';
     box.textContent = '';
     devs.forEach(function (n) {
         var row = document.createElement('div');
@@ -817,6 +822,19 @@ function renderDeviceList() {
         box.appendChild(row);
     });
     markDeviceList();
+}
+
+// The search box: a device matches on part of its name, management IP or "AS 65001" / "65001".
+function devSearchText() { return document.getElementById('dev-search').value.trim().toLowerCase(); }
+function devMatches(n, q) {
+    return (n.label || '').toLowerCase().indexOf(q) >= 0 || (n.mgmt_ip || '').indexOf(q) >= 0 ||
+           (n.asn ? ('as ' + n.asn).indexOf(q) >= 0 : false);
+}
+function devSearchKey(ev) {
+    if (ev.key === 'Escape') { ev.target.value = ''; renderDeviceList(); return; }
+    if (ev.key !== 'Enter') { return; }
+    var first = document.querySelector('#dev-rows .dev-row');
+    if (first) { pickFromList(first.getAttribute('data-id')); }
 }
 
 function markDeviceList() {

@@ -8,22 +8,18 @@ Ideas only. Nothing here is built until the user picks it.
   sender thread (webhook / mail), or send events to butler.
 
 ## Topology
+- **Link state, follow-up:** match short port names ("Gi1" vs "GigabitEthernet1") so more cables can show down; show the state on the link card.
+- **Search, follow-up:** highlight the matches and their neighbors on the map, not only the list.
 - **Routing table follow-ups:** IPv6 and a cap on a very large table; validate ECMP against a real router (the
   fixture `ios_route_not_captured.txt` is not a capture).
 - **Routing table docs and mock data:** update `docs/TOPOLOGY-MAPPING.md` (commands table, `routes` schema),
   `docs/HANDOFF.md`, and the skills `confetti-topo-add-platform` and `confetti-topo-api` (sixth task); add routes to
   `topo/scripts/seed_mock_lab.py`; run `docs-drift-checker`.
-- **Device page `#routes` link** scrolls late on a long page (after the tables render): scroll to the section once
-  the routes have loaded.
-- **PAN-OS "Unused" interface filter** matches every interface, since PAN-OS gives no admin status; the Admin
-  column also shows an empty pill. Hide the Unused box, or label it, for devices without admin status.
 - **IOS 15.2 `vrf *` check:** confirm whether `c3560g` answers `show ip route vrf *` or uses the `show ip route`
   fallback.
 - **CDP** next to LLDP (many Cisco switches speak only CDP).
 - **L2 view:** MAC table, VLANs, spanning tree. Needs its own commands, verified on real devices first.
 - **Pair parallel sessions properly** by the local address of each session instead of by position.
-- **Link state on cables:** colour an LLDP edge red when the local interface is down.
-- **Search and focus:** find a device or IP on the graph and highlight its neighbors.
 - **History:** keep the last N topologies so "what changed since yesterday" can be drawn.
 - **Label crowding:** LLDP labels show only on hover or selection now; BGP/OSPF labels and the vendor mark can
   still overlap on a dense map.
