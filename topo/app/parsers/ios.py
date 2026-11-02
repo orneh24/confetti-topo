@@ -56,6 +56,7 @@ _INTF_HEADER_RE = re.compile(
 _DESCRIPTION_RE = re.compile(r"Description:\s*(.+)")
 _IP_RE = re.compile(r"Internet address is (?P<ip>\d{1,3}(?:\.\d{1,3}){3})/(?P<prefix>\d+)")
 _MTU_RE = re.compile(r"MTU (\d+) bytes")
+_HW_MAC_RE = re.compile(r"address is ([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})")
 _DUPLEX_SPEED_RE = re.compile(
     r"(?P<duplex>Full|Half|Auto)[- ]?[Dd]uplex,\s*(?P<speed>\d+\s*[MGmg]b(?:ps|/s))"
 )
@@ -91,7 +92,12 @@ def parse_interfaces(text):
             "mtu": None,
             "input_errors": None,
             "crc_errors": None,
+            "mac": None,
         }
+
+        hw = _HW_MAC_RE.search(chunk)
+        if hw:
+            entry["mac"] = hw.group(1).lower()
 
         desc = _DESCRIPTION_RE.search(chunk)
         if desc:

@@ -458,10 +458,22 @@ def api_mac():
         sql += " AND (mac LIKE ? ESCAPE '\\' OR vlan LIKE ? ESCAPE '\\' OR LOWER(port) LIKE ? ESCAPE '\\')"
         args += [db.like_arg(q)] * 3
     sql += " ORDER BY CAST(vlan AS INTEGER), mac LIMIT 5000"
+    conn = db.get_db()
+    # A learned MAC that is the hardware address of an interface on exactly one other known device names that device.
+    owners = {}
+    for r in conn.execute("SELECT i.mac, i.device_id, i.name, d.hostname FROM interfaces i JOIN devices d ON d.id = i.device_id "
+                          "WHERE i.mac IS NOT NULL AND i.mac <> '' AND i.device_id <> ?", (device_id,)):
+        owners.setdefault(r["mac"], {})[r["device_id"]] = (r["hostname"], r["name"])
     out = []
-    for r in db.get_db().execute(sql, args):
+    for r in conn.execute(sql, args):
         d = dict(r)
         d["last_seen"] = db.iso(d["last_seen"])
+        own = owners.get(d["mac"])
+        if own and len(own) == 1:
+            dev_id, (host, intf) = list(own.items())[0]
+            d.update(device_id=dev_id, device=host, interface=intf)
+        else:
+            d.update(device_id=None, device=None, interface=None)
         out.append(d)
     return jsonify(out)
 

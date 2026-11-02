@@ -1419,6 +1419,19 @@ def _():
     c = m["appmod"].app.test_client()
     need(len(c.get("/api/mac?device_id=%d" % did).get_json()) == 2 and len(c.get("/api/mac?device_id=%d&q=gi0/5" % did).get_json()) == 1
          and c.get("/api/mac").status_code == 400, "GET /api/mac and its filter", p)
+    # a learned MAC that is an interface address on exactly one other device names that device; two owners name none
+    hw = ios.parse_interfaces("GigabitEthernet1 is up, line protocol is up" + chr(10) + "  Hardware is CSR vNIC, address is 0200.F9BA.EFFA (bia 0200.f9ba.effa)" + chr(10) + "  MTU 1500 bytes" + chr(10))
+    need(hw and hw[0]["mac"] == "0200.f9ba.effa", "parse_interfaces must read the hardware address: %r" % (hw,), p)
+    other = add_device(conn, "192.0.2.77", "mac-owner")
+    ssh.apply_result(conn, other, "interfaces", hw)
+    conn.commit()
+    row = [r for r in c.get("/api/mac?device_id=%d" % did).get_json() if r["mac"] == "0200.f9ba.effa"]
+    need(row and row[0]["device_id"] == other and row[0]["interface"] == "GigabitEthernet1", "a MAC owned by one device must name it: %r" % (row,), p)
+    twin = add_device(conn, "192.0.2.78", "mac-twin")
+    ssh.apply_result(conn, twin, "interfaces", hw)
+    conn.commit()
+    row = [r for r in c.get("/api/mac?device_id=%d" % did).get_json() if r["mac"] == "0200.f9ba.effa"]
+    need(row and row[0]["device_id"] is None, "a MAC on two devices must name none: %r" % (row,), p)
     return p
 
 

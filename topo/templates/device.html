@@ -153,7 +153,7 @@
         <div class="section-body">
             <input type="search" id="mac-q" placeholder="filter by MAC, VLAN or port" oninput="macSoon()" aria-label="Filter MAC addresses" style="margin-bottom:6px">
             <table data-sortable class="striped compact">
-                <thead><tr><th>VLAN</th><th>MAC address</th><th>Port</th></tr></thead>
+                <thead><tr><th>VLAN</th><th>MAC address</th><th>Port</th><th>Known device</th></tr></thead>
                 <tbody id="mac-rows"></tbody>
             </table>
             <div class="msg" id="mac-more"></div>
@@ -469,7 +469,8 @@ function loadMac() {
     fetch('/api/mac?device_id=' + deviceId + '&q=' + encodeURIComponent(q)).then(function (r) { return r.json(); }).then(function (list) {
         var rows = '';
         list.slice(0, 500).forEach(function (m) {
-            rows += '<tr><td>' + esc(m.vlan) + '</td><td>' + esc(m.mac) + '</td><td>' + esc(m.port) + '</td></tr>';
+            rows += '<tr><td>' + esc(m.vlan) + '</td><td>' + esc(m.mac) + '</td><td>' + esc(m.port) + '</td><td>' +
+                (m.device_id ? '<a href="/devices/' + m.device_id + '">' + esc(m.device) + '</a> ' + esc(m.interface) : '') + '</td></tr>';
         });
         document.getElementById('mac-rows').innerHTML = rows;
         document.getElementById('mac-count').textContent = list.length ? '(' + list.length + ')' : '';

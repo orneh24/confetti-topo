@@ -214,15 +214,15 @@ def _apply_interfaces(conn, device_id, parsed, now):
     for row in parsed:
         conn.execute(
             """INSERT INTO interfaces (device_id, name, description, ip, prefix_len, network,
-                   admin_status, oper_status, speed, duplex, mtu, last_seen)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   admin_status, oper_status, speed, duplex, mtu, mac, last_seen)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(device_id, name) DO UPDATE SET
                    description=excluded.description, ip=excluded.ip, prefix_len=excluded.prefix_len,
                    network=excluded.network, admin_status=excluded.admin_status,
                    oper_status=excluded.oper_status, speed=excluded.speed, duplex=excluded.duplex,
-                   mtu=excluded.mtu, last_seen=excluded.last_seen""",
+                   mtu=excluded.mtu, mac=excluded.mac, last_seen=excluded.last_seen""",
             (device_id, row["name"], row["description"], row["ip"], row["prefix_len"], row["network"],
-             row["admin_status"], row["oper_status"], row["speed"], row["duplex"], row["mtu"], now),
+             row["admin_status"], row["oper_status"], row["speed"], row["duplex"], row["mtu"], row.get("mac"), now),
         )
     # Drop interfaces this poll no longer reported (removed subinterface,
     # deleted loopback) — otherwise a dead address keeps resolving BGP/OSPF
