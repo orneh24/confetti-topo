@@ -22,7 +22,7 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
   A cable or session that both routers report is drawn once. A neighbor that is not a known device shows
   as a dashed "ghost" node, so nothing is silently dropped. A BGP/OSPF session that is not Established /
   FULL is red and dashed. A BGP session inside one AS (iBGP) is a thin yellow line and one between two ASes (eBGP)
-  a thick purple line, and an "AS areas" toggle draws a box around the routers of each AS ("Tidy AS areas" moves the routers so each AS has its own block; a new map starts that way). A list of all known devices on the right selects a device on the map when clicked; its search box (name, IP or AS) fades the other devices. An LLDP cable is red and dashed when a device reports its port down. Unknown nodes that hang off one router are grouped into a single "N unknown"
+  a thick purple line, and an "AS areas" toggle draws a box around the routers of each AS ("Tidy AS areas" moves the routers so each AS has its own block; a new map starts that way). A list of all known devices on the right selects a device on the map when clicked; its search box (name, IP or AS) fades the other devices. An LLDP cable is red and dashed when a device reports its port down. "Changed 24h" glows around devices that had a change in the last day, and "Export PNG" saves the map as a picture. Unknown nodes that hang off one router are grouped into a single "N unknown"
   node (double-click to open it). The layout stands still and is saved on the server, so everyone sees the
   same map (right-click the background and choose Re-arrange to start over). An LLDP link shows its ports
   on hover or when selected.

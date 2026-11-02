@@ -250,6 +250,8 @@ against them.
 - Empty state: show a plain message ("no devices yet") and destroy the network object.
 - A Devices list on the right with a search box (name, management IP or AS; Enter selects the first match, Escape clears):
   non-matching devices fade to 0.2 opacity on the map and the match's linked devices to 0.6.
+- "Changed 24h" toggle (off by default): a yellow glow and a hover title around devices with a change event in the last 24 h
+  (`/api/events?hours=24`). "Export PNG" downloads the map.
 - Include a legend: node colours, ghost meaning, one swatch per link layer, the red dashed style.
 
 ## 10. Pitfalls (each one happened or nearly did)

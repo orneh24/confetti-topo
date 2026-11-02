@@ -20,3 +20,5 @@ Newest last. Times are local.
 - 2026-11-03 00:30 Topology: "Export PNG" button and map right-click item download the map as a PNG (page colour behind it).
 - 2026-11-03 00:32 Leak scan: one lab hostname in ROADMAP.md replaced by a model name (it is also in older commits on origin/routing-table). README capture viewport raised to 1280x1000.
 - 2026-11-03 01:00 Recent changes: "export CSV" downloads the events shown now (filters applied); cells that start with = + - @ are prefixed with ' so a spreadsheet does not run them.
+- 2026-11-03 01:40 Topology: "Changed 24h" toggle glows yellow around devices with a change event in the last 24 h (hover shows the count). Off by default. Export PNG right-click item checked.
+- 2026-11-03 01:45 README images re-recorded at 1280x1000: no tile is cut off now.

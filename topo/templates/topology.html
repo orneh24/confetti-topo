@@ -76,6 +76,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <button class="active" id="icons-btn" aria-pressed="true" onclick="toggleIcons(this)" title="Draw devices as icons with a vendor mark. Off: plain boxes for every device">Device icons</button>
     <button class="active" id="vendor-btn" aria-pressed="true" onclick="toggleVendor(this)" title="Show the vendor mark and name beside each device icon">Vendor icons</button>
     <button class="active" id="as-btn" aria-pressed="true" onclick="toggleAsAreas(this)" title="Draw a box around the routers of each BGP AS (needs BGP shown)">AS areas</button>
+    <button id="changed-btn" aria-pressed="false" onclick="toggleChanged(this)" title="Glow around devices that had a change event in the last 24 hours">Changed 24h</button>
     <button id="tidy-btn" onclick="tidyAsAreas()" title="Move the routers so each BGP AS sits in its own block (changes the saved places)">Tidy AS areas</button>
     <button id="png-btn" onclick="exportPng()" title="Download the map as a PNG picture">Export PNG</button>
 </div>
@@ -200,6 +201,7 @@ function toVisNodes(nodes) {
     return nodes.map(function (n) {
         var o = oneVisNode(n, GROUP_COLOR);
         o.opacity = searchOpacity(n);
+        if (changedBy[n.id]) { var look = changedLook(n.id); o.shadow = look.shadow; o.title = look.title; }
         if (n.ghost) { o.mass = 0.5; }   // an unidentified neighbor is pushed around more than a router
         if (n.members) { o.title = n.members.join('\n'); }   // hover on a group lists what is in it
         if (n.x !== undefined) { o.x = n.x; o.y = n.y; }   // a place saved on the server
@@ -622,6 +624,44 @@ var VENDOR_ON_KEY = 'confetti-topo-vendor-icons';
 
 function vendorOn() {
     return document.getElementById('vendor-btn').className === 'active';
+}
+
+// Changed 24h: a yellow glow around a device with a change event (interface, peer, neighbor, OS...) in the last
+// 24 hours, from /api/events. A look setting like the icons: no FILTERED marker. Off by default.
+var CHANGED_KEY = 'confetti-topo-changed-24h';
+var changedBy = {};   // node id -> number of events
+
+function changedOn() { return document.getElementById('changed-btn').className === 'active'; }
+
+function changedLook(id) {
+    var n = changedBy[id];
+    return n ? { shadow: { enabled: true, color: themeColor('--yellow'), size: 24, x: 0, y: 0 },
+                 title: n + (n === 1 ? ' change' : ' changes') + ' in the last 24 h' }
+             : { shadow: { enabled: false }, title: undefined };
+}
+
+function loadChanged() {
+    if (!changedOn()) { changedBy = {}; applyChanged(); return; }
+    fetch('/api/events?hours=24&limit=1000').then(function (r) { return r.json(); }).then(function (list) {
+        var by = {};
+        list.forEach(function (e) { if (e.device_id) { by['dev:' + e.device_id] = (by['dev:' + e.device_id] || 0) + 1; } });
+        changedBy = by;
+        applyChanged();
+    }).catch(function () { /* keep what is shown */ });
+}
+
+function applyChanged() {
+    if (!nodeSet) { return; }
+    nodeSet.update(nodeSet.getIds().filter(function (id) { return id.indexOf('dev:') === 0; }).map(function (id) {
+        var look = changedLook(id);
+        return { id: id, shadow: look.shadow, title: look.title };
+    }));
+}
+
+function toggleChanged(btn) {
+    setLayerButton(btn, btn.className !== 'active');
+    try { localStorage.setItem(CHANGED_KEY, changedOn() ? '1' : '0'); } catch (e) { /* not remembered */ }
+    loadChanged();
 }
 
 // AS areas: a rounded box behind the routers of each BGP AS, drawn on vis's canvas under the links.
@@ -1167,9 +1207,12 @@ try { setLayerButton(document.getElementById('vendor-btn'), localStorage.getItem
 try { setLayerButton(document.getElementById('as-btn'), localStorage.getItem(AS_AREAS_KEY) !== '0'); } catch (e) { /* shown */ }
 try { setLayerButton(document.getElementById('icons-btn'), localStorage.getItem(ICONS_ON_KEY) !== '0'); } catch (e) { /* shown */ }
 try { setLayerButton(document.getElementById('unknown-btn'), localStorage.getItem(UNKNOWN_KEY) !== '1'); } catch (e) { /* shown */ }
+try { setLayerButton(document.getElementById('changed-btn'), localStorage.getItem(CHANGED_KEY) === '1'); } catch (e) { /* off */ }
 updateFilterMarker();
 load();
+loadChanged();
 setInterval(load, 20000);
+setInterval(loadChanged, 20000);
 document.addEventListener('themechange', load);
 </script>
 {% endblock %}
