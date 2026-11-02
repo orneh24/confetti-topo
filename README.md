@@ -48,7 +48,7 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
 - **Metrics.** `GET /metrics` serves Prometheus text.
 - **Look.** Seven colour themes (or Shuffle) and five layouts, picked in the header.
 
-![The dashboard in four themes: Light, Monokai, Confetti Night and Neon Streamers](docs/img/themes.png)
+![The dashboard in four themes: Light, Monokai, Confetti Night and Rainbow](docs/img/themes.png)
 
 ![The dashboard in five layouts: Classic, Modern, Retro 95, MS-DOS and Neon Green CRT](docs/img/layouts.png)
 

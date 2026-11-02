@@ -2,14 +2,26 @@
 {% block title %}Recent changes{% endblock %}
 {% block head %}
 <style>
+.chg-filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; }
+.chg-filters label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--text-dim); }
+.chg-filters input[type=search] { min-width: 200px; }
+/* Summary tiles over the filtered rows: one coloured edge each, theme variables only. */
+.chg-tiles { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chg-tile { flex: 0 0 150px; background: var(--bg-card); color: var(--text); border: 1px solid var(--border);
+    border-left: 4px solid var(--tile, var(--gray)); padding: 5px 10px; }
+.chg-tile .k { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
+.chg-tile .v { font-size: 18px; font-weight: 600; line-height: 1.4; }
+.chg-tile .plus { color: var(--green); }
+.chg-tile .minus { color: var(--red); }
 .changes-wrap { display: flex; gap: 12px; align-items: flex-start; }
 .changes-wrap .section { flex: 1 1 auto; min-width: 0; }
 tr.row { cursor: pointer; }
 tr.band td { background: color-mix(in srgb, var(--stripe), var(--text) 8%); }
 tr.devstart td { border-top: 2px solid var(--border); }
-tbody tr.selected td { background: var(--bg-hover); font-weight: bold; box-shadow: inset 0 2px 0 var(--blue), inset 0 -2px 0 var(--blue); }
+tbody tr.selected td { background: var(--yellow-bg); font-weight: bold; box-shadow: inset 0 2px 0 var(--blue), inset 0 -2px 0 var(--blue); }
 tbody tr.selected td:first-child { box-shadow: inset 4px 0 0 var(--blue), inset 0 2px 0 var(--blue), inset 0 -2px 0 var(--blue); }
 td.when { white-space: nowrap; }
+td.notes .pill { margin-right: 4px; }
 :root .linklike { display: inline; background: none; border: 0; box-shadow: none; transform: none; border-radius: 0;
     padding: 0; margin: 0; font: inherit; text-transform: none; text-shadow: none; color: var(--blue); text-decoration: underline; cursor: pointer; text-align: left; }
 :root .linklike:hover { background: none; color: var(--text); }
@@ -33,16 +45,38 @@ td.when { white-space: nowrap; }
 </style>
 {% endblock %}
 {% block content %}
-<div class="container">
+<div class="container stack">
+    <div class="section">
+        <div class="section-header"><span>Recent changes</span><span class="filter-note" id="count-note"></span></div>
+        <div class="section-body">
+            <div class="chg-filters">
+                <label>Window
+                    <select id="f-hours">
+                        <option value="1">last hour</option>
+                        <option value="6">last 6 hours</option>
+                        <option value="24" selected>last 24 hours</option>
+                        <option value="168">last 7 days</option>
+                        <option value="720">last 30 days</option>
+                    </select></label>
+                <label>Device <select id="f-device"><option value="">All</option></select></label>
+                <label>Type <select id="f-type"><option value="">All</option></select></label>
+                <label>Change <select id="f-change"><option value="">All</option></select></label>
+                <label>Severity <select id="f-severity"><option value="">All</option></select></label>
+                <label>Search <input type="search" id="f-q" placeholder="device, interface, peer, value"></label>
+                <button type="button" class="linklike" onclick="resetFilters()">reset filters</button>
+            </div>
+            <div class="chg-tiles" id="tiles"></div>
+        </div>
+    </div>
     <div class="changes-wrap">
         <div class="section">
-            <div class="section-header"><span>Changes — last 7 days</span><span class="filter-note" id="filter-note"></span></div>
             <div class="section-body">
-                <table>
-                    <thead><tr><th>Time (last change)</th><th>Device</th><th>Sev</th><th>Event</th><th>Detail</th></tr></thead>
+                <table data-sortable id="table">
+                    <thead><tr><th>Time (since last change)</th><th>Device</th><th>Type</th><th>Change</th>
+                        <th>Subject</th><th>Before</th><th>After</th><th>Notes</th></tr></thead>
                     <tbody id="rows"></tbody>
                 </table>
-                <div class="empty" id="empty" style="display:none">no changes recorded in the last 7 days</div>
+                <div class="empty" id="empty" style="display:none">no changes match</div>
             </div>
         </div>
         <div class="event-pane" id="pane" role="dialog" aria-label="Event details">
@@ -62,10 +96,9 @@ td.when { white-space: nowrap; }
 {% endblock %}
 {% block scripts %}
 <script>
-var events = [];          // newest first, as the API sends them
+var events = [];          // newest first; type/change/item/before/after come from the API (events.describe)
 var gaps = {};            // event id -> ms since the same device's previous change (null = none loaded)
 var selectedId = null;
-var onlyDevice = null;    // right-click "show only this device's changes" (not remembered)
 
 function esc(s) {
     var d = document.createElement('div');
@@ -75,26 +108,47 @@ function esc(s) {
 
 function pad(n) { return (n < 10 ? '0' : '') + n; }
 
-// hh:mm, hours may pass 24.
-function hhmm(ms) {
-    var m = Math.floor(ms / 60000);
-    return pad(Math.floor(m / 60)) + ':' + pad(m % 60);
+// 45 s, 23 min, 2 h, 3 days.
+function ago(ms) {
+    var s = Math.max(0, Math.round(ms / 1000));
+    if (s < 60) { return s + ' s'; }
+    if (s < 3600) { return Math.floor(s / 60) + ' min'; }
+    if (s < 86400) { return Math.floor(s / 3600) + ' h'; }
+    var d = Math.floor(s / 86400);
+    return d + (d === 1 ? ' day' : ' days');
 }
 
 var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// "14:32 (02:15)" today, "19 Oct 14:32 (02:15)" on another day. The bracket is the gap to that device's previous change.
+// "14:32:05 (23 min)" today, "19 Oct 14:32:05 (2 h)" on another day. The bracket is the gap to that device's previous change.
 function timeCell(e) {
     var d = new Date(e.at);
-    var text = pad(d.getHours()) + ':' + pad(d.getMinutes());
+    var text = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
     if (d.toDateString() !== new Date().toDateString()) { text = d.getDate() + ' ' + MONTHS[d.getMonth()] + ' ' + text; }
     var gap = gaps[e.id];
-    return text + ' (' + (gap === null || gap === undefined ? '--:--' : hhmm(gap)) + ')';
+    return gap === null || gap === undefined ? text : text + ' (' + ago(gap) + ')';
 }
 
 function sevClass(sev) { return sev === 'info' ? 'ok' : (sev === 'warning' ? 'running' : 'bad'); }
+function changeClass(c) { return c === 'added' ? 'ok' : (c === 'removed' ? 'bad' : (c === 'changed' ? 'running' : 'idle')); }
 
 function deviceName(e) { return e.hostname || (e.device_id ? 'device ' + e.device_id : '-'); }
+
+// What the row is about: the API's item, else the subject without the device name in front.
+function subjectText(e) {
+    if (e.item) { return e.item; }
+    var s = e.subject || '';
+    if (e.hostname && s.indexOf(e.hostname) === 0) { s = s.slice(e.hostname.length).replace(/^[ :]+/, ''); }
+    return s;
+}
+
+// The detail's first line, unless it is the "a -> b" already shown as before/after.
+function noteText(e) {
+    var d = e.detail || '';
+    if (e.before && e.after && d === e.before + ' -> ' + e.after) { return ''; }
+    var lines = d.split('\n');
+    return lines[0] + (lines.length > 1 ? ' …' : '');
+}
 
 function findEvent(id) {
     for (var i = 0; i < events.length; i++) { if (events[i].id === id) { return events[i]; } }
@@ -114,47 +168,156 @@ function computeGaps() {
     }
 }
 
-function visibleEvents() {
-    return onlyDevice === null ? events : events.filter(function (e) { return e.device_id === onlyDevice; });
+// ---- Filters --------------------------------------------------------------------
+function val(id) { return document.getElementById(id).value; }
+
+// Refill a select from the loaded rows and keep what was chosen, even if it has no rows now.
+function fillSelect(id, pairs) {
+    var sel = document.getElementById(id);
+    var keep = sel.value;
+    while (sel.options.length > 1) { sel.remove(1); }
+    pairs.sort(function (a, b) { return a[1].localeCompare(b[1], undefined, { numeric: true }); });
+    var found = false;
+    pairs.forEach(function (p) {
+        var o = document.createElement('option');
+        o.value = p[0]; o.textContent = p[1];
+        sel.appendChild(o);
+        if (p[0] === keep) { found = true; }
+    });
+    if (keep && !found) {
+        var o = document.createElement('option');
+        o.value = keep; o.textContent = keep;
+        sel.appendChild(o);
+    }
+    sel.value = keep;
 }
 
+function fillFilters() {
+    var dev = {}, type = {}, change = {}, sev = {};
+    events.forEach(function (e) {
+        if (e.device_id !== null) { dev[String(e.device_id)] = deviceName(e); }
+        type[e.type] = e.type;
+        if (e.change) { change[e.change] = e.change; }
+        sev[e.severity] = e.severity;
+    });
+    function pairs(o) { return Object.keys(o).map(function (k) { return [k, o[k]]; }); }
+    fillSelect('f-device', pairs(dev));
+    fillSelect('f-type', pairs(type));
+    fillSelect('f-change', pairs(change));
+    fillSelect('f-severity', pairs(sev));
+}
+
+function visibleEvents() {
+    var dev = val('f-device'), type = val('f-type'), change = val('f-change'), sev = val('f-severity');
+    var q = val('f-q').trim().toLowerCase();
+    return events.filter(function (e) {
+        if (dev && String(e.device_id) !== dev) { return false; }
+        if (type && e.type !== type) { return false; }
+        if (change && e.change !== change) { return false; }
+        if (sev && e.severity !== sev) { return false; }
+        if (q) {
+            var hay = [deviceName(e), e.type, e.subject, e.item, e.before, e.after, e.detail].join(' ').toLowerCase();
+            if (hay.indexOf(q) < 0) { return false; }
+        }
+        return true;
+    });
+}
+
+function setDeviceFilter(id) { document.getElementById('f-device').value = id === null ? '' : String(id); render(); }
+
+function resetFilters() {
+    ['f-device', 'f-type', 'f-change', 'f-severity', 'f-q'].forEach(function (id) { document.getElementById(id).value = ''; });
+    if (val('f-hours') !== '24') { document.getElementById('f-hours').value = '24'; load(); } else { render(); }
+}
+
+// ---- Summary tiles --------------------------------------------------------------
+function plusMinus(p, m) {
+    return '<span class="plus">+' + p + '</span> <span class="minus">&minus;' + m + '</span>';
+}
+
+function count(list, fn) { return list.filter(fn).length; }
+
+function renderTiles(list) {
+    var rp = 0, rm = 0;
+    list.forEach(function (e) {
+        var m = e.kind === 'routes_changed' && /^\+(\d+) -(\d+)$/.exec(e.item || '');
+        if (m) { rp += +m[1]; rm += +m[2]; }
+    });
+    // A peer is down when its newest state event in view is a warning (the list is newest first).
+    var seen = {}, peersDown = 0;
+    list.forEach(function (e) {
+        if (!/^(bgp|ospf)_/.test(e.kind)) { return; }
+        var key = e.device_id + '|' + e.type + '|' + e.item;
+        if (seen[key]) { return; }
+        seen[key] = true;
+        if (/_state$/.test(e.kind) && e.severity !== 'info') { peersDown++; }
+    });
+    var devs = {};
+    list.forEach(function (e) { if (e.device_id !== null) { devs[e.device_id] = true; } });
+    function n(x) { return x ? String(x) : 'none'; }
+    var tiles = [
+        ['Routes', '--blue', plusMinus(rp, rm)],
+        ['Peers down', '--red', esc(n(peersDown))],
+        ['LLDP neighbors', '--purple', plusMinus(count(list, function (e) { return e.kind === 'lldp_neighbor_added'; }),
+                                               count(list, function (e) { return e.kind === 'lldp_neighbor_removed'; }))],
+        ['Interface events', '--cyan', esc(n(count(list, function (e) { return e.type === 'Interface'; })))],
+        ['Polling events', '--yellow', esc(n(count(list, function (e) { return e.type === 'Polling'; })))],
+        ['Ping events', '--yellow', esc(n(count(list, function (e) { return e.type === 'Ping'; })))],
+        ['Devices affected', '--green', esc(n(Object.keys(devs).length))],
+        ['Last change', '--gray', esc(list.length ? ago(Date.now() - new Date(list[0].at).getTime()) + ' ago' : 'none')],
+    ];
+    document.getElementById('tiles').innerHTML = tiles.map(function (t) {
+        return '<div class="chg-tile" style="--tile: var(' + t[1] + ')"><div class="k">' + esc(t[0]) +
+            '</div><div class="v">' + t[2] + '</div></div>';
+    }).join('');
+}
+
+// ---- Table ----------------------------------------------------------------------
 function render() {
     var list = visibleEvents();
     var html = '';
-    var band = false;
-    var prev;
     for (var i = 0; i < list.length; i++) {
         var e = list[i];
-        var newDevice = i > 0 && e.device_id !== prev;
-        if (newDevice) { band = !band; }   // a run of rows from one device keeps one colour
-        prev = e.device_id;
-        var cls = 'row' + (band ? ' band' : '') + (newDevice ? ' devstart' : '') + (e.id === selectedId ? ' selected' : '');
-        html += '<tr class="' + cls + '" data-ctx="event" data-id="' + e.id + '">' +
-            '<td class="when" title="' + esc(new Date(e.at).toLocaleString()) + '">' + esc(timeCell(e)) + '</td>' +
+        var note = noteText(e);
+        html += '<tr class="row' + (e.id === selectedId ? ' selected' : '') + '" data-ctx="event" data-id="' + e.id +
+            '" data-dev="' + (e.device_id === null ? '' : e.device_id) + '">' +
+            '<td class="when" data-sort="' + ctxMenu.attr(e.at) + '" title="' + esc(new Date(e.at).toLocaleString()) + '">' + esc(timeCell(e)) + '</td>' +
             '<td>' + esc(deviceName(e)) + '</td>' +
-            '<td><span class="pill ' + sevClass(e.severity) + '">' + esc(e.severity) + '</span></td>' +
-            '<td><button type="button" class="linklike" data-id="' + e.id + '">' + esc(e.subject) + '</button></td>' +
-            '<td>' + esc(e.detail) + '</td></tr>';
+            '<td>' + esc(e.type) + '</td>' +
+            '<td>' + (e.change ? '<span class="pill ' + changeClass(e.change) + '">' + esc(e.change) + '</span>' : '') + '</td>' +
+            '<td><button type="button" class="linklike" data-id="' + e.id + '">' + esc(subjectText(e)) + '</button></td>' +
+            '<td>' + esc(e.before) + '</td>' +
+            '<td>' + esc(e.after) + '</td>' +
+            '<td class="notes"><span class="pill ' + sevClass(e.severity) + '">' + esc(e.severity) + '</span>' + esc(note) + '</td></tr>';
     }
     document.getElementById('rows').innerHTML = html;
     document.getElementById('empty').style.display = list.length ? 'none' : 'block';
-    var note = document.getElementById('filter-note');
-    note.textContent = '';
-    if (onlyDevice !== null) {
-        var first = events.filter(function (e) { return e.device_id === onlyDevice; })[0];
-        note.appendChild(document.createTextNode('Filtered: ' + (first ? deviceName(first) : 'device ' + onlyDevice) + ' · '));
-        var b = document.createElement('button');
-        b.type = 'button'; b.className = 'linklike'; b.textContent = 'Show all';
-        b.onclick = showAllDevices;
-        note.appendChild(b);
+    document.getElementById('count-note').textContent = list.length === events.length
+        ? events.length + ' changes' : list.length + ' of ' + events.length + ' changes';
+    renderTiles(list);
+    setTimeout(reband, 0);   // after tablesort.js has put the rows back in the chosen order
+}
+
+// Bands follow the rows as shown: a run of rows from one device keeps one colour, a line marks each new device.
+function reband() {
+    var rows = document.getElementById('rows').rows;
+    var band = false, prev = null;
+    for (var i = 0; i < rows.length; i++) {
+        var dev = rows[i].getAttribute('data-dev');
+        var newDevice = i > 0 && dev !== prev;
+        if (newDevice) { band = !band; }
+        prev = dev;
+        rows[i].classList.toggle('band', band);
+        rows[i].classList.toggle('devstart', newDevice);
     }
 }
 
 function load() {
-    fetch('/api/events?hours=168&limit=1000').then(function (r) { return r.json(); }).then(function (list) {
+    fetch('/api/events?hours=' + encodeURIComponent(val('f-hours')) + '&limit=1000').then(function (r) { return r.json(); }).then(function (list) {
         // Newest first by time (the API orders by id, which is the same on real data).
         events = list.sort(function (a, b) { return new Date(b.at) - new Date(a.at) || b.id - a.id; });
         computeGaps();
+        fillFilters();
         render();
         if (selectedId !== null) { if (selectedEvent()) { fillPane(selectedEvent()); } else { closePane(); } }
     });
@@ -177,10 +340,15 @@ function fillPane(e) {
     info.textContent = '';
     addRow(info, 'time', new Date(e.at).toLocaleString());
     addRow(info, 'device', deviceName(e));
-    addRow(info, 'kind', e.kind);
+    addRow(info, 'type', e.type);
+    if (e.change) { addRow(info, 'change', e.change); }
+    if (e.item) { addRow(info, 'subject', e.item); }
+    if (e.before) { addRow(info, 'before', e.before); }
+    if (e.after) { addRow(info, 'after', e.after); }
     addRow(info, 'severity', e.severity);
     var gap = gaps[e.id];
-    addRow(info, 'since last', gap === null || gap === undefined ? 'no earlier change for this device' : hhmm(gap) + ' (hh:mm)');
+    addRow(info, 'since last', gap === null || gap === undefined ? 'no earlier change for this device' : ago(gap));
+    addRow(info, 'kind', e.kind);
     addRow(info, 'event id', e.id);
     document.getElementById('ep-detail').textContent = e.detail || '(none)';
     document.getElementById('ep-device').disabled = e.device_id === null;
@@ -205,7 +373,12 @@ function closePane() {
 function openDevice(e) { if (e && e.device_id !== null) { window.location.href = '/devices/' + e.device_id; } }
 function openTopology(e) { if (e && e.device_id !== null) { window.location.href = '/topology?device=' + e.device_id; } }
 
-function showAllDevices() { onlyDevice = null; render(); }
+document.getElementById('f-hours').addEventListener('change', load);
+['f-device', 'f-type', 'f-change', 'f-severity'].forEach(function (id) {
+    document.getElementById(id).addEventListener('change', render);
+});
+document.getElementById('f-q').addEventListener('input', render);
+document.querySelector('#table thead').addEventListener('click', function () { setTimeout(reband, 0); });
 
 var rowsBody = document.getElementById('rows');
 rowsBody.addEventListener('click', function (ev) {
@@ -217,13 +390,14 @@ rowsBody.addEventListener('click', function (ev) {
 ctxMenu.register('event', function (tr) {
     var e = findEvent(parseInt(tr.getAttribute('data-id'), 10));
     if (!e) { return null; }
+    var filtered = val('f-device') !== '';
     return { title: deviceName(e) + ' | ' + e.subject, items: [
         { label: 'Show details', action: function () { selectEvent(e.id); } },
         { label: 'Open device page', action: function () { openDevice(e); }, disabled: e.device_id === null },
         { label: 'Show on topology', action: function () { openTopology(e); }, disabled: e.device_id === null },
-        onlyDevice !== null
-            ? { label: 'Show all devices', action: showAllDevices }
-            : { label: "Show only this device's changes", action: function () { onlyDevice = e.device_id; render(); }, disabled: e.device_id === null },
+        filtered
+            ? { label: 'Show all devices', action: function () { setDeviceFilter(null); } }
+            : { label: "Show only this device's changes", action: function () { setDeviceFilter(e.device_id); }, disabled: e.device_id === null },
         { label: 'Copy event text', action: function () {
             ctxMenu.copy(new Date(e.at).toLocaleString() + ' ' + deviceName(e) + ': ' + e.subject + (e.detail ? ' - ' + e.detail : ''));
         } },
@@ -237,7 +411,7 @@ ctxMenu.register('page', function (el, ev) {
     if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
     return { title: 'Recent changes', items: [
         { label: 'Refresh now', action: load },
-        { label: 'Show all devices', action: showAllDevices, disabled: onlyDevice === null },
+        { label: 'Reset filters', action: resetFilters },
         { label: 'Close details', action: closePane, disabled: selectedId === null },
     ] };
 });

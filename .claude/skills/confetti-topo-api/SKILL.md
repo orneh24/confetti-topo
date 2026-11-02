@@ -67,7 +67,8 @@ also has `positions` {node_id: {x, y}}, including the page-only `group:dev:<id>`
 `GET /api/adjacencies[?device_id=]`, `GET /api/lldp-neighbors[?device_id=]`. The last two return the
 **effective** `peer_device_id` / `remote_device_id` (`/api/lldp-neighbors` also has `matched_by`: null, `chassis` or `name`).
 
-**Events and metrics:** `GET /api/events` (`device_id`, `kind`, `severity`, `hours`, `limit`); `GET /metrics`
+**Events and metrics:** `GET /api/events` (`device_id`, `kind`, `severity`, `hours`, `limit`; each row also has
+`type`, `change`, `item`, `before`, `after`, derived at read time by `events.describe()`, no schema change); `GET /metrics`
 (Prometheus text, hand-written, labels escaped).
 
 **Health:** `GET /api/time` (chrony), `GET /api/health` (services, poller_running, reach_running, discovery,

@@ -255,9 +255,9 @@ topo/
     collectors/        — ssh.py, panos.py (XML API), sweep.py, confetti.py, butler.py, seedfile.py
     parsers/           — ios.py (regex only), panos.py (XML)
   templates/           — base.html (head, header/nav, theme + layout pickers, footer, Retro taskbar)
-                         + dashboard, devices, device, changes (Recent changes: events table, banded per device, details pane, right-click menu), topology, conflicts, settings, each `{% extends "base.html" %}`
+                         + dashboard, devices, device, changes (Recent changes: filter bar, summary tiles, sortable events table with type/change/before/after from `events.describe()`, banded per device, details pane, right-click menu), topology, conflicts, settings, each `{% extends "base.html" %}`
   static/theme.css     — the ONE place colours live (Dark, Light, Monokai, High Contrast,
-                         Terminal green, Confetti Night, Neon Streamers). Pages must not define their own :root colours
+                         Terminal green, Confetti Night, Rainbow). Pages must not define their own :root colours
   static/layout.css    — Classic, Modern, Retro 95, MS-DOS, Neon Green CRT (MS-DOS also has a keyboard layer:
                          base.html's .dos-menubar / .dos-fkeys / .dos-help, a row cursor, and one keydown IIFE at
                          the end of theme.js that does nothing in any other layout; same block as confetti-butler). Loaded AFTER theme.css

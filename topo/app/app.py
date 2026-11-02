@@ -15,6 +15,7 @@ from flask import Flask, jsonify, render_template, request, Response
 from . import config
 from . import db
 from . import discovery
+from . import events
 from . import identity
 from . import lldp_crawl
 from . import metrics
@@ -879,7 +880,8 @@ def api_events():
     """Change events from the poller (events.py), newest first.
 
     ?device_id=N, ?kind=, ?severity=info|warning|critical, ?hours=N (default
-    168), ?limit=N (default 100, max 1000).
+    168), ?limit=N (default 100, max 1000). Each row also carries type, change,
+    item, before and after from events.describe().
     """
     args = request.args
     where = ["e.at >= datetime('now', ? || ' hours')"]
@@ -906,6 +908,7 @@ def api_events():
     for r in rows:
         d = dict(r)
         d["at"] = db.iso(d["at"])
+        d.update(events.describe(d["kind"], d["subject"], d["detail"], d["hostname"]))
         out.append(d)
     return jsonify(out)
 
