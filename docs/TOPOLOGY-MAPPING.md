@@ -251,7 +251,7 @@ against them.
 - A Devices list on the right with a search box (name, management IP or AS; Enter selects the first match, Escape clears):
   non-matching devices fade to 0.2 opacity on the map and the match's linked devices to 0.6.
 - "Changed 24h" toggle (off by default): a yellow glow and a hover title around devices with a change event in the last 24 h
-  (`/api/events?hours=24`). "Export PNG" downloads the map.
+  (`/api/events?hours=24`). "Export PNG" and "Export JSON" download the map. The History dropdown shows a past map (snapshots kept when the map changes, `/api/topology/snapshots`) read-only, with a banner of what changed since.
 - Include a legend: node colours, ghost meaning, one swatch per link layer, the red dashed style.
 
 ## 10. Pitfalls (each one happened or nearly did)
@@ -289,5 +289,5 @@ against them.
 - PAN-OS: IPv4 only; no Panorama or HA state; only the default listing of BGP/OSPF is read, and the same peer address
   in two virtual routers keeps one row. LLDP rows are unique per local port and remote port name, so two neighbors
   that name their port alike on one firewall port overwrite each other (seen in the lab).
-- LLDP only, no CDP. No L2 (MAC table / VLAN / STP) view.
+- LLDP only, no CDP. L2: VLANs, trunks, the spanning-tree summary and the MAC table (switches only); no per-port STP roles.
 - BGP/OSPF peers outside the lab (and peers behind an address two devices share) show as ghosts.

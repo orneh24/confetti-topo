@@ -84,7 +84,7 @@ real IOS-XE 17.3 CSR1000v and a 15.4 router; see constraint 3 for command-name g
 started. There is no SNMP collector.
 
 **PAN-OS** (`collectors/panos.py`, `parsers/panos.py`, skill `panos-xml-api`): the poller picks the collector from the
-platform's `transport` (`xml_api` or `ssh`) and records it in `poll_history.transport`; the five tasks, the apply
+platform's `transport` (`xml_api` or `ssh`) and records it in `poll_history.transport`; the six tasks, the apply
 steps and the events are shared. The collector logs in once per poll (`keygen`, with the username and password from
 the usual credential order), then sends one `<show>` operation per task; BGP takes two (the peer list, and the
 summary that holds the router's own AS). Its parsers use XML (ElementTree), the one place the parsers are not regex.
@@ -161,7 +161,7 @@ deletes nothing (both switch tasks). Fixture `dev/samples/ios_trunk.txt`.
 The `vlans` task runs `show vlan brief` on a device the topology draws as a switch (`ssh._is_switch`, from role, model and
 hostname) and stores one row per VLAN in `vlans` (`GET /api/vlans?device_id=N`, shown on the device page). A switch always
 has VLAN 1, so an answer with no rows deletes nothing; a real list replaces the old one. No events. Fixture
-`dev/samples/ios_vlan_brief.txt` (real format, Catalyst 3560). Not handled: the MAC table.
+`dev/samples/ios_vlan_brief.txt` (real format, Catalyst 3560).
 
 ### Topology history
 
@@ -285,6 +285,7 @@ topo/
     discovery.py       — scheduled discovery thread (off by default)
     lldp_crawl.py      — adopt unknown LLDP neighbors as inventory-only devices
     metrics.py         — /metrics Prometheus text
+    history.py         — topology snapshots on change (TOPO_SNAPSHOT_*)
     auth.py            — optional access token (TOPO_AUTH_TOKEN): /login, cookie or bearer; off by default
     collectors/        — ssh.py, panos.py (XML API), sweep.py, confetti.py, butler.py, seedfile.py
     parsers/           — ios.py (regex only), panos.py (XML)

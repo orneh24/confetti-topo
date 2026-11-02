@@ -22,7 +22,7 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
   A cable or session that both routers report is drawn once. A neighbor that is not a known device shows
   as a dashed "ghost" node, so nothing is silently dropped. A BGP/OSPF session that is not Established /
   FULL is red and dashed. A BGP session inside one AS (iBGP) is a thin yellow line and one between two ASes (eBGP)
-  a thick purple line, and an "AS areas" toggle draws a box around the routers of each AS ("Tidy AS areas" moves the routers so each AS has its own block; a new map starts that way). A list of all known devices on the right selects a device on the map when clicked; its search box (name, IP or AS) fades the other devices. An LLDP cable is red and dashed when a device reports its port down. "Changed 24h" glows around devices that had a change in the last day, and "Export PNG" saves the map as a picture. Unknown nodes that hang off one router are grouped into a single "N unknown"
+  a thick purple line, and an "AS areas" toggle draws a box around the routers of each AS ("Tidy AS areas" moves the routers so each AS has its own block; a new map starts that way). A list of all known devices on the right selects a device on the map when clicked; its search box (name, IP or AS) fades the other devices. An LLDP cable is red and dashed when a device reports its port down. "Changed 24h" glows around devices that had a change in the last day, "Export PNG" / "Export JSON" save the map, and the History dropdown shows the map as it was (snapshots kept `TOPO_SNAPSHOT_RETENTION_DAYS`, default 14). Unknown nodes that hang off one router are grouped into a single "N unknown"
   node (double-click to open it). The layout stands still and is saved on the server, so everyone sees the
   same map (right-click the background and choose Re-arrange to start over). An LLDP link shows its ports
   on hover or when selected.
@@ -35,8 +35,8 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
   test nodes from confetti-traffic or the device list from confetti-butler. The same router seen by two sources lands on one device. When the
   identifiers disagree (the same IP now answers with a different serial), it raises a conflict instead of
   guessing.
-- **Polling.** Every few minutes it logs in once per router and reads version, interfaces, LLDP, BGP and
-  OSPF. Anything a router stops reporting drops out. A failed poll (timeout, bad login) removes nothing.
+- **Polling.** Every few minutes it logs in once per router and reads version, interfaces, LLDP, BGP, OSPF and
+  routes (switches also VLANs, trunks, spanning tree and the MAC table). Anything a router stops reporting drops out. A failed poll (timeout, bad login) removes nothing.
   Platforms: Cisco IOS / IOS-XE (SSH) and Palo Alto PAN-OS (XML API, set the device's platform to
   `paloalto_panos`; the same username and password as for SSH).
 - **Crawl.** LLDP neighbors that advertise an unknown management IP are listed on the Devices page and can be

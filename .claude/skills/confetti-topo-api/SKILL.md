@@ -45,6 +45,10 @@ those two columns to NULL, so its neighbors become ghosts again.
 - `GET|PUT|DELETE /api/devices/<id>` — PUT is an authoritative operator edit (bypasses the ladder, records new
   `serial`/`mgmt_ip`/`hostname` as aliases; a value another device owns comes back in `alias_warnings`)
 - `POST /api/devices/<id>/poll` — synchronous, inline on the request thread
+- `GET /api/routes|vlans|stp|trunks|mac?device_id=N` — one device's routing table (`vrf`, `kind`, `prefix`), VLANs, spanning-tree summary,
+  trunk ports, learned MACs (`q` filters; a MAC owned by one other device carries `device`/`interface`)
+- `GET /api/topology/snapshots[?limit=]` and `/api/topology/snapshots/<id>` — read-only topology history (`TOPO_SNAPSHOT_*`)
+- `TOPO_AUTH_TOKEN` (off by default): pages go to `/login`, `/api/*` and `/metrics` answer 401 without a cookie, `Authorization: Bearer` or `X-Topo-Token`; `/api/health` and `/static` stay open
 - `GET /api/devices/<id>/interfaces`; `GET|PUT /api/devices/<id>/credentials` (GET never returns a secret,
   only `*_set` booleans; PUT is partial, `""` clears one)
 - `GET|PUT /api/settings/credentials` — server-wide defaults (the `settings` table; GET shows `*_source`:
@@ -77,8 +81,8 @@ load/memory/disk/uptime) — both never 500; every check degrades to `null`/`"un
 ## Poller scheduling
 
 `devices.poll_state` (`idle`/`running`) is the per-device lock; `next_poll_at` is the schedule. Each tick
-claims due devices, marks them `running`, and runs five tasks per device — `version`, `interfaces`, `lldp`,
-`bgp`, `ospf` — over one SSH session, each committing its own transaction. Rows a *successful* task no longer
+claims due devices, marks them `running`, and runs ten tasks per device — `version`, `interfaces`, `lldp`,
+`bgp`, `ospf`, `routes`, and on IOS switches `vlans`, `trunks`, `stp`, `mac` — over one SSH session (PAN-OS: six over the XML API), each committing its own transaction. Rows a *successful* task no longer
 sees are deleted; a failed task changes nothing. `running` is released in a `finally` and reset at startup.
 `role='node'` devices are excluded from the claim query. Success: `fail_count=0`,
 `next_poll_at = now + poll_interval_s`. Failure: `fail_count += 1`,

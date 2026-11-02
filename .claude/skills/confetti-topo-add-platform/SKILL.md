@@ -11,9 +11,9 @@ real device. Parsers written from documentation were removed from the butler lin
 reason.
 
 1. **Get real output first.** Ask the user for a lab device. Capture the raw output of each command (version,
-   interfaces, lldp, bgp, ospf) into `dev/samples/<platform>_<task>.txt`. Replace real hostnames, IPs and
+   interfaces, lldp, bgp, ospf, routes) into `dev/samples/<platform>_<task>.txt`. Replace real hostnames, IPs and
    secrets with placeholders (see `dev/samples/README.md`).
-2. **Registry.** One entry in `topo/app/platforms.py` with the same five task names. An unknown platform falls
+2. **Registry.** One entry in `topo/app/platforms.py` with the same six task names (version, interfaces, lldp, bgp, ospf, routes); the switch tasks (`vlans`, `trunks`, `stp`, `mac`) are IOS-only. An unknown platform falls
    back to IOS, so a typo is silent — spell the key as stored in `devices.platform`.
 3. **Commands are `show` only.** `dev/regress.py` R19 fails on anything else. Never add a config-push path.
 4. **Parser.** New `topo/app/parsers/<name>.py`, pure regex (no textfsm). Same row shapes as `ios.py`:

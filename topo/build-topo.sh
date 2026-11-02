@@ -238,6 +238,8 @@ TOPO_SNAPSHOT_INTERVAL_S=300
 TOPO_SNAPSHOT_RETENTION_DAYS=14
 # Nightly database backups kept (/var/lib/confetti-topo/backups).
 TOPO_BACKUP_KEEP=7
+# Optional access token for the pages and API (empty = no login).
+# TOPO_AUTH_TOKEN=
 
 # --- ICMP reachability ---------------------------------------------------
 TOPO_PING_ENABLED=true
