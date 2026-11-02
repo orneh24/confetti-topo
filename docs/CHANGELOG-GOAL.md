@@ -22,3 +22,5 @@ Newest last. Times are local.
 - 2026-11-03 01:00 Recent changes: "export CSV" downloads the events shown now (filters applied); cells that start with = + - @ are prefixed with ' so a spreadsheet does not run them.
 - 2026-11-03 01:40 Topology: "Changed 24h" toggle glows yellow around devices with a change event in the last 24 h (hover shows the count). Off by default. Export PNG right-click item checked.
 - 2026-11-03 01:45 README images re-recorded at 1280x1000: no tile is cut off now.
+- 2026-11-03 02:10 Checked CDP on the real lab (read-only): not enabled on any reachable IOS device, so not built. Noted in ROADMAP.
+- 2026-11-03 02:20 Verified on a scratch mock lab: a down port shows a red dashed cable and the link card text; "Changed 24h" leaves a device with no events unlit; CSV formula prefix checked.

@@ -15,7 +15,7 @@ Ideas only. Nothing here is built until the user picks it.
   `topo/scripts/seed_mock_lab.py`; run `docs-drift-checker`.
 - **IOS 15.2 `vrf *` check:** confirm whether the Catalyst 3560 switch answers `show ip route vrf *` or uses the `show ip route`
   fallback.
-- **CDP** next to LLDP (many Cisco switches speak only CDP).
+- **CDP** next to LLDP (many Cisco switches speak only CDP). Checked 2026-11-03: `show cdp neighbors detail` answers `% CDP is not enabled` on every reachable lab IOS device, so there is no real output to build a parser from. Enable CDP on one lab switch first, capture, then add it (merge into the lldp task, never duplicate a cable that LLDP already shows).
 - **L2 view:** MAC table, VLANs, spanning tree. Needs its own commands, verified on real devices first.
 - **Pair parallel sessions properly** by the local address of each session instead of by position.
 - **History:** keep the last N topologies so "what changed since yesterday" can be drawn.
