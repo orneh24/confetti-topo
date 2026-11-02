@@ -58,13 +58,13 @@ Each tick (`TOPO_POLL_TICK_S`, default 15s): claim devices with `poll_state='idl
 `next_poll_at <= now`, mark them `'running'` (this is the per-device lock — a device whose SSH hangs is never
 queued twice), and hand each to a `ThreadPoolExecutor` (`TOPO_POLL_WORKERS`, default 8).
 
-Per device, nine tasks run independently, **each committing its own transaction**: `version`, `interfaces`,
-`lldp`, `bgp`, `ospf`, `routes`, and `vlans`, `trunks` and `stp` (IOS **switches** only: `ssh.run_tasks` leaves it out for a router, which answers
+Per device, ten tasks run independently, **each committing its own transaction**: `version`, `interfaces`,
+`lldp`, `bgp`, `ospf`, `routes`, and `vlans`, `trunks`, `stp` and `mac` (IOS **switches** only: `ssh.run_tasks` leaves it out for a router, which answers
 `Invalid input`, and PAN-OS has none; a new switch gets it from its second poll, once its model is known). Partial failure is the normal case — an LLDP timeout must never discard interface data
 collected 200ms earlier. `role='node'` devices (confetti-traffic's imported Alpine fleet) are never polled —
 `poller.py`'s device-selection query filters `role != 'node'`.
 
-All nine tasks share **one SSH session** per poll (PAN-OS: one keygen per poll) (`ssh.run_tasks` is a generator, so each task still commits
+All ten tasks share **one SSH session** per poll (PAN-OS: one keygen per poll) (`ssh.run_tasks` is a generator, so each task still commits
 before the next command runs). Each apply step deletes that device's rows not seen in this poll — a removed
 peer or cable must not stay on the topology forever. But **only a successful task deletes**: a timeout or a
 failed login applies nothing (constraint 14). `interfaces` skips the delete on an empty result, since empty
@@ -146,7 +146,12 @@ a cap on a very large table (a full BGP table would be one row per route).
 The `stp` task runs `show spanning-tree summary` and keeps one row per switch in `stp` (mode, the VLANs it is root bridge for,
 the VLANs with a blocking port; `GET /api/stp?device_id=N`, a Spanning tree box on the device page). A change in the root
 VLANs or the blocking VLANs is one `stp_changed` warning event each (not on the first poll). Fixture
-`dev/samples/ios_stp_summary.txt`. The MAC table and per-port STP roles are not handled.
+`dev/samples/ios_stp_summary.txt`. Per-port STP roles are not handled.
+
+The `mac` task runs `show mac address-table` and keeps the **dynamic** (learned) entries in `mac_table` (VLAN, MAC, port; at most
+5000 per switch; `GET /api/mac?device_id=N&q=`, a MAC addresses box with a filter on the device page). The switch's own static
+rows are always in the answer, so an answer with no rows is a parse failure and deletes nothing. No events (addresses come and go
+all day). Fixture `dev/samples/ios_mac_table.txt` (real format, MACs replaced). Not handled: MAC to LLDP-neighbor matching.
 
 The `trunks` task runs `show interfaces trunk` the same way (`trunks` table, `GET /api/trunks?device_id=N`, a Trunks table on
 the device page). A switch may have no trunks, so an empty answer clears the table; a `%` answer fails the task and
@@ -403,7 +408,7 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
     path on this server. Checked by R33.
 19. **VLANs, trunks and spanning tree are asked of switches only, and a failed answer deletes nothing.** A router answers `show vlan brief` with
     `Invalid input`, so `ssh.run_tasks` drops the `vlans` task unless `_is_switch`; PAN-OS has none. A switch always has VLAN 1,
-    so an empty VLAN parse is a failure, not a real answer (constraint 14); a `%` answer fails all three tasks. Checked by R34.
+    so an empty VLAN parse is a failure, not a real answer (constraint 14); a `%` answer fails all four tasks (the `mac` task also keeps nothing on an empty parse). Checked by R34.
 20. **Topology history is written only when the map changed, pruned by age, read-only over the API, and holds no secrets.** A snapshot
     is the `/api/topology` data and nothing else (no credentials, no device output). An unchanged map adds no row, and
     `TOPO_SNAPSHOT_INTERVAL_S=0` stores nothing. A history failure must never stop the poller tick. Checked by R35.

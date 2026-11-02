@@ -276,6 +276,16 @@ def init_db():
             data     TEXT NOT NULL
         );
 
+        -- Learned MAC addresses on a switch (show mac address-table, dynamic entries only).
+        CREATE TABLE IF NOT EXISTS mac_table (
+            device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+            vlan      TEXT NOT NULL,
+            mac       TEXT NOT NULL,
+            port      TEXT NOT NULL DEFAULT '',
+            last_seen TEXT NOT NULL,
+            PRIMARY KEY (device_id, vlan, mac)
+        );
+
         -- Where each node sits on the topology page, shared by every viewer.
         -- node_id is the graph id ('dev:5', 'ghost:lldp:sw1'), not a devices FK.
         CREATE TABLE IF NOT EXISTS node_positions (

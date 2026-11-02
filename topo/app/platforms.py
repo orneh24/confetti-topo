@@ -2,7 +2,7 @@
 
 A device's `platform` column picks its entry here. The poller itself does not
 care: every platform produces the same parsed shapes for the same task names
-(version, interfaces, lldp, bgp, ospf, routes, and vlans, trunks, stp on IOS switches), so the apply steps, events and
+(version, interfaces, lldp, bgp, ospf, routes, and vlans, trunks, stp, mac on IOS switches), so the apply steps, events and
 topology work unchanged for all of them. Adding a vendor means adding an entry
 here plus its parsers (Junos is planned, see docs/ROADMAP.md).
 
@@ -32,6 +32,7 @@ IOS = {
         "vlans": "show vlan brief",
         "trunks": "show interfaces trunk",
         "stp": "show spanning-tree summary",
+        "mac": "show mac address-table",
     },
     "parsers": {
         "version": ios.parse_version,
@@ -43,6 +44,7 @@ IOS = {
         "vlans": ios.parse_vlans,
         "trunks": ios.parse_trunks,
         "stp": ios.parse_stp,
+        "mac": ios.parse_mac,
     },
     # Older IOS leaves "Local Intf" out of the detail output; this table has it.
     "lldp_brief_command": "show lldp neighbors",
@@ -85,7 +87,7 @@ def get(platform):
 
 
 # Tasks only a switch is asked for (ssh.run_tasks leaves them out for a router, which answers "Invalid input").
-SWITCH_TASKS = ("vlans", "trunks", "stp")
+SWITCH_TASKS = ("vlans", "trunks", "stp", "mac")
 
 
 def tasks(plat):

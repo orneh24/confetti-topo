@@ -166,6 +166,8 @@ def apply_result(conn, device_id, task, parsed):
         _apply_trunks(conn, device_id, parsed, now)
     elif task == "stp":
         _apply_stp(conn, device_id, parsed, now)
+    elif task == "mac":
+        _apply_mac(conn, device_id, parsed, now)
 
 
 def _apply_version(conn, device_id, parsed, now):
@@ -422,3 +424,22 @@ def _apply_stp(conn, device_id, parsed, now):
                blocking_vlans=excluded.blocking_vlans, instances=excluded.instances, last_seen=excluded.last_seen""",
         (device_id, new["mode"], new["root_for"], new["blocking_vlans"], new["instances"], now),
     )
+
+
+MAC_ROW_LIMIT = 5000   # per switch; a bigger table keeps its first rows (the page says so)
+
+
+def _apply_mac(conn, device_id, parsed, now):
+    """Store the learned (dynamic) MAC addresses. A switch always lists its own static entries, so an answer with no
+    rows at all is a parse failure and deletes nothing; otherwise the dynamic rows replace the old ones (a switch with
+    nothing learned yet clears the table). No events: addresses come and go all day."""
+    if not parsed:
+        return
+    dynamic = [r for r in parsed if r["type"] == "dynamic"][:MAC_ROW_LIMIT]
+    for r in dynamic:
+        conn.execute(
+            """INSERT INTO mac_table (device_id, vlan, mac, port, last_seen) VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(device_id, vlan, mac) DO UPDATE SET port=excluded.port, last_seen=excluded.last_seen""",
+            (device_id, r["vlan"], r["mac"], r["port"], now),
+        )
+    conn.execute("DELETE FROM mac_table WHERE device_id = ? AND last_seen <> ?", (device_id, now))

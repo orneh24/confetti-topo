@@ -147,6 +147,18 @@
             <div class="empty" id="route-empty" style="display:none">no routes polled yet</div>
         </div>
     </div>
+    <!-- Switches only: shown once the device has learned MAC addresses. -->
+    <div class="section wide" id="mac" style="display:none">
+        <div class="section-header"><span>MAC addresses <span id="mac-count"></span></span></div>
+        <div class="section-body">
+            <input type="search" id="mac-q" placeholder="filter by MAC, VLAN or port" oninput="macSoon()" aria-label="Filter MAC addresses" style="margin-bottom:6px">
+            <table data-sortable class="striped compact">
+                <thead><tr><th>VLAN</th><th>MAC address</th><th>Port</th></tr></thead>
+                <tbody id="mac-rows"></tbody>
+            </table>
+            <div class="msg" id="mac-more"></div>
+        </div>
+    </div>
     <!-- Switches only: shown once the device has a spanning-tree summary. -->
     <div class="section wide" id="stp" style="display:none">
         <div class="section-header"><span>Spanning tree</span></div>
@@ -449,6 +461,23 @@ function loadTrunks() {
     });
 }
 
+var macTimer = null;
+function macSoon() { clearTimeout(macTimer); macTimer = setTimeout(loadMac, 250); }
+// Learned MAC addresses (switches). Shows the first 500 rows of the answer; the filter box searches all of them on the server.
+function loadMac() {
+    var q = document.getElementById('mac-q').value.trim();
+    fetch('/api/mac?device_id=' + deviceId + '&q=' + encodeURIComponent(q)).then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '';
+        list.slice(0, 500).forEach(function (m) {
+            rows += '<tr><td>' + esc(m.vlan) + '</td><td>' + esc(m.mac) + '</td><td>' + esc(m.port) + '</td></tr>';
+        });
+        document.getElementById('mac-rows').innerHTML = rows;
+        document.getElementById('mac-count').textContent = list.length ? '(' + list.length + ')' : '';
+        document.getElementById('mac-more').textContent = list.length > 500 ? 'First 500 of ' + list.length + ' shown. Use the filter to find the rest.' : '';
+        document.getElementById('mac').style.display = (list.length || q) ? '' : 'none';
+    });
+}
+
 function loadStp() {
     fetch('/api/stp?device_id=' + deviceId).then(function (r) { return r.json(); }).then(function (s) {
         var box = document.getElementById('stp');
@@ -534,6 +563,7 @@ function pollNow() {
         loadVlans();
         loadTrunks();
         loadStp();
+        loadMac();
         loadLldp();
         loadAdjacencies();
         loadEvents();
@@ -549,6 +579,7 @@ loadRoutes();
 loadVlans();
 loadTrunks();
 loadStp();
+loadMac();
 loadLldp();
 loadAdjacencies();
 loadEvents();

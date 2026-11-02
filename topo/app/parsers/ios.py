@@ -490,3 +490,21 @@ def parse_stp(text):
             if int(m.group(2)) > 0:
                 blocking.append(m.group(1).lstrip("0") or "0")
     return [{"mode": mode.group(1), "root_for": _vlan_list(root), "blocking_vlans": ",".join(blocking), "instances": instances}]
+
+
+# ---------------------------------------------------------------------------
+# show mac address-table (switches)
+# ---------------------------------------------------------------------------
+
+_MAC_ROW_RE = re.compile(r"^\s*(\d+|All)\s+([0-9a-fA-F]{4}\.[0-9a-fA-F]{4}\.[0-9a-fA-F]{4})\s+(\S+)\s+(\S.*?)\s*$")
+
+
+def parse_mac(text):
+    """Parse 'show mac address-table' into rows {vlan, mac, type, port}. vlan is 'All' for the switch's own static
+    entries (port 'CPU'). A real switch always has those, so [] means a parse failure, not an empty table."""
+    rows = []
+    for line in text.splitlines():
+        m = _MAC_ROW_RE.match(line)
+        if m:
+            rows.append({"vlan": m.group(1), "mac": m.group(2).lower(), "type": m.group(3).lower(), "port": m.group(4)})
+    return rows

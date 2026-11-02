@@ -33,3 +33,6 @@ Used by `dev/regress.py`.
 
 Add a fixture for every parser bug found on a real device (LLDP detail without `Local Intf:`, OSPF, BGP),
 sanitised with documentation addresses only (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24, 2001:db8::/32).
+
+- `ios_mac_table.txt` has the **real format** of `show mac address-table` from a Catalyst 3560. The MAC addresses were replaced
+  with made-up ones and the list was cut to 3 static and 14 dynamic rows.

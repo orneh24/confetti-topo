@@ -445,6 +445,27 @@ def api_stp():
     return jsonify(out)
 
 
+@app.route("/api/mac", methods=["GET"])
+def api_mac():
+    """Learned MAC addresses of a switch. ?device_id=N is required; ?q= keeps rows whose MAC, VLAN or port contains it."""
+    device_id = request.args.get("device_id", type=int)
+    if device_id is None:
+        return jsonify({"error": "device_id is required"}), 400
+    q = (request.args.get("q") or "").strip().lower()
+    sql = "SELECT vlan, mac, port, last_seen FROM mac_table WHERE device_id = ?"
+    args = [device_id]
+    if q:
+        sql += " AND (mac LIKE ? ESCAPE '\\' OR vlan LIKE ? ESCAPE '\\' OR LOWER(port) LIKE ? ESCAPE '\\')"
+        args += [db.like_arg(q)] * 3
+    sql += " ORDER BY CAST(vlan AS INTEGER), mac LIMIT 5000"
+    out = []
+    for r in db.get_db().execute(sql, args):
+        d = dict(r)
+        d["last_seen"] = db.iso(d["last_seen"])
+        out.append(d)
+    return jsonify(out)
+
+
 @app.route("/api/trunks", methods=["GET"])
 def api_trunks():
     """A switch's trunk ports (show interfaces trunk). ?device_id=N is required."""

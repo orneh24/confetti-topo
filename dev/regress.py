@@ -563,7 +563,7 @@ def _():
 def _():
     p = []
     tasks = app_modules()["ssh"].TASKS
-    words = {"four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9}
+    words = {"four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
     doc = read("CLAUDE.md")
     for pat in (r"Per device, (\w+) tasks", r"All (\w+) tasks share"):
         m = re.search(pat, doc)
@@ -638,19 +638,19 @@ def sample(name):
     return read(SAMPLES + name)
 
 
-@check("R19", "platform registry: same core tasks everywhere (vlans, trunks and stp are IOS-only), unknown platform = IOS, every command read-only")
+@check("R19", "platform registry: same core tasks everywhere (vlans, trunks, stp and mac are IOS-only), unknown platform = IOS, every command read-only")
 def _():
     p = []
     m = app_modules()
     from app import platforms
     ios_tasks = tuple(platforms.IOS["commands"])
     core = ("version", "interfaces", "lldp", "bgp", "ospf", "routes")
-    need(ios_tasks == core + ("vlans", "trunks", "stp"), "IOS tasks are %r" % (ios_tasks,), p)
+    need(ios_tasks == core + ("vlans", "trunks", "stp", "mac"), "IOS tasks are %r" % (ios_tasks,), p)
     for name, plat in platforms.PLATFORMS.items():
         # "vlans" is a switch task of the IOS entry only; every platform has the six core tasks.
         have = tuple(t for t in plat["commands"] if t not in platforms.SWITCH_TASKS)
         need(have == core, "%s tasks are %r, expected the core %r" % (name, tuple(plat["commands"]), core), p)
-        need(not (set(plat["commands"]) & set(platforms.SWITCH_TASKS)) or plat is platforms.IOS, "%s: vlans, trunks and stp are only for the IOS entry" % name, p)
+        need(not (set(plat["commands"]) & set(platforms.SWITCH_TASKS)) or plat is platforms.IOS, "%s: vlans, trunks, stp and mac are only for the IOS entry" % name, p)
         need(set(plat["parsers"]) == set(plat["commands"]), "%s: commands and parsers differ" % name, p)
         # SSH platforms run `show ...`; the XML API platform sends `<show>...</show>` operations. Nothing else.
         prefix = "<show>" if plat.get("transport") == "xml_api" else "show "
@@ -1301,7 +1301,7 @@ def _():
     return p
 
 
-@check("R34", "vlans, trunks and stp (switches only): parse the real output, a router is never asked, an empty VLAN list deletes nothing, a \"%\" answer fails the task, a real list replaces the old one")
+@check("R34", "vlans, trunks, stp and mac (switches only): parse the real output, a router is never asked, an empty VLAN list deletes nothing, a \"%\" answer fails the task, a real list replaces the old one")
 def _():
     p = []
     m, conn = fresh_db()
@@ -1313,7 +1313,11 @@ def _():
     need([x["status"] for x in v if x["vlan_id"] == 1002] == ["act/unsup"], "act/unsup status lost", p)
     cont = ios.parse_vlans(text + "                                                Gi0/11, Gi0/12\n")   # written from IOS's documented format
     need(cont[-1]["ports"] == "Gi0/11, Gi0/12", "a continuation line must add to the row above: %r" % cont[-1], p)
-    need({"vlans", "trunks", "stp"} <= set(ssh.TASKS), "vlans / trunks / stp missing from the IOS tasks", p)
+    need({"vlans", "trunks", "stp", "mac"} <= set(ssh.TASKS), "vlans / trunks / stp / mac missing from the IOS tasks", p)
+    mac = ios.parse_mac(read(SAMPLES + "ios_mac_table.txt"))
+    need(len(mac) == 17 and mac[0] == {"vlan": "All", "mac": "0100.0ccc.cccc", "type": "static", "port": "CPU"}
+         and mac[3] == {"vlan": "1", "mac": "0200.f9ba.effa", "type": "dynamic", "port": "Gi0/1"}, "ios_mac_table: %d rows, %r" % (len(mac), mac[:1]), p)
+    need(ios.parse_mac("% Invalid input") == [], "an error answer must parse to nothing", p)
     stp = ios.parse_stp(read(SAMPLES + "ios_stp_summary.txt"))
     need(stp == [{"mode": "pvst", "root_for": "1,10-12,15,100,156,170,200", "blocking_vlans": "11", "instances": 6}],
          "ios_stp_summary: %r" % (stp,), p)
@@ -1342,7 +1346,7 @@ def _():
         for dev in (sw, rt):
             asked.clear()
             list(ssh.run_tasks(dict(dev, mgmt_ip="192.0.2.9"), {"username": "u", "password": "p", "secret": ""}))
-            need(all((c in asked) == (dev is sw) for c in ("show vlan brief", "show interfaces trunk", "show spanning-tree summary")),
+            need(all((c in asked) == (dev is sw) for c in ("show vlan brief", "show interfaces trunk", "show spanning-tree summary", "show mac address-table")),
                  "switch-only commands asked=%r for %s" % (asked, dev["model"]), p)
     finally:
         ssh.ConnectHandler = real
@@ -1382,7 +1386,7 @@ def _():
         res = {t: ok for t, ok, *_ in ssh.run_tasks(dict(sw, mgmt_ip="192.0.2.9"), {"username": "u", "password": "p", "secret": ""})}
     finally:
         ssh.ConnectHandler = real
-    need(res.get("vlans") is False and res.get("trunks") is False and res.get("stp") is False, "an error answer must fail vlans, trunks and stp: %r" % res, p)
+    need(res.get("vlans") is False and res.get("trunks") is False and res.get("stp") is False and res.get("mac") is False, "an error answer must fail vlans, trunks, stp and mac: %r" % res, p)
     # stp: stored; a change of root VLANs or blocking VLANs is one event each, none on the first poll or when nothing changed
     ev = lambda: conn.execute("SELECT subject, detail FROM events WHERE device_id = ? AND kind = 'stp_changed' ORDER BY id", (did,)).fetchall()
     ssh.apply_result(conn, did, "stp", stp)
@@ -1400,6 +1404,21 @@ def _():
     need(len(got) == 2 and got[0][1] == "1,10-12,15,100,156,170,200 -> 1,10" and got[1][1] == "11 -> none", "stp change events: %r" % (got,), p)
     r = m["appmod"].app.test_client().get("/api/stp?device_id=%d" % did)
     need(r.status_code == 200 and r.get_json().get("root_for") == "1,10", "GET /api/stp: %s %r" % (r.status_code, r.get_json()), p)
+    # mac: only the dynamic rows are stored; an empty parse deletes nothing; a real answer replaces the old rows
+    nm = lambda: conn.execute("SELECT COUNT(*) FROM mac_table WHERE device_id = ?", (did,)).fetchone()[0]
+    ssh.apply_result(conn, did, "mac", mac)
+    conn.commit()
+    need(nm() == 14, "mac: only the 14 dynamic rows must be stored: %d" % nm(), p)
+    time.sleep(1.1)   # a later second than the rows above, so a wrongful delete would show
+    ssh.apply_result(conn, did, "mac", [])
+    need(nm() == 14, "an empty mac parse must delete nothing: %d" % nm(), p)
+    time.sleep(1.1)
+    ssh.apply_result(conn, did, "mac", mac[:5])
+    conn.commit()
+    need(nm() == 2, "a real mac answer must replace the old rows: %d" % nm(), p)
+    c = m["appmod"].app.test_client()
+    need(len(c.get("/api/mac?device_id=%d" % did).get_json()) == 2 and len(c.get("/api/mac?device_id=%d&q=gi0/5" % did).get_json()) == 1
+         and c.get("/api/mac").status_code == 400, "GET /api/mac and its filter", p)
     return p
 
 
