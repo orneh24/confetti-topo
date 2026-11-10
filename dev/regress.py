@@ -1478,6 +1478,45 @@ def _():
     return p
 
 
+@check("R36", "other Confetti projects' URLs: http(s) only, all-or-nothing, empty clears, partial update, no secret, header shortcut file safe")
+def _():
+    p = []
+    m, conn = fresh_db()
+    client = m["appmod"].app.test_client()
+    url = "/api/settings/links"
+    need(client.get(url).get_json() == {"butler": "", "traffic": ""}, "nothing set yet: %r" % client.get(url).get_json(), p)
+    r = client.put(url, json={"butler": " http://butler.example:8080/ "})
+    need(r.status_code == 200 and r.get_json() == {"butler": "http://butler.example:8080", "traffic": ""},
+         "a good URL is trimmed, has no trailing slash and leaves the other field: %s %r" % (r.status_code, r.get_json()), p)
+    r = client.put(url, json={"traffic": "https://hub.example"})
+    need(r.get_json() == {"butler": "http://butler.example:8080", "traffic": "https://hub.example"}, "a partial PUT must keep the other field: %r" % r.get_json(), p)
+    before = client.get(url).get_json()
+    bad = ["javascript:alert(1)", "ftp://x.example", "http://", "x.example", "http://u:p@h.example", "http://a b.example",
+           "http://h.example/\"x", "http://h.example:99999", "http://" + "a" * 300, 123, None, ["http://h.example"]]
+    for v in bad:
+        r = client.put(url, json={"butler": v})
+        need(r.status_code == 400 and client.get(url).get_json() == before,
+             "%r must be refused (400) and change nothing: %s" % (v, r.status_code), p)
+    r = client.put(url, json={"butler": "http://other.example", "traffic": "javascript:x"})
+    need(r.status_code == 400 and client.get(url).get_json() == before, "one bad value must change neither field (all or nothing)", p)
+    for body in ({}, {"unknown": "http://h.example"}, [], "text"):
+        need(client.put(url, json=body).status_code == 400, "body %r must be refused" % (body,), p)
+    r = client.put(url, json={"butler": ""})
+    need(r.get_json() == {"butler": "", "traffic": "https://hub.example"}, "an empty value must clear that field only: %r" % r.get_json(), p)
+    need(conn.execute("SELECT COUNT(*) FROM settings WHERE key = 'url_butler'").fetchone()[0] == 0, "an empty value must delete the row", p)
+    need(conn.execute("SELECT COUNT(*) FROM settings WHERE key NOT IN ('url_butler', 'url_traffic')").fetchone()[0] == 0, "only url_* rows may be written", p)
+    need(client.delete(url).status_code == 405 and client.post(url, json={}).status_code == 405, "only GET and PUT", p)
+    page = client.get("/settings").get_data(as_text=True)
+    need("Other Confetti projects" in page and 'id="links-form"' in page, "/settings has no Other Confetti projects section", p)
+    # The header shortcut: a placeholder in base.html, the shared script, never HTML built from the URL, opens safely.
+    base = open("topo/templates/base.html", encoding="utf-8").read()
+    need('id="confetti-links"' in base and 'src="/static/confetti-links.js"' in base, "base.html must hold the shortcut span and load confetti-links.js", p)
+    js = open("topo/static/confetti-links.js", encoding="utf-8").read()
+    need("innerHTML" not in js and "document.write" not in js, "confetti-links.js must not build HTML from the URL", p)
+    need("noopener" in js and "_blank" in js and "https?" in js, "confetti-links.js must open in a new tab with noopener and re-check http(s)", p)
+    return p
+
+
 def run_live():
     """Start the real server (serve.py) from a temp copy on free ports and
     drive it over HTTP and UDP."""

@@ -47,7 +47,8 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
   dashboard, on each device page and on the Recent changes page (filters, sortable, Before and After states coloured green, yellow or red). There is no alerting; see the roadmap.
 - **Device page.** Interfaces, LLDP neighbors, BGP/OSPF sessions and the routing table (filter, "export CSV"). On a switch also VLANs, trunks, the spanning-tree summary and the learned MAC addresses (filter; a MAC that belongs to a known device names it).
 - **Metrics.** `GET /metrics` serves Prometheus text.
-- **Dashboard.** Drag a box by its title to move it, drag its corner to resize it; the arrangement is kept in the browser, and "Reset layout" undoes it.
+- **Other Confetti projects.** Type the Butler and Traffic URLs on the Settings page and a small button for each appears at the right of the top menu (opens in a new tab).
+- **Dashboard.** Drag a box by its title to move it (drop it on the middle of another box to put them side by side, sharing the row), drag its corner to resize it; the arrangement is kept in the browser, and "Reset layout" undoes it.
 - **Look.** Seven colour themes (or Shuffle) and four layouts (MS-DOS in two colour variants), picked in the header.
 
 ![The dashboard in four themes: Light, Monokai, Confetti Night and Rainbow](docs/img/themes.png)

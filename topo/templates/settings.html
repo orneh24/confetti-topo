@@ -26,6 +26,20 @@
         </div>
     </div>
     <div class="section">
+        <div class="section-header"><span>Other Confetti projects</span></div>
+        <div class="section-body">
+            <form id="links-form" onsubmit="saveLinks(); return false;" autocomplete="off">
+                <div class="form-grid">
+                    <label for="l-traffic">Confetti Traffic URL</label><input id="l-traffic" name="traffic" placeholder="http://confetti-hub.example">
+                    <label for="l-butler">Confetti Butler URL</label><input id="l-butler" name="butler" placeholder="http://confetti-butler.example">
+                </div>
+                <div class="hint">A small button for each URL that is filled in appears at the right of the top menu on every page and opens that project in a new tab. Only http:// or https://. Leave a field empty to remove its button. The server never connects to these addresses; they are only links.</div>
+                <button type="submit" class="primary">Save</button>
+                <span class="msg" id="links-msg"></span>
+            </form>
+        </div>
+    </div>
+    <div class="section">
         <div class="section-header"><span>LLDP neighbor matching</span></div>
         <div class="section-body">
             <div class="hint" id="lldp-status">loading</div>
@@ -110,6 +124,27 @@ function saveDefaults() {
 
 function clearDefaults() {
     sendDefaults({ password: '', enable_secret: '' }, 'secrets cleared');
+}
+
+function loadLinks() {
+    fetch('/api/settings/links').then(function (r) { return r.json(); }).then(function (l) {
+        var f = document.getElementById('links-form');
+        f.traffic.value = l.traffic || '';
+        f.butler.value = l.butler || '';
+    });
+}
+
+function saveLinks() {
+    var f = document.getElementById('links-form');
+    fetch('/api/settings/links', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ traffic: f.traffic.value, butler: f.butler.value }),
+    }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+    }).then(function (res) {
+        say('links-msg', res.ok, res.ok ? 'saved' : (res.data.error || 'save failed'));
+        if (res.ok) { loadLinks(); ConfettiLinks.refresh(); }
+    });
 }
 
 function sendDefaults(body, okText) {
@@ -209,6 +244,7 @@ function saveLldp() {
 }
 
 loadDefaults();
+loadLinks();
 loadLldp();
 loadDevices();
 </script>

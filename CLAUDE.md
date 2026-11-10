@@ -299,7 +299,8 @@ topo/
   static/layout.css    — Classic, Modern, Retro 95, MS-DOS (MS-DOS has two colour variants, DOS Blue and Neon Green: `data-variant="green"` on `:root`, a header dropdown shown only in MS-DOS, saved in `confetti-topo-dos-variant`; it also has a keyboard layer:
                          base.html's .dos-menubar / .dos-fkeys / .dos-help, a row cursor, and one keydown IIFE at
                          the end of theme.js that does nothing in any other layout; same block as confetti-butler). Loaded AFTER theme.css
-  static/dashgrid.js   — the dashboard's movable/resizable boxes: drag a `.section[data-box]` by its header (pointer events on `document`, not pointer capture: moving the node in the DOM drops the capture), drag the corner grip to resize (width snaps to grid columns, height free), "Reset layout" button; saved per browser in `confetti-topo-dashboard-layout`. Injects its own CSS; the SAME file as in confetti-butler and confetti-traffic, copy it by hand and keep the three identical
+  static/confetti-links.js — the header shortcut buttons to the other Confetti projects (URLs from the Settings page, `GET /api/settings/links`); opens in a new tab; the SAME file as in confetti-butler and confetti-traffic, copy it by hand and keep the three identical
+  static/dashgrid.js   — the dashboard's movable/resizable boxes: drag a `.section[data-box]` by its header (pointer events on `document`, not pointer capture: moving the node in the DOM drops the capture), drag the corner grip to resize (width snaps to grid columns, height free); a box dropped on the middle band of another (outlined `dg-join`) shares that row with it and the boxes already on it, the columns split between them (`joinRow`, the first is pinned to column 1 via `state.row`); "Reset layout" button; saved per browser in `confetti-topo-dashboard-layout`. Injects its own CSS; the SAME file as in confetti-butler and confetti-traffic, copy it by hand and keep the three identical
   static/ctxmenu.js    — right-click menus, loaded once by base.html (menu CSS at the end of layout.css); the SAME file as in confetti-butler and confetti-traffic, copy it by hand and keep the three identical. A row carries data-ctx="<type>" and the page calls ctxMenu.register(type, fn(el, ev)); one document-level listener finds the row. Fill data-* attributes with ctxMenu.attr(), never esc(). A destructive item is `danger: true`, goes last and must ask confirm() (R29 fails a page that has one without). Used by changes.html (rows, plus the whole page for the empty-space menu) and the topology map (ctxMenu.open from vis's `oncontext`). R29 checks it
   static/theme.js      — THEMES + LAYOUTS lists and the two header dropdowns (confetti-topo-theme,
                          confetti-topo-layout in localStorage), themeColor() for canvas colours,
@@ -418,6 +419,11 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
 20. **Topology history is written only when the map changed, pruned by age, read-only over the API, and holds no secrets.** A snapshot
     is the `/api/topology` data and nothing else (no credentials, no device output). An unchanged map adds no row, and
     `TOPO_SNAPSHOT_INTERVAL_S=0` stores nothing. A history failure must never stop the poller tick. Checked by R35.
+21. **The URLs of the other Confetti projects are only link targets: http(s) with a host, validated on write, never fetched.** The Settings page
+    keeps the Butler and Traffic URLs (`settings` keys `url_butler` / `url_traffic`, `GET|PUT /api/settings/links`); a value that is not
+    http:// or https:// with a host, or has a user:password, whitespace or markup characters, is a 400 and changes nothing (all or nothing); an empty
+    value clears. `static/confetti-links.js` (the same file as in confetti-butler and confetti-traffic) turns them into small header buttons that
+    open in a new tab with `noopener`, re-checks http(s) and never builds HTML from the URL. The server never connects to them. Checked by R36.
 
 ## Regression gate
 
@@ -429,7 +435,7 @@ HTTP; `R21`..`R26` cover the ICMP state machine, `/metrics` format, LLDP crawl, 
 container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R27` checks the OpenSSH
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
-the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll. Output is one line per check
+the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R36` (constraint 21) the other Confetti projects' URLs; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the
