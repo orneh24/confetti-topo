@@ -228,7 +228,7 @@ against them.
   layout and zoom on every refresh. Give edges a stable id (`from|to|layer|label`) so updates match.
 - Nodes: boxes for devices, dots for ghosts. Edge colour per layer (LLDP, BGP, OSPF) plus the red
   dashed "down" style. An iBGP session is a thin yellow line, an eBGP session a thick purple one (`--purple` in
-  theme.css; the CRT layouts have one hue, so there eBGP differs by width only). An **AS areas** toggle
+  theme.css; the MS-DOS layout has one hue, so there eBGP differs by width only). An **AS areas** toggle
   (`confetti-topo-as-areas`, a look setting) draws a dashed box labelled `AS <n>` behind the nodes of each AS, on vis's
   `beforeDrawing`; it shows only while BGP is shown. A box is sized from the node places and a fixed size (not
   `getBoundingBox`, which grows with the selection outline), and its title sits on the top edge. The legend starts closed

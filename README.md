@@ -11,7 +11,7 @@ It started as the topology part of [confetti-butler](https://github.com/orneh24/
 own project now, with its own device list, poller and database. The look follows the hub UI of the sibling
 project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
 
-![Tour of confetti-topo: dashboard, devices, a device page, recent changes, topology, conflicts, then the colour themes, the five layouts and the Confetti button](docs/img/confetti-topo-demo.gif)
+![Tour of confetti-topo: dashboard, devices, a device page, recent changes, topology, conflicts, then the colour themes, the layouts and the Confetti button](docs/img/confetti-topo-demo.gif)
 
 *Mock data from a made-up lab, using documentation-range addresses. See [Running locally](#running-locally).*
 
@@ -47,11 +47,11 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
   dashboard, on each device page and on the Recent changes page (filters, sortable, Before and After states coloured green, yellow or red). There is no alerting; see the roadmap.
 - **Device page.** Interfaces, LLDP neighbors, BGP/OSPF sessions and the routing table (filter, "export CSV"). On a switch also VLANs, trunks, the spanning-tree summary and the learned MAC addresses (filter; a MAC that belongs to a known device names it).
 - **Metrics.** `GET /metrics` serves Prometheus text.
-- **Look.** Seven colour themes (or Shuffle) and five layouts, picked in the header.
+- **Look.** Seven colour themes (or Shuffle) and four layouts (MS-DOS in two colour variants), picked in the header.
 
 ![The dashboard in four themes: Light, Monokai, Confetti Night and Rainbow](docs/img/themes.png)
 
-![The dashboard in five layouts: Classic, Modern, Retro 95, MS-DOS and Neon Green CRT](docs/img/layouts.png)
+![The dashboard in four layouts: Classic, Modern, Retro 95 and MS-DOS (blue, and the Neon Green variant)](docs/img/layouts.png)
 
 The MS-DOS layout can be driven from the keyboard: F10 or Alt for the menu bar, Up/Down and Enter on table
 rows, F6 between panels, F1 for the list.

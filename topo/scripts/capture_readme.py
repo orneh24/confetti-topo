@@ -38,7 +38,7 @@ BASE = "http://127.0.0.1:{}".format(PORT)
 SIZE = {"width": 1280, "height": 1000}
 
 THEMES = ["light", "monokai", "confetti-night", "rainbow"]      # themes.png, in order
-LAYOUTS = ["classic", "modern", "retro95", "msdos", "greencrt"]           # layouts.png, in order
+LAYOUTS = ["classic", "modern", "retro95", "msdos", "msdos:green"]        # layouts.png, in order ("layout:variant")
 TOUR = ["/", "/devices", "/devices/1", "/changes", "/topology", "/conflicts"]
 
 
@@ -55,12 +55,14 @@ def wait_for_server():
 def shot(browser, path, theme="confetti-night", layout="classic", wait_ms=900):
     """One screenshot as a PIL image, in a fresh browser context that is closed again
     (open contexts keep polling /api/health and starve the server). Saved theme and
-    layout are set in localStorage first."""
+    layout are set in localStorage first. A layout may carry a variant: "msdos:green"."""
+    layout, _, variant = layout.partition(":")
     context = browser.new_context(viewport=SIZE)
     page = context.new_page()
     page.add_init_script(
         "try{localStorage.setItem('confetti-topo-theme','%s');"
-        "localStorage.setItem('confetti-topo-layout','%s');}catch(e){}" % (theme, layout))
+        "localStorage.setItem('confetti-topo-layout','%s');"
+        "localStorage.setItem('confetti-topo-dos-variant','%s');}catch(e){}" % (theme, layout, variant or "blue"))
     page.goto(BASE + path)
     page.wait_for_load_state("networkidle")
     page.wait_for_timeout(wait_ms + (1500 if path == "/topology" else 0))

@@ -17,10 +17,10 @@ CDN.
 - Colours live **only** in `static/theme.css` (a dark `:root` plus one `:root[data-theme=NAME]` block per
   theme). A page must not define its own `:root` colours; use the CSS variables. A new theme = one block in
   `theme.css` + one entry in the `THEMES` list in `theme.js`.
-- `static/layout.css` carries the structure and the five layouts (Classic, Modern, Retro 95, MS-DOS, Neon
-  Green CRT). It loads **after** `theme.css` on purpose. Use `.section > .section-header + .section-body`, not
+- `static/layout.css` carries the structure and the four layouts (Classic, Modern, Retro 95, MS-DOS; MS-DOS has two
+  colour variants, blue and Neon Green, `data-variant="green"`). It loads **after** `theme.css` on purpose. Use `.section > .section-header + .section-body`, not
   your own card CSS.
-- localStorage keys: `confetti-topo-theme`, `confetti-topo-layout`, `confetti-topo-theme-shuffle`, `confetti-topo-layers` (the topology's LLDP/BGP/OSPF
+- localStorage keys: `confetti-topo-theme`, `confetti-topo-layout`, `confetti-topo-dos-variant` (MS-DOS colour variant), `confetti-topo-theme-shuffle`, `confetti-topo-layers` (the topology's LLDP/BGP/OSPF
   toggles) and `confetti-topo-hide-unknown` (the "Unknown nodes" toggle: hides ghost nodes and their edges in the browser only; a yellow FILTERED marker over the map shows while any layer is off or unknown nodes are hidden; its "Show all" resets all of these) and `confetti-topo-hidden-nodes` (nodes hidden from the click-a-node card; viewer-side only, like the unknown-nodes toggle), `confetti-topo-changed-24h` (the Changed 24h glow, off by default), `confetti-topo-device-icons` and `confetti-topo-vendor-icons` (the Device icons / Vendor icons toggles, on by default) and `confetti-topo-hidden-icons` (the node card's Hide icon checkbox) and `confetti-topo-master` (the node id set by right-click Focus on device: lays the map out as a tree from it; a view setting, no FILTERED marker, Show all leaves it alone; the tree places are never saved to `node_positions`, so `savePositions`, `tidyAsAreas` and `rearrange` do nothing while `treeOn`). The icon keys are look settings, not filters: no FILTERED marker, and Show all leaves them alone. Right-click menus use the shared `static/ctxmenu.js` (the same file as confetti-butler and confetti-traffic;
   fill `data-*` attributes with `ctxMenu.attr()`, R29). On the map: vis-network's `oncontext` event plus
   `getNodeAt`, then `ctxMenu.open(x, y, spec)` with window coordinates; the browser's own menu is blocked on the map.
