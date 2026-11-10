@@ -91,6 +91,10 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <span>History view, read-only: the map as it was on <b id="hist-when"></b>. <span id="hist-diff"></span> Red glow: gone since.</span>
     <button type="button" onclick="document.getElementById('hist-sel').value=''; pickHistory('')">Back to live</button>
 </div>
+<div class="hist-bar" id="master-bar" role="status" style="display:none">
+    <span id="master-text"></span>
+    <button type="button" onclick="clearMaster()">Stop focus</button>
+</div>
 <div class="net-wrap">
     <div id="net"></div>
     <div class="left-stack" id="left-stack">
@@ -230,6 +234,7 @@ function toVisNodes(nodes) {
         if (n.ghost) { o.mass = 0.5; }   // an unidentified neighbor is pushed around more than a router
         if (n.members) { o.title = n.members.join('\n'); }   // hover on a group lists what is in it
         if (n.x !== undefined) { o.x = n.x; o.y = n.y; }   // a place saved on the server
+        if (treeOn && n.id === masterNode) { o.borderWidth = 3; o.color.border = themeColor('--yellow'); }   // the master
         return o;
     });
 }
@@ -333,6 +338,7 @@ function syncSet(set, items) {
 
 // Layout: the places nodes sit are saved on the server (/api/topology/positions), the same map for everyone.
 function savePositions(ids) {
+    if (treeOn) { return; }   // the focus tree is this viewer's view, not the map everyone shares
     var positions = network.getPositions(ids);
     fetch('/api/topology/positions', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ positions: positions }),
@@ -420,6 +426,7 @@ function centerPending() {
 
 // "Re-arrange": forget the saved places and lay the map out again from scratch.
 function rearrange() {
+    if (treeOn) { toast('stop the focus first: this would change the saved places'); return; }
     fetch('/api/topology/positions', { method: 'DELETE' }).then(function () {
         if (network) { network.destroy(); network = null; }
         load();
@@ -432,6 +439,96 @@ var tidyOnSettle = false;   // set by load() when no node has a saved place
 var selectedNode = null;
 var selectedLink = null;
 var focusNode = null;     // right-click "show only this node's links" (not remembered)
+
+// Right-click "Focus on device": one device is the master (HQ / datacenter) and the map is laid out as a tree from it,
+// one row per hop, over the links that are shown. A view setting of this browser: remembered in localStorage, and the
+// tree places are never saved to the server (the saved places are the same map for every viewer).
+var MASTER_KEY = 'confetti-topo-master';
+var masterNode = null;    // node id, e.g. dev:3
+var treeOn = false;       // true while the master is on the map and the tree is drawn
+var lastTreeKey = '';     // the shape the tree was last laid out for; a refresh with the same shape keeps dragged places
+
+function restoreMaster() {
+    try { masterNode = localStorage.getItem(MASTER_KEY) || null; } catch (e) { masterNode = null; }
+}
+
+function saveMaster() {
+    try {
+        if (masterNode) { localStorage.setItem(MASTER_KEY, masterNode); } else { localStorage.removeItem(MASTER_KEY); }
+    } catch (e) { /* not remembered */ }
+}
+
+// Breadth-first from the master over the edges: row = hops away. Nodes with no path go in rows of 8 below the tree.
+// Returns {node id: {x, y}}, or null when the master is not among the nodes.
+function treePositions(data, masterId) {
+    var byId = {};
+    data.nodes.forEach(function (n) { byId[n.id] = n; });
+    if (!byId[masterId]) { return null; }
+    var name = function (id) { return (byId[id].label || id).toLowerCase(); };
+    var adj = {};
+    data.edges.forEach(function (e) {
+        (adj[e.from] = adj[e.from] || []).push(e.to);
+        (adj[e.to] = adj[e.to] || []).push(e.from);
+    });
+    var depth = {};
+    depth[masterId] = 0;
+    var order = [masterId];
+    for (var i = 0; i < order.length; i++) {
+        var next = (adj[order[i]] || []).filter(function (o) { return byId[o] && depth[o] === undefined; });
+        next.sort(function (a, b) { return name(a) < name(b) ? -1 : (name(a) > name(b) ? 1 : 0); });
+        next.forEach(function (o) { if (depth[o] === undefined) { depth[o] = depth[order[i]] + 1; order.push(o); } });
+    }
+    var GAPX = 170, GAPY = 160;
+    var rows = [];
+    order.forEach(function (id) { (rows[depth[id]] = rows[depth[id]] || []).push(id); });
+    var pos = {};
+    rows.forEach(function (ids, d) {
+        ids.forEach(function (id, k) { pos[id] = { x: (k - (ids.length - 1) / 2) * GAPX, y: d * GAPY }; });
+    });
+    var rest = data.nodes.map(function (n) { return n.id; }).filter(function (id) { return depth[id] === undefined; });
+    rest.sort(function (a, b) { return name(a) < name(b) ? -1 : (name(a) > name(b) ? 1 : 0); });
+    var y0 = rows.length * GAPY + 60;
+    rest.forEach(function (id, k) {
+        var inRow = Math.min(8, rest.length - Math.floor(k / 8) * 8);
+        pos[id] = { x: ((k % 8) - (inRow - 1) / 2) * GAPX, y: y0 + Math.floor(k / 8) * GAPY };
+    });
+    return pos;
+}
+
+function treeKey(data) {
+    return masterNode + '#' + data.nodes.map(function (n) { return n.id; }).sort().join(',') + '#' +
+        data.edges.map(edgeKey).sort().join(',');
+}
+
+function updateMasterBar() {
+    var bar = document.getElementById('master-bar');
+    bar.style.display = masterNode ? '' : 'none';
+    document.getElementById('tidy-btn').disabled = treeOn;
+    if (!masterNode) { return; }
+    var n = rawData && rawData.nodes.filter(function (x) { return x.id === masterNode; })[0];
+    var name = n ? n.label : masterNode;
+    document.getElementById('master-text').textContent = treeOn
+        ? 'Focused on ' + name + ': the map is a tree from this device, one row per hop. These places are not saved.'
+        : name + ' is not on the map (hidden, filtered or removed), so the normal layout is shown.';
+}
+
+function resetTree() {
+    lastTreeKey = '';
+    if (network) { network.destroy(); network = null; }
+    load();
+}
+
+function setMaster(id) {
+    masterNode = id;
+    saveMaster();
+    resetTree();
+}
+
+function clearMaster() {
+    masterNode = null;
+    saveMaster();
+    resetTree();
+}
 
 // History: a saved snapshot of the whole map (server side, /api/topology/snapshots). While one is picked the page shows
 // it instead of the live map, with a banner. Nothing is written to a device or to the snapshot.
@@ -509,6 +606,20 @@ function load() {
         rawData = data;                    // the node card reads this, so a hidden node can still be shown and un-hidden
         renderDeviceList();
         data = groupUnknown(hideFiltered(data));
+        var tree = masterNode ? treePositions(data, masterNode) : null;
+        var treeChanged = false;
+        if (tree) {
+            var tkey = treeKey(data);
+            treeChanged = tkey !== lastTreeKey;
+            lastTreeKey = tkey;
+            data.nodes = data.nodes.map(function (n) { return Object.assign({}, n, tree[n.id]); });
+        } else {
+            // The master left the map (or focus was cleared): drop the tree places and use the saved ones again.
+            if (lastTreeKey && network) { network.destroy(); network = null; }
+            lastTreeKey = '';
+        }
+        treeOn = !!tree;
+        updateMasterBar();
         nodeAs = {};
         data.nodes.forEach(function (n) { if (n.asn !== null && n.asn !== undefined) { nodeAs[n.id] = n.asn; } });
         var container = document.getElementById('net');
@@ -521,11 +632,13 @@ function load() {
             var items = toVisNodes(data.nodes);
             var newFree = items.filter(function (it) { return !nodeSet.get(it.id) && it.x === undefined; });
             // A node already on screen keeps the place the viewer sees, not an older one from the server.
-            items.forEach(function (it) { if (nodeSet.get(it.id)) { delete it.x; delete it.y; } });
+            // (a new tree shape moves every node; the same shape keeps what the viewer dragged)
+            items.forEach(function (it) { if (nodeSet.get(it.id) && !treeChanged) { delete it.x; delete it.y; } });
             if (newFree.length) { startSettling(nodeSet.getIds()); }   // the old nodes stand still, the new ones find a place
             syncSet(nodeSet, items);
             syncSet(edgeSet, toVisEdges(data.edges));
             if (newFree.length) { network.stabilize(200); }
+            if (treeChanged) { setTimeout(fitMap, 100); }
             return;
         }
         container.innerHTML = '';
@@ -790,6 +903,7 @@ function toggleAsAreas(btn) {
 // places. Blocks are packed left to right in rows; nodes with no AS go in a row below them.
 function tidyAsAreas() {
     if (!network || !nodeSet) { return; }
+    if (treeOn) { toast('stop the focus first: this would change the saved places'); return; }
     var groups = {}, rest = [];
     nodeSet.getIds().forEach(function (id) {
         if (nodeAs[id] !== undefined) { (groups[nodeAs[id]] = groups[nodeAs[id]] || []).push(id); } else { rest.push(id); }
@@ -1082,6 +1196,13 @@ function showNodePanel(id) {
                 info.textContent = '';
                 fillDeviceInfo(info, d, node.device_type);
                 if (node.asn) { addRow(info, 'BGP AS', node.asn); }
+                // Same as the right-click item: make this device the master of a tree layout (or stop).
+                var focusBtn = document.createElement('button');
+                focusBtn.type = 'button';
+                focusBtn.textContent = masterNode === id ? 'Stop focus' : 'Focus on this device';
+                focusBtn.title = 'Lay the map out as a tree from this device (this browser only)';
+                focusBtn.onclick = function () { if (masterNode === id) { clearMaster(); } else { setMaster(id); } showNodePanel(id); };
+                addRow(info, 'Focus', '').appendChild(focusBtn);
             }
         });
     }
@@ -1257,9 +1378,10 @@ function openContextMenu(id, x, y) {
             { label: 'Reset view', action: fitMap },
             { label: 'Export PNG', action: exportPng },
             { label: 'Export JSON', action: exportJson },
-            { label: 'Tidy AS areas', action: tidyAsAreas },
-            { label: 'Re-arrange', action: rearrange },
+            { label: 'Tidy AS areas', action: tidyAsAreas, disabled: treeOn },
+            { label: 'Re-arrange', action: rearrange, disabled: treeOn },
         ] };
+        if (masterNode) { spec.items.push({ label: 'Stop focus', action: clearMaster }); }
     } else {
         var isDevice = !node.ghost;
         // A device carries its management IP; a peer ghost is labelled with its IP.
@@ -1267,6 +1389,8 @@ function openContextMenu(id, x, y) {
         pollItem = { label: 'Poll now', action: function () {}, disabled: true };
         spec = { title: node.mgmt_ip ? node.label + ' | ' + node.mgmt_ip : node.label,   // e.g. csr-1 | 192.0.2.1
                  items: [
+            masterNode === id ? { label: 'Stop focus', action: clearMaster }
+                              : { label: 'Focus on device', action: function () { setMaster(id); }, disabled: !isDevice },
             { label: 'Open device page', action: function () { window.location.href = '/devices/' + node.device_id; }, disabled: !isDevice },
             { label: 'View routing table', action: function () { window.location.href = '/devices/' + node.device_id + '#routes'; }, disabled: !isDevice },
             { label: 'Hide this node', action: function () {
@@ -1309,6 +1433,7 @@ document.getElementById('net').addEventListener('contextmenu', function (ev) { e
 
 restoreHiddenNodes();
 restoreHiddenIcons();
+restoreMaster();
 fillLegendIcons();
 restoreLayers();
 try { setLayerButton(document.getElementById('vendor-btn'), localStorage.getItem(VENDOR_ON_KEY) !== '0'); } catch (e) { /* shown */ }

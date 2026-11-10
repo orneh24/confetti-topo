@@ -24,7 +24,7 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
   FULL is red and dashed. A BGP session inside one AS (iBGP) is a thin yellow line and one between two ASes (eBGP)
   a thick purple line, and an "AS areas" toggle draws a box around the routers of each AS ("Tidy AS areas" moves the routers so each AS has its own block; a new map starts that way). A list of all known devices on the right selects a device on the map when clicked; its search box (name, IP or AS) fades the other devices. An LLDP cable is red and dashed when a device reports its port down. "Changed 24h" glows around devices that had a change in the last day, "Export PNG" / "Export JSON" save the map, and the History dropdown shows the map as it was (snapshots kept `TOPO_SNAPSHOT_RETENTION_DAYS`, default 14). Unknown nodes that hang off one router are grouped into a single "N unknown"
   node (double-click to open it). The layout stands still and is saved on the server, so everyone sees the
-  same map (right-click the background and choose Re-arrange to start over). An LLDP link shows its ports
+  same map (right-click the background and choose Re-arrange to start over). "Focus on device" (right-click a device, or the button on its card) makes it the master and lays the map out as a tree from it, in this browser only. An LLDP link shows its ports
   on hover or when selected.
 - **Peers find their router.** A BGP or OSPF peer is usually a loopback or link address, not the router's
   management IP. confetti-topo also reads each router's interface addresses, so a peer resolves to its

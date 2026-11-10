@@ -111,6 +111,9 @@ knows it); double-click expands it. An LLDP link shows its port names only on ho
 BGP/OSPF labels always show. A BGP session is typed by the AS at its two ends (`adjacencies.local_as` is the router's own
 AS, from `show bgp summary`): `bgp_type` `ibgp` = thin yellow line, `ebgp` = thick purple line, and the **AS areas** toggle
 draws a box labelled with the AS behind its nodes (`nodes[].asn`). `/topology?device=<id>` selects and centres on that device once (the Recent changes page links there).
+Right-click **Focus on device** makes one device the master: a tree layout from it, one row per hop over the shown links
+(`treePositions` in topology.html). It is per browser (`confetti-topo-master`), and the tree is never saved to `node_positions`
+(`savePositions` returns while `treeOn`).
 
 Who is that neighbor? Two steps:
 1. **At poll time**, the apply step matches the management IP an LLDP neighbor advertises (`remote_mgmt_ip`),
