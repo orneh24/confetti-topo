@@ -32,18 +32,18 @@
 {% endblock %}
 {% block content %}
 <div class="container">
-    <div class="section">
+    <div class="section" data-box="system">
         <div class="section-header"><span>System</span></div>
         <div class="section-body">
             <div id="time-body"><div class="kv"><span class="k">loading</span></div></div>
             <div id="system-body"><div class="kv"><span class="k">loading</span></div></div>
         </div>
     </div>
-    <div class="section">
+    <div class="section" data-box="services">
         <div class="section-header"><span>Services</span></div>
         <div class="section-body" id="services-body"><div class="kv"><span class="k">loading</span></div></div>
     </div>
-    <div class="section wide">
+    <div class="section wide" data-box="activity">
         <div class="section-header"><span>Activity, last 24 h <span id="act-count"></span></span></div>
         <div class="section-body">
             <div class="act-bars" id="act-bars" role="img" aria-label="Change events per hour for the last 24 hours"></div>
@@ -51,7 +51,7 @@
             <div class="act-key"><b class="s-info" style="background:var(--cyan)"></b>info<b style="background:var(--yellow)"></b>warning<b style="background:var(--red)"></b>critical</div>
         </div>
     </div>
-    <div class="section wide">
+    <div class="section wide" data-box="devices">
         <div class="section-header"><span>Devices <span id="dev-count"></span></span></div>
         <div class="section-body">
             <table class="striped compact">
@@ -61,7 +61,7 @@
             <div class="empty" id="dev-empty" style="display:none">no devices yet</div>
         </div>
     </div>
-    <div class="section wide">
+    <div class="section wide" data-box="events">
         <div class="section-header"><span>Events — last 15</span></div>
         <div class="section-body">
             <table class="striped">
@@ -74,7 +74,9 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="/static/dashgrid.js"></script>
 <script>
+DashGrid.init({ container: '.container', prefix: 'confetti-topo' });
 function kv(k, v, cls) {
     return '<div class="kv"><span class="k">' + k + '</span><span class="v' +
         (cls ? ' ' + cls : '') + '">' + v + '</span></div>';
