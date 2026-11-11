@@ -574,6 +574,69 @@ function pollNow() {
     });
 }
 
+// Right-click menus (static/ctxmenu.js). Each table body is one menu target; the row under the pointer is found
+// when the menu opens, so the tables can be rebuilt (poll, refresh) without touching the menu.
+['alias-rows', 'source-rows', 'event-rows', 'lldp-rows', 'adj-rows', 'interface-rows', 'route-rows', 'mac-rows',
+ 'trunk-rows', 'vlan-rows'].forEach(function (id) {
+    document.getElementById(id).setAttribute('data-ctx', 'row');
+});
+
+function cellText(tr, i) { return tr.cells[i] ? tr.cells[i].textContent.trim() : ''; }
+
+ctxMenu.register('row', function (tb, ev) {
+    var tr = ev.target.closest('tr');
+    if (!tr || tr.cells.length < 2) { return null; }   // the "none" placeholder row
+    var id = tb.id, items = [];
+    var link = tr.querySelector('a[href^="/devices/"]');   // neighbor, peer or known device in this row
+    var m = link ? link.getAttribute('href').match(/^\/devices\/(\d+)/) : null;
+    function copy(label, i) {
+        items.push({ label: label, action: function () { ctxMenu.copy(cellText(tr, i)); }, disabled: cellText(tr, i) === '' });
+    }
+    if (m) {
+        items.push({ label: 'Open ' + link.textContent.trim(), action: function () { window.location.href = '/devices/' + m[1]; } });
+        items.push({ label: 'Show on topology', action: function () { window.location.href = '/topology?device=' + m[1]; } });
+    }
+    if (id === 'interface-rows') { copy('Copy name', 0); copy('Copy IP', 3); }
+    else if (id === 'route-rows') {
+        copy('Copy prefix', 0); copy('Copy next hop', 2);
+        items.push({ label: 'Filter to this prefix', action: function () {
+            document.getElementById('rt-prefix').value = cellText(tr, 0);
+            renderRoutes();
+        } });
+    }
+    else if (id === 'lldp-rows') { copy('Copy local port', 0); copy('Copy remote port', 2); copy('Copy management IP', 3); }
+    else if (id === 'adj-rows') { copy('Copy peer', 1); }
+    else if (id === 'mac-rows') { copy('Copy MAC address', 1); copy('Copy port', 2); }
+    else if (id === 'vlan-rows') { copy('Copy VLAN', 0); copy('Copy name', 1); }
+    else if (id === 'trunk-rows') { copy('Copy port', 0); }
+    else { copy('Copy ' + (id === 'event-rows' ? 'event' : 'value'), id === 'event-rows' ? 2 : 1); }
+    items.push({ label: 'Copy row', action: function () {
+        ctxMenu.copy(Array.prototype.map.call(tr.cells, function (c) { return c.textContent.trim(); }).join('  '));
+    } });
+    return { title: cellText(tr, 0).slice(0, 40), items: items };
+});
+
+// Empty page space; the header, nav and taskbar keep the browser's own menu.
+document.documentElement.setAttribute('data-ctx', 'page');
+ctxMenu.register('page', function (el, ev) {
+    if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
+    var d = current;
+    if (!d) { return null; }
+    var isNode = d.role === 'node';
+    return { title: d.hostname || 'Device', items: [
+        { label: 'Poll now', action: pollNow, disabled: isNode || !d.enabled },
+        { label: 'Show on topology', action: function () { window.location.href = '/topology?device=' + deviceId; } },
+        { label: 'Routing table', action: function () { window.location.hash = 'routes'; } },
+        { label: 'Export routes CSV', action: exportRoutesCsv, disabled: !routeList.length },
+        { label: d.enabled ? 'Disable polling' : 'Enable polling', disabled: isNode, action: function () {
+            fetch('/api/devices/' + deviceId, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: d.enabled ? 0 : 1 }) }).then(loadDevice);
+        } },
+        { label: 'Copy hostname', action: function () { ctxMenu.copy(d.hostname || ''); } },
+        { label: 'Copy management IP', action: function () { ctxMenu.copy(d.mgmt_ip || ''); }, disabled: !d.mgmt_ip },
+    ] };
+});
+
 loadDevice();
 loadInterfaces();
 loadRoutes();

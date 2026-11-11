@@ -50,6 +50,7 @@ function mergeConflict(conflictId, ids, btn) {
 }
 
 function dismissConflict(conflictId, btn) {
+    if (!confirm('Dismiss conflict #' + conflictId + '? It is marked resolved without merging anything.')) { return; }
     var msg = btn.closest('form').querySelector('.msg');
     fetch('/api/conflicts/' + conflictId + '/dismiss', { method: 'POST' }).then(function (r) {
         if (r.ok) { load(); return; }
@@ -60,7 +61,9 @@ function dismissConflict(conflictId, btn) {
     });
 }
 
+var conflictList = [];
 function render(list) {
+    conflictList = list;
     var el = document.getElementById('list');
     if (!list.length) {
         el.innerHTML = '<div class="empty">no unresolved conflicts</div>';
@@ -69,7 +72,7 @@ function render(list) {
     var html = '';
     for (var i = 0; i < list.length; i++) {
         var c = list[i];
-        html += '<div class="section">' +
+        html += '<div class="section" data-ctx="conflict" data-id="' + ctxMenu.attr(c.id) + '">' +
             '<div class="section-header"><span>conflict #' + c.id + ' — ' + esc(c.source) + '</span></div>' +
             '<div class="section-body">' +
             '<div class="kv"><span class="k">seen</span><span>' + esc(c.seen_at) + '</span></div>' +
@@ -91,6 +94,35 @@ function render(list) {
 function load() {
     fetch('/api/conflicts').then(function (r) { return r.json(); }).then(render);
 }
+
+// Right-click menus (static/ctxmenu.js). The card is looked up by id when the menu opens.
+ctxMenu.register('conflict', function (card) {
+    var id = parseInt(card.getAttribute('data-id'), 10);
+    var c = conflictList.filter(function (x) { return x.id === id; })[0];
+    if (!c) { return null; }
+    var items = String(c.device_ids || '').split(',').map(function (s) { return s.trim(); }).filter(Boolean).map(function (did) {
+        return { label: 'Open device ' + did, action: function () { window.location.href = '/devices/' + did; } };
+    });
+    items.push({ label: 'Copy device ids', action: function () { ctxMenu.copy(String(c.device_ids || '')); } });
+    items.push({ label: 'Copy detail', action: function () { ctxMenu.copy(c.detail || ''); } });
+    items.push({ label: 'Copy candidate', action: function () { ctxMenu.copy(c.candidate || ''); } });
+    // The card's own Dismiss button asks first (dismissConflict).
+    items.push({ label: 'Dismiss conflict', danger: true, action: function () {
+        var b = card.querySelector('button[title^="Mark resolved"]');
+        if (b) { b.click(); }
+    } });
+    return { title: 'Conflict #' + c.id, items: items };
+});
+
+// Empty page space; the header, nav and taskbar keep the browser's own menu.
+document.documentElement.setAttribute('data-ctx', 'page');
+ctxMenu.register('page', function (el, ev) {
+    if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
+    return { title: 'Conflicts', items: [
+        { label: 'Refresh', action: load },
+        { label: 'Devices', action: function () { window.location.href = '/devices'; } },
+    ] };
+});
 
 load();
 </script>

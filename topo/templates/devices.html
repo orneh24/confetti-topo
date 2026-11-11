@@ -121,7 +121,8 @@ function loadUnknownNeighbors() {
         var rows = '';
         for (var i = 0; i < list.length; i++) {
             var n = list[i];
-            rows += '<tr><td>' + esc(n.ip) + '</td><td>' + esc(n.sysname || '') + '</td><td>' + esc(n.seen_on) +
+            rows += '<tr data-ctx="neighbor" data-ip="' + ctxMenu.attr(n.ip) + '" data-name="' + ctxMenu.attr(n.sysname || '') +
+                '"><td>' + esc(n.ip) + '</td><td>' + esc(n.sysname || '') + '</td><td>' + esc(n.seen_on) +
                 '</td><td><button data-ip="' + attr(n.ip) + '" data-name="' + attr(n.sysname || '') +
                 '" onclick="adoptNeighbor(this)">add</button></td></tr>';
         }
@@ -157,7 +158,7 @@ function renderDevices(fresh) {
         var d = list[i];
         var pollCls = d.poll_state === 'running' ? 'running' : 'idle';
         if (d.role === 'node') { pollCls = 'node'; }
-        rows += '<tr>' +
+        rows += '<tr data-ctx="device" data-id="' + ctxMenu.attr(d.id) + '">' +
             '<td><a href="/devices/' + d.id + '">' + esc(d.hostname) + '</a></td>' +
             '<td>' + pollResultIcon(d) + '<span class="pill ' + pollCls + '">' + esc(d.role === 'node' ? 'not polled' : d.poll_state) + '</span></td>' +
             '<td>' + esc(d.role) + '</td>' +
@@ -234,6 +235,8 @@ function pollAll() {
 }
 
 function removeDevice(id) {
+    var d = allDevices.filter(function (x) { return x.id === id; })[0];
+    if (!confirm('Delete ' + (d ? d.hostname : 'device ' + id) + ' and everything stored for it? This cannot be undone.')) { return; }
     fetch('/api/devices/' + id, { method: 'DELETE' }).then(loadDevices);
 }
 
@@ -319,6 +322,59 @@ document.getElementById('seedfile-form').addEventListener('submit', function (ev
     var path = ev.target.path.value.trim();
     if (!path) { return; }
     runDiscover('/api/discover/seedfile', { path: path }, 'seed file');
+});
+
+// Right-click menus (static/ctxmenu.js). The list is rebuilt on every refresh, so a row is looked up by id when the menu opens.
+function go(url) { window.location.href = url; }
+
+ctxMenu.register('device', function (tr) {
+    var id = parseInt(tr.getAttribute('data-id'), 10);
+    var d = allDevices.filter(function (x) { return x.id === id; })[0];
+    if (!d) { return null; }
+    var isNode = d.role === 'node';
+    return { title: d.hostname, items: [
+        { label: 'Open device page', action: function () { go('/devices/' + d.id); } },
+        { label: 'Open in new tab', action: function () { window.open('/devices/' + d.id, '_blank', 'noopener'); } },
+        { label: 'Show on topology', action: function () { go('/topology?device=' + d.id); } },
+        { label: 'Routing table', action: function () { go('/devices/' + d.id + '#routes'); }, disabled: isNode },
+        { label: 'Copy hostname', action: function () { ctxMenu.copy(d.hostname || ''); } },
+        { label: 'Copy management IP', action: function () { ctxMenu.copy(d.mgmt_ip || ''); }, disabled: !d.mgmt_ip },
+        { label: 'Copy key', action: function () { ctxMenu.copy(d.key || ''); } },
+        { label: 'Only this site', action: function () {
+            document.getElementById('dev-filter').value = d.site || '';
+            renderDevices();
+        }, disabled: !d.site },
+        { label: 'Poll now', disabled: isNode || !d.enabled, action: function () {
+            var btn = document.createElement('button');   // pollDevice wants a button to disable
+            pollDevice(d.id, btn);
+        } },
+        { label: d.enabled ? 'Disable polling' : 'Enable polling', disabled: isNode, action: function () {
+            fetch('/api/devices/' + d.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: d.enabled ? 0 : 1 }) }).then(loadDevices);
+        } },
+        { label: 'Delete device', danger: true, action: function () { removeDevice(d.id); } },   // removeDevice asks first
+    ] };
+});
+
+ctxMenu.register('neighbor', function (tr) {
+    var ip = tr.getAttribute('data-ip'), name = tr.getAttribute('data-name');
+    return { title: name || ip, items: [
+        { label: 'Add to inventory', action: function () { adoptNeighbor(tr); } },
+        { label: 'Copy IP', action: function () { ctxMenu.copy(ip); } },
+        { label: 'Copy name', action: function () { ctxMenu.copy(name); }, disabled: !name },
+    ] };
+});
+
+// Empty page space; the header, nav and taskbar keep the browser's own menu.
+document.documentElement.setAttribute('data-ctx', 'page');
+ctxMenu.register('page', function (el, ev) {
+    if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
+    return { title: 'Devices', items: [
+        { label: 'Refresh', action: function () { loadDevices(); loadUnknownNeighbors(); } },
+        { label: 'Poll all devices', action: pollAll },
+        { label: 'Clear filter', action: function () { document.getElementById('dev-filter').value = ''; renderDevices(); },
+          disabled: document.getElementById('dev-filter').value === '' },
+    ] };
 });
 
 loadDevices();

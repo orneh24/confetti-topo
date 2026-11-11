@@ -30,8 +30,8 @@
         <div class="section-body">
             <form id="links-form" onsubmit="saveLinks(); return false;" autocomplete="off">
                 <div class="form-grid">
-                    <label for="l-traffic">Confetti Traffic URL</label><input id="l-traffic" name="traffic" placeholder="http://confetti-hub.example">
-                    <label for="l-butler">Confetti Butler URL</label><input id="l-butler" name="butler" placeholder="http://confetti-butler.example">
+                    <label for="l-traffic" data-ctx="link" data-field="traffic">Confetti Traffic URL</label><input id="l-traffic" name="traffic" placeholder="http://confetti-hub.example">
+                    <label for="l-butler" data-ctx="link" data-field="butler">Confetti Butler URL</label><input id="l-butler" name="butler" placeholder="http://confetti-butler.example">
                 </div>
                 <div class="hint">A small button for each URL that is filled in appears at the right of the top menu on every page and opens that project in a new tab. Only http:// or https://. Leave a field empty to remove its button. The server never connects to these addresses; they are only links.</div>
                 <button type="submit" class="primary">Save</button>
@@ -168,7 +168,8 @@ function loadDevices() {
                 ? esc(d.username || 'default user') + ', password ' + (d.password_set ? 'set' : 'not set') +
                   ', enable ' + (d.enable_secret_set ? 'set' : 'not set')
                 : 'none (uses the defaults)';
-            html += '<tr><td><input type="checkbox" value="' + d.device_id + '"' +
+            html += '<tr data-ctx="cred" data-id="' + ctxMenu.attr(d.device_id) + '" data-ip="' + ctxMenu.attr(d.mgmt_ip || '') +
+                '" data-name="' + ctxMenu.attr(d.hostname || '') + '"><td><input type="checkbox" value="' + d.device_id + '"' +
                 (checked[d.device_id] ? ' checked' : '') + ' aria-label="Select ' + esc(d.hostname) + '"></td>' +
                 '<td><a href="/devices/' + d.device_id + '">' + esc(d.hostname) + '</a></td>' +
                 '<td>' + esc(d.mgmt_ip) + '</td><td>' + own + '</td><td>' + esc(d.updated_at || '') + '</td></tr>';
@@ -242,6 +243,41 @@ function saveLldp() {
         loadLldp();
     });
 }
+
+// Right-click menus (static/ctxmenu.js). A URL field keeps the browser's own menu, so its label carries the menu.
+ctxMenu.register('link', function (label) {
+    var input = document.getElementById('l-' + label.getAttribute('data-field'));
+    var url = input.value.trim();
+    return { title: label.textContent.trim(), items: [
+        { label: 'Open in new tab', action: function () { window.open(url, '_blank', 'noopener'); }, disabled: !/^https?:\/\/\S+$/i.test(url) },
+        { label: 'Copy URL', action: function () { ctxMenu.copy(url); }, disabled: !url },
+        { label: 'Clear this link', disabled: !url, action: function () { input.value = ''; saveLinks(); } },
+    ] };
+});
+
+ctxMenu.register('cred', function (tr) {
+    var id = parseInt(tr.getAttribute('data-id'), 10), name = tr.getAttribute('data-name');
+    var box = tr.querySelector('input[type=checkbox]');
+    return { title: name, items: [
+        { label: 'Open device page', action: function () { window.location.href = '/devices/' + id; } },
+        { label: box.checked ? 'Unselect' : 'Select', action: function () { box.checked = !box.checked; } },
+        { label: 'Select all', action: function () { selectAll(true); } },
+        { label: 'Copy IP', action: function () { ctxMenu.copy(tr.getAttribute('data-ip')); }, disabled: !tr.getAttribute('data-ip') },
+        { label: 'Remove own credentials', danger: true, confirm: 'Remove the own credentials of ' + name + '?',
+          action: function () { bulk('/api/credentials/clear', { device_ids: [id] }, 'removed from ' + name); } },
+    ] };
+});
+
+// Empty page space; the header, nav and taskbar keep the browser's own menu.
+document.documentElement.setAttribute('data-ctx', 'page');
+ctxMenu.register('page', function (el, ev) {
+    if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
+    return { title: 'Settings', items: [
+        { label: 'Reload all sections', action: function () { loadDefaults(); loadLinks(); loadLldp(); loadDevices(); } },
+        { label: 'Select all devices', action: function () { selectAll(true); } },
+        { label: 'Unselect all devices', action: function () { selectAll(false); } },
+    ] };
+});
 
 loadDefaults();
 loadLinks();

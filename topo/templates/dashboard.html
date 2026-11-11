@@ -176,7 +176,9 @@ function timeAgo(iso) {
 }
 
 // Every device on one screen, the ones that need a look first (not answering ping, then failing polls).
+var devById = {}, evById = {};
 function renderDevices(list) {
+    devById = {};
     function rank(d) { return d.reachable === 0 ? 0 : (d.fail_count > 0 ? 1 : 2); }
     var sorted = list.slice().sort(function (a, b) {
         return rank(a) - rank(b) || (a.hostname || '').toLowerCase().localeCompare((b.hostname || '').toLowerCase());
@@ -188,7 +190,8 @@ function renderDevices(list) {
         var poll = d.role === 'node' || !d.enabled ? '<span class="pill idle">not polled</span>'
             : (d.fail_count > 0 ? '<span class="pill bad" title="' + d.fail_count + ' failed in a row">failing</span>'
                : (d.last_poll_ok ? '<span class="pill ok">ok</span>' : '<span class="pill idle">waiting</span>'));
-        rows += '<tr><td><a href="/devices/' + d.id + '">' + esc(d.hostname) + '</a></td><td>' + esc(d.mgmt_ip) + '</td><td>' +
+        devById[d.id] = d;
+        rows += '<tr data-ctx="device" data-id="' + ctxMenu.attr(d.id) + '"><td><a href="/devices/' + d.id + '">' + esc(d.hostname) + '</a></td><td>' + esc(d.mgmt_ip) + '</td><td>' +
             ping + '</td><td>' + poll + '</td><td>' + (d.role === 'node' ? '' : esc(timeAgo(d.last_poll_ok))) + '</td></tr>';
     });
     document.getElementById('dev-rows').innerHTML = rows;
@@ -223,11 +226,13 @@ function poll() {
 function loadEvents() {
     fetch('/api/events?limit=15').then(function (r) { return r.json(); }).then(function (list) {
         var rows = '';
+        evById = {};
         for (var i = 0; i < list.length; i++) {
             var e = list[i];
             var cls = e.severity === 'info' ? 'ok' : (e.severity === 'warning' ? 'running' : 'bad');
             var subj = e.device_id ? '<a href="/devices/' + e.device_id + '">' + esc(e.subject) + '</a>' : esc(e.subject);
-            rows += '<tr><td>' + new Date(e.at).toLocaleString() + '</td>' +
+            evById[e.id] = e;
+            rows += '<tr data-ctx="event" data-id="' + ctxMenu.attr(e.id) + '"><td>' + new Date(e.at).toLocaleString() + '</td>' +
                 '<td><span class="pill ' + cls + '">' + esc(e.severity) + '</span></td>' +
                 '<td>' + subj + '</td><td>' + esc(e.detail) + '</td></tr>';
         }
@@ -268,6 +273,51 @@ function pollAll() {
     loadEvents();
     loadActivity();
 }
+
+// Right-click menus (static/ctxmenu.js). Rows are looked up by id when the menu opens: the tables are rebuilt every 15 s.
+function go(url) { window.location.href = url; }
+
+ctxMenu.register('device', function (tr) {
+    var d = devById[tr.getAttribute('data-id')];
+    if (!d) { return null; }
+    var pollable = d.role !== 'node' && d.enabled;
+    return { title: d.hostname, items: [
+        { label: 'Open device page', action: function () { go('/devices/' + d.id); } },
+        { label: 'Show on topology', action: function () { go('/topology?device=' + d.id); } },
+        { label: 'Routing table', action: function () { go('/devices/' + d.id + '#routes'); }, disabled: d.role === 'node' },
+        { label: 'Copy name', action: function () { ctxMenu.copy(d.hostname || ''); } },
+        { label: 'Copy IP', action: function () { ctxMenu.copy(d.mgmt_ip || ''); }, disabled: !d.mgmt_ip },
+        { label: 'Poll now', disabled: !pollable, action: function () {
+            ctxMenu.toast('Polling ' + d.hostname + '...');
+            fetch('/api/devices/' + d.id + '/poll', { method: 'POST' }).then(function () { pollAll(); });
+        } },
+    ] };
+});
+
+ctxMenu.register('event', function (tr) {
+    var e = evById[tr.getAttribute('data-id')];
+    if (!e) { return null; }
+    return { title: e.subject, items: [
+        { label: 'Open device page', action: function () { go('/devices/' + e.device_id); }, disabled: !e.device_id },
+        { label: 'Show on topology', action: function () { go('/topology?device=' + e.device_id); }, disabled: !e.device_id },
+        { label: 'Open Recent changes', action: function () { go('/changes'); } },
+        { label: 'Copy event text', action: function () {
+            ctxMenu.copy(new Date(e.at).toLocaleString() + ' ' + e.subject + (e.detail ? ' - ' + e.detail : ''));
+        } },
+    ] };
+});
+
+// Empty page space; the header, nav and taskbar keep the browser's own menu.
+document.documentElement.setAttribute('data-ctx', 'page');
+ctxMenu.register('page', function (el, ev) {
+    if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
+    return { title: 'Dashboard', items: [
+        { label: 'Refresh now', action: pollAll },
+        { label: 'Devices', action: function () { go('/devices'); } },
+        { label: 'Recent changes', action: function () { go('/changes'); } },
+        { label: 'Topology', action: function () { go('/topology'); } },
+    ] };
+});
 
 pollAll();
 setInterval(pollAll, 15000);
