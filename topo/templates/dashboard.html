@@ -3,6 +3,7 @@
 {% block head %}
 <style>
 .note { margin-top: 10px; }
+table.compact td.wrap { white-space: normal; overflow-wrap: anywhere; }
 /* Activity chart: one bar per hour, stacked by severity; colours come from the theme variables. */
 .act-bars { display: flex; align-items: flex-end; gap: 2px; height: 64px; }
 .act-bar { flex: 1 1 0; display: flex; flex-direction: column-reverse; min-width: 0; height: 100%; justify-content: flex-start; }
@@ -81,7 +82,7 @@
             <div class="empty" id="ses-empty" style="display:none">all BGP/OSPF sessions are up</div>
         </div>
     </div>
-    <div class="section" data-box="conflicts">
+    <div class="section wide" data-box="conflicts">
         <div class="section-header"><span>Open conflicts <span id="con-count"></span></span></div>
         <div class="section-body">
             <table class="striped compact">
@@ -276,12 +277,24 @@ function renderSessions(down, total) {
     document.getElementById('ses-empty').style.display = down.length ? 'none' : 'block';
 }
 
+// The candidate is stored as JSON pairs, [["serial","X"],["mgmt_ip","Y"]]: show "serial X, mgmt_ip Y". Anything else stays as it is.
+function candidateText(raw) {
+    try {
+        var pairs = JSON.parse(raw);
+        if (Array.isArray(pairs)) {
+            return pairs.map(function (p) { return Array.isArray(p) ? p.join(' ') : String(p); }).join(', ');
+        }
+    } catch (e) { /* not JSON: show it as it is */ }
+    return raw;
+}
+
 // Merge conflicts waiting for the operator (merge and dismiss stay on the Conflicts page).
 function loadConflicts() {
     fetch('/api/conflicts').then(function (r) { return r.json(); }).then(function (list) {
         var rows = '';
         list.forEach(function (c) {
-            rows += '<tr><td>' + esc(timeAgo(c.seen_at)) + '</td><td>' + esc(c.source) + '</td><td>' + esc(c.candidate) + '</td><td>' + esc(c.detail) + '</td></tr>';
+            rows += '<tr><td>' + esc(timeAgo(c.seen_at)) + '</td><td>' + esc(c.source) + '</td><td class="wrap" title="' + esc(c.candidate) + '">' +
+                esc(candidateText(c.candidate)) + '</td><td class="wrap">' + esc(c.detail) + '</td></tr>';
         });
         document.getElementById('con-rows').innerHTML = rows;
         document.getElementById('con-count').textContent = list.length ? '(' + list.length + ')' : '';

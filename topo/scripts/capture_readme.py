@@ -96,7 +96,7 @@ def main():
             collage([shot(browser, "/", layout=l) for l in LAYOUTS], os.path.join(OUT, "layouts.png"))
 
             # The whole dashboard on one tall screen: the collages above cut off the lower widgets.
-            shot(browser, "/", size={"width": 1280, "height": 1220}).save(os.path.join(OUT, "dashboard.png"), optimize=True)
+            shot(browser, "/", size={"width": 1280, "height": 1360}).save(os.path.join(OUT, "dashboard.png"), optimize=True)
 
             frames = [shot(browser, path) for path in TOUR]
             frames[TOUR.index("/topology")].save(os.path.join(OUT, "topology.png"), optimize=True)
