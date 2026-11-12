@@ -48,8 +48,10 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
 - **Device page.** Interfaces, LLDP neighbors, BGP/OSPF sessions and the routing table (filter, "export CSV"). On a switch also VLANs, trunks, the spanning-tree summary and the learned MAC addresses (filter; a MAC that belongs to a known device names it).
 - **Metrics.** `GET /metrics` serves Prometheus text.
 - **Other Confetti projects.** Type the Butler and Traffic URLs on the Settings page and a small button for each appears at the right of the top menu (opens in a new tab).
-- **Dashboard.** Widgets: System, Services, Activity, Devices, Events, Sessions down, Open conflicts, Unknown LLDP neighbors (with an add button) and Map changes (each row opens that snapshot on the map). Drag a widget by its title to move it (drop it on the middle of another widget to put them side by side, sharing the row), drag its corner to resize it; the arrangement is kept in the browser, and "Reset layout" undoes it.
+- **Dashboard.** Widgets: System, Services, Activity, Devices, Events, Sessions down, Open conflicts, Unknown LLDP neighbors (with an add button) and Map changes (each row opens that snapshot on the map). Drag a widget by its title to move it (a copy follows the pointer and a grid outline shows where it will land; drop it on the middle of another widget to put them side by side, sharing the row, or into the empty space at the end of a row), drag its corner to resize it; the arrangement is kept in the browser, and "Reset layout" undoes it.
 - **Look.** Seven colour themes (or Shuffle) and four layouts (MS-DOS in two colour variants), picked in the header.
+
+![The whole dashboard: system, services, activity, devices, events, sessions down, open conflicts, unknown LLDP neighbors and map changes](docs/img/dashboard.png)
 
 ![The dashboard in four themes: Light, Monokai, Confetti Night and Rainbow](docs/img/themes.png)
 

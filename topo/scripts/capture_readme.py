@@ -52,12 +52,12 @@ def wait_for_server():
     sys.exit("server did not start")
 
 
-def shot(browser, path, theme="confetti-night", layout="classic", wait_ms=900):
+def shot(browser, path, theme="confetti-night", layout="classic", wait_ms=900, size=SIZE):
     """One screenshot as a PIL image, in a fresh browser context that is closed again
     (open contexts keep polling /api/health and starve the server). Saved theme and
     layout are set in localStorage first. A layout may carry a variant: "msdos:green"."""
     layout, _, variant = layout.partition(":")
-    context = browser.new_context(viewport=SIZE)
+    context = browser.new_context(viewport=size)
     page = context.new_page()
     page.add_init_script(
         "try{localStorage.setItem('confetti-topo-theme','%s');"
@@ -95,6 +95,9 @@ def main():
             collage([shot(browser, "/", theme=t) for t in THEMES], os.path.join(OUT, "themes.png"))
             collage([shot(browser, "/", layout=l) for l in LAYOUTS], os.path.join(OUT, "layouts.png"))
 
+            # The whole dashboard on one tall screen: the collages above cut off the lower widgets.
+            shot(browser, "/", size={"width": 1280, "height": 1220}).save(os.path.join(OUT, "dashboard.png"), optimize=True)
+
             frames = [shot(browser, path) for path in TOUR]
             frames[TOUR.index("/topology")].save(os.path.join(OUT, "topology.png"), optimize=True)
             frames += [shot(browser, "/", theme=t) for t in THEMES]
@@ -104,7 +107,7 @@ def main():
         small = [f.resize((960, 540), Image.LANCZOS).quantize(colors=128) for f in frames]
         small[0].save(os.path.join(OUT, "confetti-topo-demo.gif"), save_all=True,
                       append_images=small[1:], duration=1800, loop=0, optimize=True)
-        print("wrote themes.png, layouts.png, confetti-topo-demo.gif to", os.path.normpath(OUT))
+        print("wrote dashboard.png, themes.png, layouts.png, confetti-topo-demo.gif to", os.path.normpath(OUT))
     finally:
         server.terminate()
         server.wait(timeout=10)

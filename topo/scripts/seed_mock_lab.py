@@ -24,7 +24,7 @@ if os.path.exists(sys.argv[1]):
     sys.exit("{} already exists - pick a new path".format(sys.argv[1]))
 os.environ["TOPO_DB_PATH"] = sys.argv[1]
 
-from app import db, identity  # noqa: E402  (env var must be set first)
+from app import db, history, identity  # noqa: E402  (env var must be set first)
 from app.parsers import ios  # noqa: E402
 
 ROUTERS = [
@@ -138,6 +138,9 @@ def main():
                         {"serial": "9SIMLAB0099", "mgmt_ip": "192.0.2.171"}, "sweep", "192.0.2.0/24")
     except identity.Conflict:
         pass
+
+    # One topology snapshot, so the dashboard's Map changes widget has a row.
+    history.maybe_snapshot(conn, force=True)
 
     conn.commit()
     conn.close()
