@@ -532,7 +532,8 @@ function clearMaster() {
 
 // History: a saved snapshot of the whole map (server side, /api/topology/snapshots). While one is picked the page shows
 // it instead of the live map, with a banner. Nothing is written to a device or to the snapshot.
-var viewSnap = '';
+// /topology?snapshot=<id> (the Dashboard's Map changes widget) opens that snapshot; an unknown id falls back to live.
+var viewSnap = (new URLSearchParams(window.location.search).get('snapshot') || '').replace(/[^0-9]/g, '');
 var markedGone = [];   // node ids glowing red in a history view: on that map, gone from the live one
 function clearGoneMarks() {
     if (nodeSet) {
@@ -596,6 +597,7 @@ function load() {
     var seq = ++loadSeq;
     fetch(url).then(function (r) { return r.json(); }).then(function (data) {
         if (seq !== loadSeq) { return; }   // a newer toggle already asked: drop this older answer
+        if (viewSnap && data.error) { viewSnap = ''; load(); return; }   // no such snapshot: show the live map
         if (viewSnap) {
             var want = shownLayers();
             data.edges = data.edges.filter(function (e) { return want.indexOf(e.layer) >= 0; });

@@ -71,6 +71,47 @@
             <div class="empty" id="event-empty" style="display:none">no changes recorded yet</div>
         </div>
     </div>
+    <div class="section wide" data-box="sessions">
+        <div class="section-header"><span>Sessions down <span id="ses-count"></span></span></div>
+        <div class="section-body">
+            <table class="striped compact">
+                <thead><tr><th>Device</th><th>Proto</th><th>Peer</th><th>AS / area</th><th>State</th></tr></thead>
+                <tbody id="ses-rows"></tbody>
+            </table>
+            <div class="empty" id="ses-empty" style="display:none">all BGP/OSPF sessions are up</div>
+        </div>
+    </div>
+    <div class="section" data-box="conflicts">
+        <div class="section-header"><span>Open conflicts <span id="con-count"></span></span></div>
+        <div class="section-body">
+            <table class="striped compact">
+                <thead><tr><th>Seen</th><th>Source</th><th>Candidate</th><th>Detail</th></tr></thead>
+                <tbody id="con-rows"></tbody>
+            </table>
+            <div class="empty" id="con-empty" style="display:none">no open conflicts</div>
+            <div class="note"><a href="/conflicts">Open Conflicts page</a></div>
+        </div>
+    </div>
+    <div class="section" data-box="lldp-unknown">
+        <div class="section-header"><span>Unknown LLDP neighbors <span id="unk-count"></span></span></div>
+        <div class="section-body">
+            <table class="striped compact">
+                <thead><tr><th>IP</th><th>Name</th><th>Seen on</th><th></th></tr></thead>
+                <tbody id="unk-rows"></tbody>
+            </table>
+            <div class="empty" id="unk-empty" style="display:none">every LLDP neighbor is a known device</div>
+        </div>
+    </div>
+    <div class="section" data-box="map-changes">
+        <div class="section-header"><span>Map changes</span></div>
+        <div class="section-body">
+            <table class="striped compact">
+                <thead><tr><th>When</th><th>Nodes</th><th>Links</th></tr></thead>
+                <tbody id="snap-rows"></tbody>
+            </table>
+            <div class="empty" id="snap-empty" style="display:none">no topology snapshots yet</div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 {% block scripts %}
@@ -214,6 +255,82 @@ function loadKpis() {
     fetch('/api/adjacencies').then(function (r) { return r.json(); }).then(function (list) {
         var down = list.filter(function (a) { return a.state !== (a.proto === 'bgp' ? 'Established' : 'FULL'); });
         setKpi('adj', down.length, down.length ? 'bad' : 'good', list.length + ' BGP/OSPF total');
+        renderSessions(down, list.length);
+    });
+}
+
+// BGP/OSPF sessions that are not Established / FULL.
+var sesByKey = {};
+function renderSessions(down, total) {
+    sesByKey = {};
+    var rows = '';
+    down.forEach(function (a, i) {
+        sesByKey[i] = a;
+        var peer = a.peer_device_id ? '<a href="/devices/' + a.peer_device_id + '">' + esc(a.peer_ip) + '</a>' : esc(a.peer_ip);
+        var where = a.proto === 'bgp' ? (a.remote_as ? 'AS ' + esc(a.remote_as) : '') : (a.area ? 'area ' + esc(a.area) : '');
+        rows += '<tr data-ctx="session" data-id="' + ctxMenu.attr(i) + '"><td><a href="/devices/' + a.device_id + '">' + esc(a.hostname) + '</a></td><td>' +
+            esc(a.proto) + '</td><td>' + peer + '</td><td>' + where + '</td><td><span class="pill bad">' + esc(a.state) + '</span></td></tr>';
+    });
+    document.getElementById('ses-rows').innerHTML = rows;
+    document.getElementById('ses-count').textContent = down.length ? '(' + down.length + ' of ' + total + ')' : '';
+    document.getElementById('ses-empty').style.display = down.length ? 'none' : 'block';
+}
+
+// Merge conflicts waiting for the operator (merge and dismiss stay on the Conflicts page).
+function loadConflicts() {
+    fetch('/api/conflicts').then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '';
+        list.forEach(function (c) {
+            rows += '<tr><td>' + esc(timeAgo(c.seen_at)) + '</td><td>' + esc(c.source) + '</td><td>' + esc(c.candidate) + '</td><td>' + esc(c.detail) + '</td></tr>';
+        });
+        document.getElementById('con-rows').innerHTML = rows;
+        document.getElementById('con-count').textContent = list.length ? '(' + list.length + ')' : '';
+        document.getElementById('con-empty').style.display = list.length ? 'none' : 'block';
+    });
+}
+
+// LLDP neighbors advertising a management IP no device owns; "add" makes an inventory-only device (polling off).
+var unkByIp = {};
+function loadUnknown() {
+    fetch('/api/lldp/unknown').then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '';
+        unkByIp = {};
+        list.forEach(function (n) {
+            unkByIp[n.ip] = n;
+            rows += '<tr data-ctx="unknown" data-ip="' + ctxMenu.attr(n.ip) + '"><td>' + esc(n.ip) + '</td><td>' + esc(n.sysname) + '</td><td>' + esc(n.seen_on) +
+                '</td><td><button class="btn-small" data-ip="' + ctxMenu.attr(n.ip) + '" onclick="adoptNeighbor(this.getAttribute(\'data-ip\'))">add</button></td></tr>';
+        });
+        document.getElementById('unk-rows').innerHTML = rows;
+        document.getElementById('unk-count').textContent = list.length ? '(' + list.length + ')' : '';
+        document.getElementById('unk-empty').style.display = list.length ? 'none' : 'block';
+    });
+}
+
+function adoptNeighbor(ip) {
+    var n = unkByIp[ip];
+    if (!n) { return; }
+    fetch('/api/lldp/adopt', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ip: n.ip, hostname: n.sysname || '' })
+    }).then(function () { ctxMenu.toast('Added ' + (n.sysname || n.ip) + ' (polling off)'); pollAll(); });
+}
+
+// The last topology snapshots: written only when the map's shape changed. Each row opens that snapshot on the map.
+function loadSnapshots() {
+    fetch('/api/topology/snapshots?limit=10').then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '';
+        function diff(now, before) {
+            if (before === undefined) { return String(now); }
+            var d = now - before;
+            return now + (d ? ' (' + (d > 0 ? '+' : '') + d + ')' : '');
+        }
+        list.forEach(function (s, i) {
+            var older = list[i + 1];
+            rows += '<tr><td><a href="/topology?snapshot=' + s.id + '">' + esc(new Date(s.taken_at).toLocaleString()) + '</a></td><td>' +
+                diff(s.nodes, older && older.nodes) + '</td><td>' + diff(s.edges, older && older.edges) + '</td></tr>';
+        });
+        document.getElementById('snap-rows').innerHTML = rows;
+        document.getElementById('snap-empty').style.display = list.length ? 'none' : 'block';
     });
 }
 
@@ -272,6 +389,9 @@ function pollAll() {
     loadKpis();
     loadEvents();
     loadActivity();
+    loadConflicts();
+    loadUnknown();
+    loadSnapshots();
 }
 
 // Right-click menus (static/ctxmenu.js). Rows are looked up by id when the menu opens: the tables are rebuilt every 15 s.
@@ -304,6 +424,26 @@ ctxMenu.register('event', function (tr) {
         { label: 'Copy event text', action: function () {
             ctxMenu.copy(new Date(e.at).toLocaleString() + ' ' + e.subject + (e.detail ? ' - ' + e.detail : ''));
         } },
+    ] };
+});
+
+ctxMenu.register('session', function (tr) {
+    var a = sesByKey[tr.getAttribute('data-id')];
+    if (!a) { return null; }
+    return { title: a.hostname + ' → ' + a.peer_ip, items: [
+        { label: 'Open device page', action: function () { go('/devices/' + a.device_id); } },
+        { label: 'Show on topology', action: function () { go('/topology?device=' + a.device_id); } },
+        { label: 'Copy peer IP', action: function () { ctxMenu.copy(a.peer_ip || ''); }, disabled: !a.peer_ip },
+    ] };
+});
+
+ctxMenu.register('unknown', function (tr) {
+    var n = unkByIp[tr.getAttribute('data-ip')];
+    if (!n) { return null; }
+    return { title: n.sysname || n.ip, items: [
+        { label: 'Add to inventory', action: function () { adoptNeighbor(n.ip); } },
+        { label: 'Copy IP', action: function () { ctxMenu.copy(n.ip); } },
+        { label: 'Copy name', action: function () { ctxMenu.copy(n.sysname || ''); }, disabled: !n.sysname },
     ] };
 });
 
