@@ -1517,6 +1517,58 @@ def _():
     return p
 
 
+@check("R37", "BGP flap detection: timer formats, silent baseline, a timer reset or a state change counts, 3 in the window = one flapping event, quiet = one stop event, BGP only")
+def _():
+    p = []
+    m, conn = fresh_db()
+    from app import flap
+    ssh, config = m["ssh"], m["config"]
+    for text, want in (("never", 0), ("00:05:12", 312), ("1d02h", 93600), ("3w2d", 1987200), ("1y12w", 38793600), ("junk", None), (None, None)):
+        need(flap.uptime_seconds(text) == want, "uptime_seconds(%r) must be %r, got %r" % (text, want, flap.uptime_seconds(text)), p)
+    need(config.FLAP_COUNT == 3 and config.FLAP_WINDOW_S == 3600, "the defaults must be 3 changes in 3600 s", p)
+    did = add_device(conn, "192.0.2.10", "h1")
+    peer = "198.51.100.1"
+
+    def poll(state, up, proto="bgp"):
+        row = {"peer_ip": peer, "state": state, "uptime": up, "remote_as": 65001, "local_as": 65000, "prefixes": 1}
+        if proto == "ospf":
+            row = {"peer_ip": peer, "state": state, "local_if": "Gi1"}
+        ssh.apply_result(conn, did, proto, [row])
+        conn.execute("INSERT INTO poll_history (device_id, transport, task, ok, started_at, received_at) VALUES (?, 'ssh', ?, 1, '', '')", (did, proto))
+        conn.commit()
+    kinds = lambda: [r[0] for r in conn.execute("SELECT kind FROM events ORDER BY id")]
+    flapping = lambda: conn.execute("SELECT flapping FROM adjacencies WHERE proto = 'bgp'").fetchone()[0]
+
+    poll("Established", "01:00:00")                      # first poll: baseline, silent
+    need(not kinds() and not conn.execute("SELECT COUNT(*) FROM bgp_changes").fetchone()[0], "the first poll must record nothing: %r" % kinds(), p)
+    poll("Established", "01:05:00")                      # the timer grows: no change
+    need(not conn.execute("SELECT COUNT(*) FROM bgp_changes").fetchone()[0], "a growing timer is not a change", p)
+    poll("Established", "00:01:00")                      # the timer went back: it dropped and came back between two polls
+    need(kinds() == ["bgp_reset"] and not flapping(), "a timer reset must give one bgp_reset and not flapping yet: %r" % kinds(), p)
+    poll("Idle", "00:00:10")                             # change 2
+    need(not flapping(), "two changes must not be flapping", p)
+    poll("Active", "00:00:20")                           # Idle -> Active is a peer that is down, not a flap
+    need(conn.execute("SELECT COUNT(*) FROM bgp_changes").fetchone()[0] == 2, "a change between two states that are not Established must not count", p)
+    poll("Established", "00:00:30")                      # change 3
+    need(flapping() == 1 and kinds().count("bgp_flapping") == 1, "three changes must give flapping=1 and exactly one bgp_flapping: %r" % kinds(), p)
+    poll("Established", "00:05:30")
+    need(kinds().count("bgp_flapping") == 1, "a flapping peer must not emit bgp_flapping again", p)
+    conn.execute("UPDATE bgp_changes SET at = datetime('now', '-2 hours')")
+    conn.commit()
+    poll("Established", "00:10:30")
+    need(flapping() == 0 and kinds().count("bgp_flap_stopped") == 1, "a quiet window must clear flapping with one bgp_flap_stopped: %r" % kinds(), p)
+    # OSPF never records, and a flap check never talks to a device.
+    poll("FULL", None, "ospf")
+    poll("EXSTART", None, "ospf")
+    poll("FULL", None, "ospf")
+    need(conn.execute("SELECT COUNT(*) FROM adjacencies WHERE proto = 'ospf' AND flapping = 1").fetchone()[0] == 0, "OSPF must never be flapping", p)
+    need(conn.execute("SELECT COUNT(*) FROM bgp_changes WHERE peer_ip = ? AND at > datetime('now', '-1 hour')", (peer,)).fetchone()[0] == 0, "OSPF changes must not be recorded", p)
+    src = read("topo/app/flap.py")
+    need("send_command" not in src and "ConnectHandler" not in src, "flap.py must not talk to a device", p)
+    need(len(grep(r"flap\.prune", "topo/app/poller.py")) == 1, "the poller tick must prune bgp_changes", p)
+    return p
+
+
 def run_live():
     """Start the real server (serve.py) from a temp copy on free ports and
     drive it over HTTP and UDP."""

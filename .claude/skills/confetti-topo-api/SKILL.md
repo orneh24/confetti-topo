@@ -74,6 +74,8 @@ also has `positions` {node_id: {x, y}}, including the page-only `group:dev:<id>`
 **Events and metrics:** `GET /api/events` (`device_id`, `kind`, `severity`, `hours`, `limit`; each row also has
 `type`, `change`, `item`, `before`, `after`, derived at read time by `events.describe()`, no schema change); `GET /metrics`
 (Prometheus text, hand-written, labels escaped).
+**BGP flapping:** `/api/adjacencies` rows and `/api/topology` edges carry `flapping` (bool); events `bgp_reset`,
+`bgp_flapping`, `bgp_flap_stopped` (`app/flap.py`, `TOPO_FLAP_COUNT`, `TOPO_FLAP_WINDOW_S`, table `bgp_changes`).
 
 **Health:** `GET /api/time` (chrony), `GET /api/health` (services, poller_running, reach_running, discovery,
 load/memory/disk/uptime) — both never 500; every check degrades to `null`/`"unknown"`.

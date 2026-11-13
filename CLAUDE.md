@@ -95,7 +95,7 @@ were captured from a real PA-VM (PAN-OS 11.1); other versions and Panorama are u
 ### Topology
 
 `app/topology.py` builds `GET /api/topology`, a vis.js-shaped `{nodes, edges}` graph over LLDP neighbors and
-BGP/OSPF adjacencies (`?layer=lldp|bgp|ospf`, or a comma list, limits it; the page's LLDP/BGP/OSPF buttons are independent toggles). A neighbor/peer that does not resolve to a known
+BGP/OSPF adjacencies (`?layer=lldp|bgp|ospf`, or a comma list, limits it; the page's LLDP/BGP/OSPF buttons are independent toggles; a Lines dropdown sets the connector thickness Small / Medium / Large, `confetti-topo-line-width`, per browser, `lineScale()` multiplies the widths by 0.5 / 1 / 2). A neighbor/peer that does not resolve to a known
 device renders as a **ghost node** (`ghost:lldp:<sysname|chassis>`, or `ghost:peer:<ip>` shared by BGP and
 OSPF) rather than being dropped — an edge to nowhere reads as a bug, a distinctly styled ghost reads as
 "something is out there, unidentified". A cable or BGP/OSPF session both ends report is drawn once (a
@@ -105,7 +105,7 @@ Established first — a simple rule, wrong only when the two ends list them in a
 
 The page keeps the map still and readable: physics places only nodes with no saved place, then stops.
 Places are stored in `node_positions` (`PUT`/`DELETE /api/topology/positions`, the same map for every viewer;
-`GET /api/topology` returns `x`/`y` per node and a `positions` dict). Unknown nodes whose links all go to one
+`GET /api/topology` returns `x`/`y` per node and a `positions` dict). An unknown node (or "N unknown" node) whose links all go to one known device is kept close to it and out of the way: `tuckUnknown` in topology.html puts one that is more than `UNKNOWN_NEAR` (400 px) away, or that touches a link or another node, or whose own AS area would meet the area of another AS (an unknown BGP peer has the AS it reports), on a ring around that device at the angle and distance with the most free room, after the layout settles and on load, and saves the new places. Devices and links never move for it: the real map has precedence over unknown nodes (a drag that is near and clear stays). Unknown nodes whose links all go to one
 known device are drawn as one "N unknown" node (`group:dev:<id>`, made up by the page, so only `positions`
 knows it); double-click expands it. An LLDP link shows its port names only on hover or when selected.
 BGP/OSPF labels always show. A BGP session is typed by the AS at its two ends (`adjacencies.local_as` is the router's own
@@ -207,6 +207,17 @@ transaction of the change it describes. `events.is_baseline()` is true until a t
 `poll_history`; while true, nothing is emitted, so adding a device doesn't produce one event per interface/peer.
 Read via `GET /api/events` (`device_id`, `kind`, `severity`, `hours`, `limit`); shown on the dashboard (last 15)
 and each device page. **There is no alerting** (butler has it); events are only displayed.
+
+### BGP flapping
+
+`app/flap.py`: polls come every few minutes, so a BGP peer that drops and returns between two polls looks unchanged. A peer
+change is (a) the state going to or from Established between two polls, or (b) the state Established at both polls but the
+Up/Down timer smaller than before (`flap.uptime_seconds`; the timer only grows, so a smaller value is a reset, event
+`bgp_reset`). Each change is a row in `bgp_changes`. A peer with `TOPO_FLAP_COUNT` (3) changes inside `TOPO_FLAP_WINDOW_S`
+(3600) is flapping: `adjacencies.flapping=1`, one `bgp_flapping` warning when it starts, one `bgp_flap_stopped` info when it
+ends. Idle/Active/Connect cycling of a peer that never comes up is not counted. BGP only (OSPF has no timer to read), nothing
+on a first poll, nothing from a failed task, no device command. The map draws a flapping session thick, yellow and dotted
+(`edges[].flapping`), the device page and the dashboard's Sessions down / flapping widget show a `flapping` pill.
 
 ### Device identity and the merge rule
 
@@ -424,6 +435,10 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
     http:// or https:// with a host, or has a user:password, whitespace or markup characters, is a 400 and changes nothing (all or nothing); an empty
     value clears. `static/confetti-links.js` (the same file as in confetti-butler and confetti-traffic) turns them into small header buttons that
     open in a new tab with `noopener`, re-checks http(s) and never builds HTML from the URL. The server never connects to them. Checked by R36.
+22. **BGP flap detection works only from what a poll already read, counts only changes to or from Established or a timer reset of an
+    Established peer, and is silent on a first poll.** A peer cycling Idle/Active/Connect never flaps. Flapping = `TOPO_FLAP_COUNT`
+    changes inside `TOPO_FLAP_WINDOW_S`; one `bgp_flapping` event at the start and one `bgp_flap_stopped` at the end, never one per
+    poll. BGP only, no device command, `bgp_changes` is age-pruned in the poller tick. Checked by R37.
 
 ## Regression gate
 
@@ -435,7 +450,7 @@ HTTP; `R21`..`R26` cover the ICMP state machine, `/metrics` format, LLDP crawl, 
 container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R27` checks the OpenSSH
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
-the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R36` (constraint 21) the other Confetti projects' URLs; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll. Output is one line per check
+the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti projects' URLs; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

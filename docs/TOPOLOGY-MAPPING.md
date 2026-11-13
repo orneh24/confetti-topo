@@ -242,7 +242,7 @@ against them.
   Clicking a node opens a card (device details from `GET /api/devices/<id>`, its links) with a **Hide this node**
   checkbox: the node and its edges leave the map in the browser only, remembered in `confetti-topo-hidden-nodes`. The **Device icons** toggle in the Show: bar (`confetti-topo-device-icons`, a look setting, not a filter) turns all icons off, and the **Vendor icons** toggle (`confetti-topo-vendor-icons`) turns only the vendor mark and name off. A **Hide icon** checkbox under it draws that node as the old plain
   box/dot instead (`confetti-topo-hidden-icons`).
-  Right-clicking a node opens a menu: **Focus on device** (first item; also a **Focus on this device** button at the end of the node card), open device page, hide this node, copy name, copy IP, show only this node's links
+  Right-clicking a node opens a menu: **Focus on device** (first item; also a **Focus on this device** button at the end of the node card), open device page, hide this node, copy name, copy IP, show only this node's links or "+1" (also the links of its neighbors)
   (a FILTERED marker, not remembered), and poll now (asks first; SSH `show` commands only). Right-clicking empty
   canvas offers Show all and Reset view (and Stop focus while a focus is set).
   **Focus on device** makes that device the master (HQ / datacenter): the map is laid out as a tree from it, one row per
@@ -270,6 +270,8 @@ against them.
    mixing it with ISO-8601 (`T`) makes every same-day row look newer.
 8. Giving the poller devices that are not routers (test hosts), which fail every `show` command.
 9. A rebuilt vis.js network on each refresh (layout jumps).
+10. Missing a BGP flap because the poll is every few minutes: a state compare sees "Established" at both polls. The Up/Down
+    timer going backwards is the sign that the session dropped in between (`app/flap.py`, constraint 22).
 
 ## 11. Test checklist for a new build
 

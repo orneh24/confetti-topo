@@ -80,8 +80,11 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <button class="active" id="icons-btn" aria-pressed="true" onclick="toggleIcons(this)" title="Draw devices as icons with a vendor mark. Off: plain boxes for every device">Device icons</button>
     <button class="active" id="vendor-btn" aria-pressed="true" onclick="toggleVendor(this)" title="Show the vendor mark and name beside each device icon">Vendor icons</button>
     <button class="active" id="as-btn" aria-pressed="true" onclick="toggleAsAreas(this)" title="Draw a box around the routers of each BGP AS (needs BGP shown)">AS areas</button>
+    <label class="hist-label" title="How thick the connector lines are drawn. Only this browser remembers it">Lines
+        <select id="width-sel" onchange="setLineWidth(this.value)"><option value="small">Small</option><option value="medium" selected>Medium</option><option value="large">Large</option></select></label>
     <button id="changed-btn" aria-pressed="false" onclick="toggleChanged(this)" title="Glow around devices that had a change event in the last 24 hours">Changed 24h</button>
     <button id="tidy-btn" onclick="tidyAsAreas()" title="Move the routers so each BGP AS sits in its own block (changes the saved places)">Tidy AS areas</button>
+    <button id="rearrange-btn" onclick="rearrange()" title="Forget every saved place and lay the whole map out again from scratch (the same map for everyone)">Re-arrange</button>
     <label class="hist-label" title="Look at the map as it was when it last changed. Read-only; pick Live to go back">History
         <select id="hist-sel" onchange="pickHistory(this.value)"><option value="">Live</option></select></label>
     <button id="png-btn" onclick="exportPng()" title="Download the map as a PNG picture">Export PNG</button>
@@ -142,6 +145,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
         <div class="row"><span class="ln" style="border-color:var(--purple)"></span>eBGP session (different AS): both AS numbers and state</div>
         <div class="row"><span class="sw" style="background:var(--bg-muted);border:1px dashed var(--text-dim)"></span>AS area: the routers of one BGP AS</div>
         <div class="row"><span class="ln" style="border-color:var(--blue)"></span>OSPF adjacency and its state</div>
+        <div class="row"><span class="ln" style="border-color:var(--yellow);border-top-style:dotted"></span>BGP session that is flapping (went down and up again several times in the last hour)</div>
         <div class="row"><span class="ln" style="border-color:var(--red);border-top-style:dashed"></span>BGP/OSPF session that is not Established / FULL, or a cable whose port is down</div>
         <div class="hint">Double-click a router to open its page. Drag to move, scroll to zoom.</div>
     </details>
@@ -298,6 +302,18 @@ function updateLldpLabels() {
     }));
 }
 
+// Connector line thickness: Small, Medium (the default look) or Large. A look setting for this browser, like the icons.
+var LINE_KEY = 'confetti-topo-line-width';
+var LINE_SCALE = { small: 0.5, medium: 1, large: 2 };
+function lineScale() {
+    return LINE_SCALE[document.getElementById('width-sel').value] || 1;
+}
+
+function setLineWidth(value) {
+    try { localStorage.setItem(LINE_KEY, value); } catch (e) { /* not remembered */ }
+    load();
+}
+
 function toVisEdges(edges) {
     var LAYER_COLOR = { lldp: themeColor('--cyan'), bgp: themeColor('--yellow'), ospf: themeColor('--blue') };
     return edges.map(function (e) {
@@ -307,18 +323,19 @@ function toVisEdges(edges) {
             id: edgeKey(e),
             from: e.from,
             to: e.to,
-            label: edgeLabel(e),
+            label: edgeLabel(e) + (e.flapping && e.layer === 'bgp' ? ' FLAPPING' : ''),
             // A BGP/OSPF session that is not Established/FULL is drawn red and dashed.
+            // A BGP session that keeps going down and up (flapping) is thick, yellow and dotted.
             color: {
-                color: e.up === false ? themeColor('--red') : (ebgp ? themeColor('--purple') : (LAYER_COLOR[e.layer] || themeColor('--gray'))),
+                color: e.up === false ? themeColor('--red') : (e.flapping ? themeColor('--yellow') : (ebgp ? themeColor('--purple') : (LAYER_COLOR[e.layer] || themeColor('--gray')))),
                 highlight: themeColor('--text'),   // the selected link
             },
             // A link to an unidentified neighbor is short, so the ghost sits next to the router that sees it.
             // A BGP/OSPF label is about 150px wide and always shown: that link is long enough for the label to sit
             // between the router and the ghost. LLDP labels are hidden until hover, and a group's label is short.
             length: e.to.indexOf('group:') === 0 ? 170 : (e.to.indexOf('ghost:') === 0 ? (e.layer === 'lldp' ? 110 : 230) : undefined),
-            dashes: e.up === false,
-            width: e.up === false ? 2 : (ebgp ? 3 : 1),
+            dashes: e.up === false ? true : (e.flapping ? [2, 5] : false),
+            width: (e.up === false ? 2 : (e.flapping || ebgp ? 3 : 1)) * lineScale(),
             // Lines between the same two devices would sit on top of each other: bend BGP one way, OSPF the other.
             smooth: { type: 'curvedCW', roundness: { lldp: 0, bgp: 0.25, ospf: -0.25 }[e.layer] || 0 },
             font: { color: themeColor('--text-dim'), size: 10, strokeWidth: 0, background: themeColor('--bg') },
@@ -353,11 +370,116 @@ function startSettling(pinIds) {
     network.once('stabilizationIterationsDone', settled);
 }
 
+// An unknown node (or "N unknown" group) whose links all go to ONE known device belongs next to that device, and
+// the real map comes first: it must not sit on a link or on another node. One that is more than UNKNOWN_NEAR away, or
+// that touches a link or a node, or whose AS area would meet the area of another AS, is put on a ring around its device at the angle and distance with the most free
+// room (a slot facing away from the middle of the map wins a tie). Devices, links and other nodes never move for it.
+// One that is near and clear stays where it is (also where the viewer dragged it). The places it moved are saved.
+var UNKNOWN_NEAR = 400, UNKNOWN_RING = 130, UNKNOWN_CLEAR = 12;
+
+// Points along an edge. A BGP/OSPF link is curved to one side or the other, so both sides are sampled.
+function edgeSamples(e, pos) {
+    var a = pos[e.from], b = pos[e.to], out = [];
+    if (!a || !b) { return out; }
+    var r = Math.abs((e.smooth && e.smooth.roundness) || 0), dx = b.x - a.x, dy = b.y - a.y;
+    for (var i = 1; i < 14; i++) {
+        var t = i / 14;
+        out.push({ x: a.x + dx * t, y: a.y + dy * t });
+        if (r) {
+            [1, -1].forEach(function (side) {
+                var vx = (a.x + b.x) / 2 + side * r * dy, vy = (a.y + b.y) / 2 - side * r * dx;
+                out.push({ x: (1 - t) * (1 - t) * a.x + 2 * (1 - t) * t * vx + t * t * b.x,
+                           y: (1 - t) * (1 - t) * a.y + 2 * (1 - t) * t * vy + t * t * b.y });
+            });
+        }
+    }
+    return out;
+}
+
+function tuckUnknown() {
+    if (treeOn || !network) { return; }
+    var pos = network.getPositions();
+    var edges = edgeSet.get();
+    var owner = {};   // unknown node id -> the one device it hangs off; '' when it touches anything else too
+    edges.forEach(function (e) {
+        [[e.from, e.to], [e.to, e.from]].forEach(function (p) {
+            if (p[0].indexOf('ghost:') !== 0 && p[0].indexOf('group:') !== 0) { return; }
+            owner[p[0]] = (owner[p[0]] === undefined || owner[p[0]] === p[1]) && p[1].indexOf('dev:') === 0 ? p[1] : '';
+        });
+    });
+    var cx = 0, cy = 0, n = 0;
+    Object.keys(pos).forEach(function (id) { if (id.indexOf('dev:') === 0) { cx += pos[id].x; cy += pos[id].y; n++; } });
+    if (!n) { return; }
+    cx /= n; cy /= n;
+
+    // True when unknown node id, put at (x, y), would make its AS area meet the area of another AS (an unknown BGP peer
+    // has the AS it reports, so it has an area of its own; it must not push into the area of the router it hangs off).
+    function asClash(id, o, x, y) {
+        var mine = nodeAs[id], ownerAs = nodeAs[o], others = asBoxes(pos, id), rect = asRect({ x: x, y: y });
+        if (mine !== undefined && others[mine]) { rect = unionRect(others[mine], rect); }   // its own area grows to hold it
+        return Object.keys(others).some(function (asn) {
+            if (String(asn) === String(mine) || (mine === undefined && String(asn) === String(ownerAs))) { return false; }
+            var b = others[asn], gap = 2 * AS_PAD + 10;   // both areas are drawn bigger than their nodes
+            return rect.left < b.right + gap && rect.right > b.left - gap && rect.top < b.bottom + gap && rect.bottom > b.top - gap;
+        });
+    }
+
+    // Free room (px) at (x, y) for unknown node id hanging off device o: the distance to the nearest other node or link,
+    // counting the short link back to its own device. Links through o itself are not counted close to o (they all start there).
+    function room(id, o, x, y) {
+        var best = 1e9;
+        function near(px, py, radius) { best = Math.min(best, Math.hypot(px - x, py - y) - radius); }
+        Object.keys(pos).forEach(function (k) {
+            if (k !== id && k !== o) { near(pos[k].x, pos[k].y, k.indexOf('dev:') === 0 ? 45 : 30); }
+        });
+        edges.forEach(function (e) {
+            if (e.from === id || e.to === id) { return; }
+            var through = e.from === o || e.to === o;
+            edgeSamples(e, pos).forEach(function (s) {
+                if (through && Math.hypot(s.x - pos[o].x, s.y - pos[o].y) < 60) { return; }
+                near(s.x, s.y, 14);
+            });
+        });
+        // the link from the device to the unknown node must not run over another node either
+        [0.5, 0.75].forEach(function (t) {
+            var lx = pos[o].x + (x - pos[o].x) * t, ly = pos[o].y + (y - pos[o].y) * t;
+            Object.keys(pos).forEach(function (k) {
+                if (k !== id && k !== o) { best = Math.min(best, Math.hypot(pos[k].x - lx, pos[k].y - ly) - (k.indexOf('dev:') === 0 ? 45 : 30)); }
+            });
+        });
+        return best;
+    }
+
+    var moved = [], byOwner = {};
+    Object.keys(owner).forEach(function (id) { if (owner[id] && pos[owner[id]] && pos[id]) { (byOwner[owner[id]] = byOwner[owner[id]] || []).push(id); } });
+    Object.keys(byOwner).forEach(function (o) {
+        var p = pos[o], base = Math.atan2(p.y - cy, p.x - cx);   // away from the middle of the map
+        byOwner[o].forEach(function (id) {
+            var far = Math.hypot(pos[id].x - p.x, pos[id].y - p.y) > UNKNOWN_NEAR;
+            if (!far && room(id, o, pos[id].x, pos[id].y) >= UNKNOWN_CLEAR && !asClash(id, o, pos[id].x, pos[id].y)) { return; }
+            var best = null;
+            [UNKNOWN_RING, UNKNOWN_RING + 50, UNKNOWN_RING + 100, UNKNOWN_RING + 160, UNKNOWN_RING + 230].forEach(function (r) {
+                for (var k = 0; k < 24; k++) {
+                    var a = base + k * Math.PI / 12, x = p.x + r * Math.cos(a), y = p.y + r * Math.sin(a);
+                    var turn = Math.abs(Math.atan2(Math.sin(a - base), Math.cos(a - base)));
+                    var score = Math.min(room(id, o, x, y), 60) - (r - UNKNOWN_RING) * 0.08 - turn - (asClash(id, o, x, y) ? 1000 : 0);
+                    if (!best || score > best.score) { best = { score: score, x: x, y: y }; }
+                }
+            });
+            pos[id] = { x: best.x, y: best.y };   // the next unknown node of this device keeps clear of this one
+            network.moveNode(id, best.x, best.y);
+            moved.push(id);
+        });
+    });
+    if (moved.length) { savePositions(moved); }
+}
+
 function settled() {
     network.setOptions({ physics: { enabled: false } });
     nodeSet.update(nodeSet.getIds().map(function (id) { return { id: id, fixed: false }; }));
     // The default first layout: a map with no saved places at all gets one block per BGP AS (saved places are never moved).
     if (tidyOnSettle) { tidyOnSettle = false; tidyAsAreas(); }
+    tuckUnknown();
     savePositions(nodeSet.getIds());
     fitMap();
     centerPending();
@@ -427,6 +549,7 @@ function centerPending() {
 // "Re-arrange": forget the saved places and lay the map out again from scratch.
 function rearrange() {
     if (treeOn) { toast('stop the focus first: this would change the saved places'); return; }
+    if (!confirm('Forget every saved place and lay the map out again? Everyone who opens the map sees the new layout.')) { return; }
     fetch('/api/topology/positions', { method: 'DELETE' }).then(function () {
         if (network) { network.destroy(); network = null; }
         load();
@@ -439,6 +562,7 @@ var tidyOnSettle = false;   // set by load() when no node has a saved place
 var selectedNode = null;
 var selectedLink = null;
 var focusNode = null;     // right-click "show only this node's links" (not remembered)
+var focusHops = 1;        // 1: only the links of focusNode. 2 ("+1"): also the links of its neighbors
 
 // Right-click "Focus on device": one device is the master (HQ / datacenter) and the map is laid out as a tree from it,
 // one row per hop, over the links that are shown. A view setting of this browser: remembered in localStorage, and the
@@ -504,6 +628,7 @@ function updateMasterBar() {
     var bar = document.getElementById('master-bar');
     bar.style.display = masterNode ? '' : 'none';
     document.getElementById('tidy-btn').disabled = treeOn;
+    document.getElementById('rearrange-btn').disabled = treeOn;
     if (!masterNode) { return; }
     var n = rawData && rawData.nodes.filter(function (x) { return x.id === masterNode; })[0];
     var name = n ? n.label : masterNode;
@@ -663,7 +788,7 @@ function load() {
         };
         network = new vis.Network(container, { nodes: nodeSet, edges: edgeSet }, options);
         if (anyFree) { network.once('stabilizationIterationsDone', settled); }
-        else { setTimeout(function () { fitMap(); centerPending(); }, 100); }
+        else { setTimeout(function () { tuckUnknown(); fitMap(); centerPending(); }, 100); }
         network.on('dragEnd', function (params) {
             if (params.nodes.length) { savePositions(params.nodes); }
         });
@@ -742,7 +867,7 @@ function updateFilterMarker() {
     }
     if (focusNode) {
         var f = rawData && rawData.nodes.filter(function (n) { return n.id === focusNode; })[0];
-        text = (text ? text + '; ' : '') + 'only ' + (f ? f.label : 'one node') + "'s links";
+        text = (text ? text + '; ' : '') + 'only ' + (f ? f.label : 'one node') + "'s links" + (focusHops === 2 ? ' +1' : '');
     }
     document.getElementById('filter-marker').style.display = text ? 'flex' : 'none';
     document.getElementById('filter-text').textContent = 'FILTERED: ' + text;
@@ -774,7 +899,15 @@ function hideFiltered(data) {
     });
     var edges = data.edges.filter(function (e) { return keep[e.from] && keep[e.to]; });
     if (focusNode && keep[focusNode]) {
-        edges = edges.filter(function (e) { return e.from === focusNode || e.to === focusNode; });
+        var touching = { };   // the nodes whose links are shown: the focus node, and with +1 its neighbors too
+        touching[focusNode] = true;
+        if (focusHops === 2) {
+            edges.forEach(function (e) {
+                if (e.from === focusNode) { touching[e.to] = true; }
+                if (e.to === focusNode) { touching[e.from] = true; }
+            });
+        }
+        edges = edges.filter(function (e) { return touching[e.from] || touching[e.to]; });
         var near = {};
         near[focusNode] = true;
         edges.forEach(function (e) { near[e.from] = true; near[e.to] = true; });
@@ -932,20 +1065,28 @@ function tidyAsAreas() {
     network.redraw();
 }
 
+// The AS area of each AS: AS number -> bounding box of its nodes, from the places in pos (node id -> {x, y}); skip is a node
+// id to leave out. From a node's place and a fixed size, not getBoundingBox: that one grows with the selection outline and the
+// box would jump when a node is clicked. Room for the icon, the name under it and the vendor mark beside it.
+var AS_PAD = 10;   // the drawn box is this much bigger than the nodes in it
+function asRect(p) { return { left: p.x - 55, right: p.x + 55, top: p.y - 32, bottom: p.y + 50 }; }
+function unionRect(a, b) {
+    return { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top), right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) };
+}
+function asBoxes(pos, skip) {
+    var boxes = {};
+    Object.keys(nodeAs).forEach(function (id) {
+        if (id === skip || !pos[id]) { return; }
+        var b = asRect(pos[id]);
+        boxes[nodeAs[id]] = boxes[nodeAs[id]] ? unionRect(boxes[nodeAs[id]], b) : b;
+    });
+    return boxes;
+}
+
 function drawAsAreas(ctx) {
     if (!asAreasOn() || !nodeSet) { return; }
-    var boxes = {};   // AS number -> bounding box of its nodes
-    Object.keys(nodeAs).forEach(function (id) {
-        if (!nodeSet.get(id)) { return; }
-        // From the node's place and a fixed size, not getBoundingBox: that one grows with the selection outline and the
-        // box would jump when a node is clicked. Room for the icon, the name under it and the vendor mark beside it.
-        var pos = network.getPositions([id])[id];
-        var b = { left: pos.x - 55, right: pos.x + 55, top: pos.y - 32, bottom: pos.y + 50 };
-        var a = boxes[nodeAs[id]];
-        boxes[nodeAs[id]] = a ? { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top),
-                                  right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) } : b;
-    });
-    var pad = 10;
+    var boxes = asBoxes(network.getPositions());
+    var pad = AS_PAD;
     ctx.save();
     // Biggest first: a smaller box that overlaps a bigger one is drawn on top of it, so its label stays readable.
     var area = function (b) { return (b.right - b.left) * (b.bottom - b.top); };
@@ -1001,6 +1142,7 @@ function showAllLayers() {
     try { localStorage.setItem(UNKNOWN_KEY, '0'); } catch (e) { /* not remembered */ }
     hiddenNodes = {};
     focusNode = null;
+    focusHops = 1;
     saveHiddenNodes();
     document.getElementById('np-hide').checked = false;
     updateFilterMarker();
@@ -1310,6 +1452,7 @@ function showLinkPanel(edgeId) {
     info.textContent = '';
     addRow(info, 'status', edge.layer === 'lldp' ? (edge.up === false ? 'cable seen, a port is DOWN' : 'cable seen') : (edge.up === false ? 'DOWN' : 'up'));
     if (edge.bgp_type) { addRow(info, 'type', edge.bgp_type === 'ibgp' ? 'iBGP (same AS at both ends)' : 'eBGP (between different ASes)'); }
+    if (edge.flapping) { addRow(info, 'flapping', 'yes: the session went down and up again several times in the last hour'); }
     addRow(info, 'label', edge.label);
     var reports = document.getElementById('lp-reports');
     reports.textContent = '';
@@ -1404,8 +1547,15 @@ function openContextMenu(id, x, y) {
             } },
             { label: 'Copy name', action: function () { ctxMenu.copy(node.label); } },
             { label: 'Copy IP', action: function () { ctxMenu.copy(ip); }, disabled: !ip },
-            { label: focusNode === id ? 'Show all links' : "Show only this node's links", action: function () {
-                focusNode = focusNode === id ? null : id;
+            { label: focusNode === id && focusHops === 1 ? 'Show all links' : "Show only this node's links", action: function () {
+                focusNode = focusNode === id && focusHops === 1 ? null : id;
+                focusHops = 1;
+                updateFilterMarker();
+                load();
+            } },
+            { label: focusNode === id && focusHops === 2 ? 'Show all links' : "Show only this node's links +1", action: function () {
+                focusNode = focusNode === id && focusHops === 2 ? null : id;
+                focusHops = 2;
                 updateFilterMarker();
                 load();
             } },
@@ -1438,6 +1588,7 @@ restoreHiddenIcons();
 restoreMaster();
 fillLegendIcons();
 restoreLayers();
+try { var savedWidth = localStorage.getItem(LINE_KEY); if (LINE_SCALE[savedWidth]) { document.getElementById('width-sel').value = savedWidth; } } catch (e) { /* medium */ }
 try { setLayerButton(document.getElementById('vendor-btn'), localStorage.getItem(VENDOR_ON_KEY) !== '0'); } catch (e) { /* shown */ }
 try { setLayerButton(document.getElementById('as-btn'), localStorage.getItem(AS_AREAS_KEY) !== '0'); } catch (e) { /* shown */ }
 try { setLayerButton(document.getElementById('icons-btn'), localStorage.getItem(ICONS_ON_KEY) !== '0'); } catch (e) { /* shown */ }

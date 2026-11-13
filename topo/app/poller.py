@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from . import config
 from . import db
 from . import events
+from . import flap
 from . import history
 from . import identity
 from . import platforms
@@ -102,6 +103,7 @@ def _tick(executor):
             ("-{:d}".format(config.EVENT_RETENTION_DAYS),),
         )
         try:
+            flap.prune(conn)
             history.maybe_snapshot(conn)
             history.prune(conn)
         except Exception:

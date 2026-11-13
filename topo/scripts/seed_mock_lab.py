@@ -82,7 +82,12 @@ EVENTS = [
     (24, 0, "lldp_neighbor_added", "info", "lab-rtr-a GigabitEthernet3: neighbor lab-rtr-c", "remote port GigabitEthernet3"),
     (47, 2, "device_unreachable", "warning", "lab-rtr-c: polling failed", ""),
     (95, 1, "ospf_state", "warning", "lab-rtr-b OSPF peer 10.255.0.1: EXSTART", "FULL -> EXSTART"),
+    (6, 1, "bgp_reset", "warning", "lab-rtr-b BGP peer 198.51.100.7: session reset", "07:10:02 -> 00:40:12"),
+    (4, 1, "bgp_flapping", "warning", "lab-rtr-b BGP peer 198.51.100.7: flapping", "3 changes in 60 min"),
 ]
+
+# The BGP peer that flaps (device index, peer_ip) and when its changes were seen (minutes ago), see flap.py.
+FLAPPING = (1, "198.51.100.7", [(40, "reset"), (22, "state"), (9, "state")])
 
 
 def ts(minutes_ago=0):
@@ -126,6 +131,12 @@ def main():
             "INSERT INTO adjacencies (device_id, proto, peer_ip, remote_as, local_as, area, state, uptime, "
             "prefixes, local_if, last_seen) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
             (ids[idx], proto, peer, asn, LAB_AS if proto == "bgp" else None, area, state, up, pfx, lif, now))
+
+    fidx, fpeer, fchanges = FLAPPING
+    conn.execute("UPDATE adjacencies SET flapping = 1 WHERE device_id = ? AND peer_ip = ?", (ids[fidx], fpeer))
+    for ago, kind in fchanges:
+        conn.execute("INSERT INTO bgp_changes (device_id, peer_ip, at, kind) VALUES (?,?,?,?)",
+                     (ids[fidx], fpeer, ts(ago), kind))
 
     for ago, idx, kind, sev, subject, detail in EVENTS:
         conn.execute(

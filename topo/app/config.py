@@ -31,6 +31,9 @@ EVENT_RETENTION_DAYS = int(os.environ.get("TOPO_EVENT_RETENTION_DAYS", "30"))
 # Topology history (history.py): look for a changed map this often (0 = never keep snapshots); keep them this many days.
 SNAPSHOT_INTERVAL_S = int(os.environ.get("TOPO_SNAPSHOT_INTERVAL_S", "300"))
 SNAPSHOT_RETENTION_DAYS = int(os.environ.get("TOPO_SNAPSHOT_RETENTION_DAYS", "14"))
+# BGP flap detection (flap.py): a peer with this many changes inside this many seconds is flapping.
+FLAP_COUNT = int(os.environ.get("TOPO_FLAP_COUNT", "3"))
+FLAP_WINDOW_S = int(os.environ.get("TOPO_FLAP_WINDOW_S", "3600"))
 
 # ---------------------------------------------------------------------------
 # ICMP reachability checker (reach.py)

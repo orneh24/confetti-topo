@@ -517,7 +517,8 @@ function loadAdjacencies() {
             var peer = esc(a.peer_ip);
             if (a.peer_device_id) { peer = '<a href="/devices/' + a.peer_device_id + '">' + peer + '</a>'; }
             rows += '<tr><td>' + esc(a.proto) + '</td><td>' + peer +
-                '</td><td><span class="pill ' + (up ? 'ok' : 'bad') + '">' + esc(a.state) + '</span></td>' +
+                '</td><td><span class="pill ' + (up ? 'ok' : 'bad') + '">' + esc(a.state) + '</span>' +
+                (a.flapping ? ' <span class="pill running" title="went down and up again several times in the last hour">flapping</span>' : '') + '</td>' +
                 '<td>' + esc(a.remote_as === null ? '' : a.remote_as) + '</td>' +
                 '<td>' + esc(a.prefixes === null ? '' : a.prefixes) + '</td>' +
                 '<td>' + esc(a.uptime || '') + '</td><td>' + esc(a.local_if || '') + '</td></tr>';

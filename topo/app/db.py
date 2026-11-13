@@ -181,6 +181,16 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_adj_state ON adjacencies(state);
 
+        -- One row per change of a BGP peer seen by a poll (flap.py); aged out, only the flap window matters.
+        CREATE TABLE IF NOT EXISTS bgp_changes (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+            peer_ip   TEXT NOT NULL,
+            at        TEXT NOT NULL,
+            kind      TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_bgp_changes ON bgp_changes(device_id, peer_ip, at);
+
         -- Append-only, age-pruned like confetti-traffic's results table. One row
         -- per poll task (version/interfaces/lldp/bgp/ospf), not per device —
         -- a device's LLDP task failing must not hide that its interfaces task
@@ -302,6 +312,8 @@ def init_db():
         db.execute("ALTER TABLE lldp_neighbors ADD COLUMN remote_port_descr TEXT")
     if "local_as" not in [r[1] for r in db.execute("PRAGMA table_info(adjacencies)")]:
         db.execute("ALTER TABLE adjacencies ADD COLUMN local_as INTEGER")
+    if "flapping" not in [r[1] for r in db.execute("PRAGMA table_info(adjacencies)")]:
+        db.execute("ALTER TABLE adjacencies ADD COLUMN flapping INTEGER NOT NULL DEFAULT 0")
     if "mac" not in [r[1] for r in db.execute("PRAGMA table_info(interfaces)")]:
         db.execute("ALTER TABLE interfaces ADD COLUMN mac TEXT")
     if "mgmt_mac" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:

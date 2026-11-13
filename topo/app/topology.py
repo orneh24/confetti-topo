@@ -190,7 +190,7 @@ def _session_report(r, names):
     """What one router says about a BGP/OSPF session (remote_as is the peer's AS)."""
     return {"reported_by": names.get(r["device_id"]), "peer_ip": r["peer_ip"], "state": r["state"],
             "remote_as": r["remote_as"], "local_as": r["local_as"], "uptime": r["uptime"], "prefixes": r["prefixes"],
-            "area": r["area"], "local_if": r["local_if"]}
+            "area": r["area"], "local_if": r["local_if"], "flapping": bool(r["flapping"])}
 
 
 def _is_up(row):
@@ -286,7 +286,7 @@ def build(conn, layer=None):
     protos = [p for p in ("bgp", "ospf") if p in wanted]
     if protos:
         rows = conn.execute(
-            "SELECT device_id, proto, peer_ip, peer_device_id, remote_as, local_as, state, uptime, prefixes, area, local_if FROM adjacencies "
+            "SELECT device_id, proto, peer_ip, peer_device_id, remote_as, local_as, state, uptime, prefixes, area, local_if, flapping FROM adjacencies "
             "WHERE proto IN ({})".format(",".join("?" * len(protos))),
             protos,
         ).fetchall()
@@ -304,7 +304,7 @@ def build(conn, layer=None):
                 edges.append({
                     "from": "dev:{}".format(r["device_id"]), "to": gid,
                     "layer": r["proto"], "label": _session_label(r["proto"], ends, r["state"], kind),
-                    "bgp_type": kind, "up": _is_up(r),
+                    "bgp_type": kind, "up": _is_up(r), "flapping": bool(r["flapping"]),
                     "details": [_session_report(r, names)],
                 })
             else:
@@ -331,7 +331,7 @@ def build(conn, layer=None):
                     "from": "dev:{}".format(lo), "to": "dev:{}".format(hi), "layer": proto,
                     "label": _session_label(proto, as_pair, (bad or ends)[0]["state"], kind),
                     "bgp_type": kind,
-                    "up": not bad,
+                    "up": not bad, "flapping": any(x["flapping"] for x in ends),
                     "details": [_session_report(x, names) for x in ends],
                 })
 
@@ -393,7 +393,7 @@ def adjacencies(conn, device_id=None):
     """BGP/OSPF rows for the API, with the effective peer_device_id."""
     owners = interface_owners(conn)
     sql = """SELECT a.device_id, d.hostname, a.proto, a.peer_ip, a.peer_device_id, a.remote_as, a.local_as,
-                    a.area, a.state, a.uptime, a.prefixes, a.local_if, a.last_seen
+                    a.area, a.state, a.uptime, a.prefixes, a.local_if, a.last_seen, a.flapping
              FROM adjacencies a JOIN devices d ON d.id = a.device_id"""
     params = []
     if device_id:
@@ -405,6 +405,7 @@ def adjacencies(conn, device_id=None):
         d = dict(r)
         d["peer_device_id"] = resolve(owners, d["device_id"], d["peer_device_id"], d["peer_ip"])
         d["last_seen"] = db.iso(d["last_seen"])
+        d["flapping"] = bool(d["flapping"])
         out.append(d)
     return out
 

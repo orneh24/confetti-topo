@@ -15,6 +15,7 @@ from netmiko.exceptions import NetmikoAuthenticationException, NetmikoTimeoutExc
 from .. import config
 from .. import db
 from .. import events
+from .. import flap
 from .. import identity
 from .. import lldp_crawl
 from .. import platforms
@@ -293,23 +294,40 @@ def _apply_lldp(conn, device_id, parsed, now):
 
 
 def _apply_adjacencies(conn, device_id, proto, parsed, now):
+    flapping = {}   # BGP peer_ip -> 1 when it is flapping now (flap.py); stays empty on a baseline poll and for OSPF
     if not events.is_baseline(conn, device_id, proto):
-        old = {r["peer_ip"]: r["state"] for r in conn.execute(
-            "SELECT peer_ip, state FROM adjacencies WHERE device_id = ? AND proto = ?",
+        old_rows = {r["peer_ip"]: r for r in conn.execute(
+            "SELECT peer_ip, state, uptime, flapping FROM adjacencies WHERE device_id = ? AND proto = ?",
             (device_id, proto))}
+        old = {ip: r["state"] for ip, r in old_rows.items()}
         host = _hostname(conn, device_id)
         up = "Established" if proto == "bgp" else "FULL"
         seen = set()
         for row in parsed:
             seen.add(row["peer_ip"])
             before = old.get(row["peer_ip"])
+            subject = "{} {} peer {}: ".format(host, proto.upper(), row["peer_ip"])
             if before is None:
-                events.emit(conn, device_id, proto + "_peer_added", "info",
-                            "{} {} peer {}: {}".format(host, proto.upper(), row["peer_ip"], row["state"]))
+                events.emit(conn, device_id, proto + "_peer_added", "info", subject + row["state"])
             elif before != row["state"]:
                 events.emit(conn, device_id, proto + "_state", "info" if row["state"] == up else "warning",
-                            "{} {} peer {}: {}".format(host, proto.upper(), row["peer_ip"], row["state"]),
-                            "{} -> {}".format(before, row["state"]))
+                            subject + row["state"], "{} -> {}".format(before, row["state"]))
+            if proto == "bgp" and before is not None:
+                prev = old_rows[row["peer_ip"]]
+                kind = flap.changed(prev["state"], prev["uptime"], row["state"], row.get("uptime"))
+                if kind:
+                    flap.record(conn, device_id, row["peer_ip"], kind)
+                if kind == "reset":
+                    events.emit(conn, device_id, "bgp_reset", "warning", subject + "session reset",
+                                "{} -> {}".format(prev["uptime"], row.get("uptime")))
+                n = flap.count(conn, device_id, row["peer_ip"])
+                now_flapping = n >= config.FLAP_COUNT
+                flapping[row["peer_ip"]] = 1 if now_flapping else 0
+                if now_flapping and not prev["flapping"]:
+                    events.emit(conn, device_id, "bgp_flapping", "warning", subject + "flapping",
+                                "{} changes in {} min".format(n, config.FLAP_WINDOW_S // 60))
+                elif prev["flapping"] and not now_flapping:
+                    events.emit(conn, device_id, "bgp_flap_stopped", "info", subject + "flap stopped")
         for peer in old.keys() - seen:
             events.emit(conn, device_id, proto + "_peer_removed", "warning",
                         "{} {} peer {} removed".format(host, proto.upper(), peer))
@@ -324,16 +342,16 @@ def _apply_adjacencies(conn, device_id, proto, parsed, now):
         ).fetchone()
         conn.execute(
             """INSERT INTO adjacencies (device_id, proto, peer_ip, peer_device_id, remote_as, local_as,
-                   state, uptime, prefixes, local_if, last_seen)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   state, uptime, prefixes, local_if, last_seen, flapping)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(device_id, proto, peer_ip) DO UPDATE SET
                    peer_device_id=excluded.peer_device_id, remote_as=excluded.remote_as,
                    local_as=excluded.local_as,
                    state=excluded.state, uptime=excluded.uptime, prefixes=excluded.prefixes,
-                   local_if=excluded.local_if, last_seen=excluded.last_seen""",
+                   local_if=excluded.local_if, last_seen=excluded.last_seen, flapping=excluded.flapping""",
             (device_id, proto, row["peer_ip"], peer["device_id"] if peer else None,
              row.get("remote_as"), row.get("local_as"), row["state"], row.get("uptime"), row.get("prefixes"),
-             row.get("local_if"), now),
+             row.get("local_if"), now, flapping.get(row["peer_ip"], 0)),
         )
     # Same as LLDP: a peer no longer listed was removed from the config.
     # A peer that is merely down is still listed (Active/Idle) and stays.

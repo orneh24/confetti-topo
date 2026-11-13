@@ -73,13 +73,13 @@ table.compact td.wrap { white-space: normal; overflow-wrap: anywhere; }
         </div>
     </div>
     <div class="section wide" data-box="sessions">
-        <div class="section-header"><span>Sessions down <span id="ses-count"></span></span></div>
+        <div class="section-header"><span>Sessions down / flapping <span id="ses-count"></span></span></div>
         <div class="section-body">
             <table class="striped compact">
                 <thead><tr><th>Device</th><th>Proto</th><th>Peer</th><th>AS / area</th><th>State</th></tr></thead>
                 <tbody id="ses-rows"></tbody>
             </table>
-            <div class="empty" id="ses-empty" style="display:none">all BGP/OSPF sessions are up</div>
+            <div class="empty" id="ses-empty" style="display:none">all BGP/OSPF sessions are up and steady</div>
         </div>
     </div>
     <div class="section wide" data-box="conflicts">
@@ -255,8 +255,10 @@ function loadKpis() {
     });
     fetch('/api/adjacencies').then(function (r) { return r.json(); }).then(function (list) {
         var down = list.filter(function (a) { return a.state !== (a.proto === 'bgp' ? 'Established' : 'FULL'); });
-        setKpi('adj', down.length, down.length ? 'bad' : 'good', list.length + ' BGP/OSPF total');
-        renderSessions(down, list.length);
+        var flapping = list.filter(function (a) { return a.flapping; });
+        setKpi('adj', down.length, down.length ? 'bad' : 'good', list.length + ' BGP/OSPF total' + (flapping.length ? ', ' + flapping.length + ' flapping' : ''));
+        // Sessions that are down first, then the ones that are up but flapping.
+        renderSessions(down.concat(flapping.filter(function (a) { return down.indexOf(a) < 0; })), list.length);
     });
 }
 
@@ -270,7 +272,8 @@ function renderSessions(down, total) {
         var peer = a.peer_device_id ? '<a href="/devices/' + a.peer_device_id + '">' + esc(a.peer_ip) + '</a>' : esc(a.peer_ip);
         var where = a.proto === 'bgp' ? (a.remote_as ? 'AS ' + esc(a.remote_as) : '') : (a.area ? 'area ' + esc(a.area) : '');
         rows += '<tr data-ctx="session" data-id="' + ctxMenu.attr(i) + '"><td><a href="/devices/' + a.device_id + '">' + esc(a.hostname) + '</a></td><td>' +
-            esc(a.proto) + '</td><td>' + peer + '</td><td>' + where + '</td><td><span class="pill bad">' + esc(a.state) + '</span></td></tr>';
+            esc(a.proto) + '</td><td>' + peer + '</td><td>' + where + '</td><td><span class="pill ' + (a.flapping && a.state === 'Established' ? 'running' : 'bad') + '">' + esc(a.state) + '</span>' +
+            (a.flapping ? ' <span class="pill running">flapping</span>' : '') + '</td></tr>';
     });
     document.getElementById('ses-rows').innerHTML = rows;
     document.getElementById('ses-count').textContent = down.length ? '(' + down.length + ' of ' + total + ')' : '';
