@@ -75,6 +75,8 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <button class="active" data-layer="lldp" data-name="LLDP" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide the cables the devices report over LLDP">LLDP</button>
     <button class="active" data-layer="bgp" data-name="BGP" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide BGP sessions">BGP</button>
     <button class="active" data-layer="ospf" data-name="OSPF" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide OSPF adjacencies">OSPF</button>
+    <button class="active" data-layer="default" data-name="Default" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide default routes: a line from each device to the device its 0.0.0.0/0 next hop belongs to">Default</button>
+    <button class="active" data-layer="connected" data-name="Connected" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide devices that have an address in the same subnet (the management subnet is left out)">Connected</button>
     <span class="hint">|</span>
     <button class="active" id="unknown-btn" aria-pressed="true" onclick="toggleUnknown(this)" title="Neighbors and peers that are not matched to a known device">Unknown nodes</button>
     <button class="active" id="icons-btn" aria-pressed="true" onclick="toggleIcons(this)" title="Draw devices as icons with a vendor mark. Off: plain boxes for every device">Device icons</button>
@@ -82,6 +84,8 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <button class="active" id="as-btn" aria-pressed="true" onclick="toggleAsAreas(this)" title="Draw a box around the routers of each BGP AS (needs BGP shown)">AS areas</button>
     <label class="hist-label" title="How thick the connector lines are drawn. Only this browser remembers it">Lines
         <select id="width-sel" onchange="setLineWidth(this.value)"><option value="small">Small</option><option value="medium" selected>Medium</option><option value="large">Large</option></select></label>
+    <label class="hist-label" title="Free: the saved places. Hierarchical: a tree from the best connected device, one row per hop. Only this browser remembers it; the places are not saved">Layout
+        <select id="layout-sel" onchange="setLayoutMode(this.value)"><option value="free" selected>Free</option><option value="tree">Hierarchical</option></select></label>
     <button id="changed-btn" aria-pressed="false" onclick="toggleChanged(this)" title="Glow around devices that had a change event in the last 24 hours">Changed 24h</button>
     <button id="tidy-btn" onclick="tidyAsAreas()" title="Move the routers so each BGP AS sits in its own block (changes the saved places)">Tidy AS areas</button>
     <button id="rearrange-btn" onclick="rearrange()" title="Forget every saved place and lay the whole map out again from scratch (the same map for everyone)">Re-arrange</button>
@@ -145,8 +149,10 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
         <div class="row"><span class="ln" style="border-color:var(--purple)"></span>eBGP session (different AS): both AS numbers and state</div>
         <div class="row"><span class="sw" style="background:var(--bg-muted);border:1px dashed var(--text-dim)"></span>AS area: the routers of one BGP AS</div>
         <div class="row"><span class="ln" style="border-color:var(--blue)"></span>OSPF adjacency and its state</div>
+        <div class="row"><span class="ln" style="border-color:var(--green)"></span>Default route: arrow points at the next hop's device</div>
+        <div class="row"><span class="ln" style="border-color:var(--orange)"></span>Connected: devices with an address in the same subnet (3 or more meet at a small subnet dot)</div>
         <div class="row"><span class="ln" style="border-color:var(--yellow);border-top-style:dotted"></span>BGP session that is flapping (went down and up again several times in the last hour)</div>
-        <div class="row"><span class="ln" style="border-color:var(--red);border-top-style:dashed"></span>BGP/OSPF session that is not Established / FULL, or a cable whose port is down</div>
+        <div class="row"><span class="ln" style="border-color:var(--red);border-top-style:dashed"></span>BGP/OSPF session that is not Established / FULL, or a cable or subnet port that is down</div>
         <div class="hint">Double-click a router to open its page. Drag to move, scroll to zoom.</div>
     </details>
 </div>
@@ -245,6 +251,11 @@ function toVisNodes(nodes) {
 
 function oneVisNode(n, GROUP_COLOR) {
         var color = GROUP_COLOR[n.group] || themeColor('--green');
+        if (n.device_type === 'subnet') {   // the meeting point of a Connected subnet: a small dot with its network as the name
+            return { id: n.id, label: n.label, shape: 'dot', size: 7,
+                     color: { background: themeColor('--orange'), border: themeColor('--orange') },
+                     font: { color: themeColor('--text-dim'), face: 'monospace', size: 11 } };
+        }
         if (iconsOn() && !hiddenIcons[n.id]) {
             // Icon above the name. A device that stopped answering ping is drawn in red.
             var line = n.ghost ? themeColor('--text-dim') : (n.reachable === 0 ? themeColor('--red') : color);
@@ -290,7 +301,7 @@ var lldpLabels = {};   // edge id -> the full label of an LLDP link
 
 function edgeLabel(e) {
     var id = edgeKey(e);
-    if (e.layer !== 'lldp' || e.to.indexOf('group:') === 0) { return e.label; }
+    if ((e.layer !== 'lldp' && e.layer !== 'connected') || e.to.indexOf('group:') === 0) { return e.label; }
     lldpLabels[id] = e.label;
     return (id === hoveredEdge || id === selectedLink) ? e.label : '';
 }
@@ -315,7 +326,8 @@ function setLineWidth(value) {
 }
 
 function toVisEdges(edges) {
-    var LAYER_COLOR = { lldp: themeColor('--cyan'), bgp: themeColor('--yellow'), ospf: themeColor('--blue') };
+    var LAYER_COLOR = { lldp: themeColor('--cyan'), bgp: themeColor('--yellow'), ospf: themeColor('--blue'),
+                        default: themeColor('--green'), connected: themeColor('--orange') };
     return edges.map(function (e) {
         var ebgp = e.bgp_type === 'ebgp';   // a session between two ASes: purple and thick; iBGP stays yellow and thin
         return {
@@ -334,10 +346,11 @@ function toVisEdges(edges) {
             // A BGP/OSPF label is about 150px wide and always shown: that link is long enough for the label to sit
             // between the router and the ghost. LLDP labels are hidden until hover, and a group's label is short.
             length: e.to.indexOf('group:') === 0 ? 170 : (e.to.indexOf('ghost:') === 0 ? (e.layer === 'lldp' ? 110 : 230) : undefined),
+            arrows: { to: { enabled: e.layer === 'default' } },   // a default route points at its next hop
             dashes: e.up === false ? true : (e.flapping ? [2, 5] : false),
             width: (e.up === false ? 2 : (e.flapping || ebgp ? 3 : 1)) * lineScale(),
             // Lines between the same two devices would sit on top of each other: bend BGP one way, OSPF the other.
-            smooth: { type: 'curvedCW', roundness: { lldp: 0, bgp: 0.25, ospf: -0.25 }[e.layer] || 0 },
+            smooth: { type: 'curvedCW', roundness: { lldp: 0, bgp: 0.25, ospf: -0.25, default: 0.45, connected: -0.45 }[e.layer] || 0 },
             font: { color: themeColor('--text-dim'), size: 10, strokeWidth: 0, background: themeColor('--bg') },
         };
     });
@@ -619,8 +632,47 @@ function treePositions(data, masterId) {
     return pos;
 }
 
-function treeKey(data) {
-    return masterNode + '#' + data.nodes.map(function (n) { return n.id; }).sort().join(',') + '#' +
+// Layout dropdown: "tree" lays the map out like the focus tree, from the best connected device when no master is
+// set. A view setting of this browser; the places are never saved (treeOn).
+var LAYOUT_KEY = 'confetti-topo-layout-mode';
+var layoutMode = 'free';
+
+function restoreLayoutMode() {
+    try { layoutMode = localStorage.getItem(LAYOUT_KEY) === 'tree' ? 'tree' : 'free'; } catch (e) { layoutMode = 'free'; }
+    document.getElementById('layout-sel').value = layoutMode;
+}
+
+function setLayoutMode(value) {
+    layoutMode = value === 'tree' ? 'tree' : 'free';
+    try { localStorage.setItem(LAYOUT_KEY, layoutMode); } catch (e) { /* not remembered */ }
+    resetTree();   // new network: leaving the tree must bring the saved places back
+}
+
+// The root of a hierarchical layout: the shown device with the most links (ties: first name). Null with no device.
+function autoRoot(data) {
+    var degree = {};
+    data.edges.forEach(function (e) {
+        degree[e.from] = (degree[e.from] || 0) + 1;
+        degree[e.to] = (degree[e.to] || 0) + 1;
+    });
+    var best = null;
+    data.nodes.forEach(function (n) {
+        if (n.id.indexOf('dev:') !== 0) { return; }
+        var d = degree[n.id] || 0;
+        if (!best || d > best.d || (d === best.d && (n.label || '').toLowerCase() < best.name)) {
+            best = { id: n.id, d: d, name: (n.label || '').toLowerCase() };
+        }
+    });
+    return best ? best.id : null;
+}
+
+function treeRoot(data) {
+    if (masterNode) { return masterNode; }
+    return layoutMode === 'tree' ? autoRoot(data) : null;
+}
+
+function treeKey(data, root) {
+    return root + '#' + data.nodes.map(function (n) { return n.id; }).sort().join(',') + '#' +
         data.edges.map(edgeKey).sort().join(',');
 }
 
@@ -733,10 +785,11 @@ function load() {
         rawData = data;                    // the node card reads this, so a hidden node can still be shown and un-hidden
         renderDeviceList();
         data = groupUnknown(hideFiltered(data));
-        var tree = masterNode ? treePositions(data, masterNode) : null;
+        var root = treeRoot(data);
+        var tree = root ? treePositions(data, root) : null;
         var treeChanged = false;
         if (tree) {
-            var tkey = treeKey(data);
+            var tkey = treeKey(data, root);
             treeChanged = tkey !== lastTreeKey;
             lastTreeKey = tkey;
             data.nodes = data.nodes.map(function (n) { return Object.assign({}, n, tree[n.id]); });
@@ -1326,12 +1379,17 @@ function showNodePanel(id) {
     var label = {};
     rawData.nodes.forEach(function (n) { label[n.id] = n.label; });
     document.getElementById('np-title').textContent = node.label;
-    document.getElementById('np-sub').textContent = node.ghost
-        ? 'Unknown node: seen by a neighbor or peer, not matched to a known device'
-        : 'Known device, ' + node.device_type + ' (double-click it on the map to open its page)';
+    var isSubnet = node.device_type === 'subnet';
+    document.getElementById('np-sub').textContent = isSubnet
+        ? 'Subnet shared by several devices (Connected layer)'
+        : (node.ghost
+            ? 'Unknown node: seen by a neighbor or peer, not matched to a known device'
+            : 'Known device, ' + node.device_type + ' (double-click it on the map to open its page)');
     var info = document.getElementById('np-info');
     info.textContent = '';
-    if (node.ghost) {
+    if (isSubnet) {
+        addRow(info, 'subnet', node.label);
+    } else if (node.ghost) {
         addRow(info, 'address', node.label);
         if (node.asn) { addRow(info, 'BGP AS', node.asn); }
     } else {
@@ -1427,7 +1485,8 @@ window.addEventListener('resize', fitNodePanel);
 document.addEventListener('themechange', fitNodePanel);   // the layout picker fires this too: the legend changes height
 fitNodePanel();
 // ---- Link card: click a link ---------------------------------------------------
-var LINK_KIND = { lldp: 'LLDP link (cable)', bgp: 'BGP session', ospf: 'OSPF adjacency' };
+var LINK_KIND = { lldp: 'LLDP link (cable)', bgp: 'BGP session', ospf: 'OSPF adjacency', default: 'Default route',
+                  connected: 'Connected subnet' };
 
 // The fields each protocol reports, in the order they are shown: [key in the report, label shown].
 var LINK_FIELDS = {
@@ -1437,6 +1496,8 @@ var LINK_FIELDS = {
     bgp: [['peer_ip', 'neighbor'], ['local_as', 'own AS'], ['remote_as', 'neighbor AS'], ['state', 'state'], ['uptime', 'up for'],
           ['prefixes', 'prefixes'], ['local_if', 'local interface']],
     ospf: [['peer_ip', 'neighbor'], ['area', 'area'], ['state', 'state'], ['uptime', 'up for'], ['local_if', 'local interface']],
+    default: [['next_hop', 'next hop'], ['vrf', 'vrf'], ['interface', 'interface'], ['protocol', 'learned by'], ['distance', 'distance'], ['metric', 'metric']],
+    connected: [['subnet', 'subnet'], ['interface', 'interface'], ['ip', 'address'], ['state', 'interface state']],
 };
 
 function showLinkPanel(edgeId) {
@@ -1450,7 +1511,14 @@ function showLinkPanel(edgeId) {
     document.getElementById('lp-sub').textContent = (label[edge.from] || '?') + '  <->  ' + (label[edge.to] || '?');
     var info = document.getElementById('lp-info');
     info.textContent = '';
-    addRow(info, 'status', edge.layer === 'lldp' ? (edge.up === false ? 'cable seen, a port is DOWN' : 'cable seen') : (edge.up === false ? 'DOWN' : 'up'));
+    if (edge.layer === 'lldp' || edge.layer === 'connected') {
+        addRow(info, 'status', edge.layer === 'lldp' ? (edge.up === false ? 'cable seen, a port is DOWN' : 'cable seen')
+                                                     : (edge.up === false ? 'same subnet, a port is DOWN' : 'same subnet'));
+    } else if (edge.layer === 'default') {
+        addRow(info, 'status', 'default route');
+    } else {
+        addRow(info, 'status', edge.up === false ? 'DOWN' : 'up');
+    }
     if (edge.bgp_type) { addRow(info, 'type', edge.bgp_type === 'ibgp' ? 'iBGP (same AS at both ends)' : 'eBGP (between different ASes)'); }
     if (edge.flapping) { addRow(info, 'flapping', 'yes: the session went down and up again several times in the last hour'); }
     addRow(info, 'label', edge.label);
@@ -1528,7 +1596,7 @@ function openContextMenu(id, x, y) {
         ] };
         if (masterNode) { spec.items.push({ label: 'Stop focus', action: clearMaster }); }
     } else {
-        var isDevice = !node.ghost;
+        var isDevice = !node.ghost && node.device_id !== null && node.device_id !== undefined;
         // A device carries its management IP; a peer ghost is labelled with its IP.
         var ip = node.mgmt_ip || (id.indexOf('ghost:peer:') === 0 ? node.label : '');
         pollItem = { label: 'Poll now', action: function () {}, disabled: true };
@@ -1586,6 +1654,7 @@ document.getElementById('net').addEventListener('contextmenu', function (ev) { e
 restoreHiddenNodes();
 restoreHiddenIcons();
 restoreMaster();
+restoreLayoutMode();
 fillLegendIcons();
 restoreLayers();
 try { var savedWidth = localStorage.getItem(LINE_KEY); if (LINE_SCALE[savedWidth]) { document.getElementById('width-sel').value = savedWidth; } } catch (e) { /* medium */ }

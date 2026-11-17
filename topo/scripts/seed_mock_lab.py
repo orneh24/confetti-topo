@@ -39,16 +39,22 @@ INTERFACES = {
     0: [("GigabitEthernet1", "mgmt", "192.0.2.10", 24),
         ("GigabitEthernet2", "to lab-rtr-b", "10.0.12.1", 24),
         ("GigabitEthernet3", "to lab-rtr-c", "10.0.13.1", 30),
+        ("GigabitEthernet4", "shared LAN", "10.50.0.1", 24),
         ("Loopback0", "router id", "10.255.0.1", 32)],
     1: [("GigabitEthernet1", "mgmt", "192.0.2.171", 24),
         ("GigabitEthernet2", "to lab-rtr-a", "10.0.12.2", 24),
         ("GigabitEthernet3", "to lab-rtr-c", "10.0.23.1", 24),
+        ("GigabitEthernet4", "shared LAN", "10.50.0.2", 24),
         ("Loopback0", "router id", "10.255.0.2", 32)],
     2: [("GigabitEthernet1", "mgmt", "192.0.2.167", 24),
         ("GigabitEthernet2", "to lab-rtr-b", "10.0.23.2", 24),
         ("GigabitEthernet3", "to lab-rtr-a", "10.0.13.2", 30),
+        ("GigabitEthernet5", "shared LAN", "10.50.0.3", 24),
         ("Loopback0", "router id", "10.255.0.3", 32)],
 }
+
+# device index -> next hop of its default route: a goes out to an outside address (a ghost), b via a, c via b
+DEFAULT_ROUTES = {0: "203.0.113.1", 1: "10.0.12.1", 2: "10.0.23.1"}
 
 # device index, local_if, remote sysname, remote port, remote device index (None = unknown), remote mgmt ip
 LLDP = [
@@ -119,6 +125,10 @@ def main():
                 "VALUES (?,?,?,?,?,?,?,?,?,?,1500,?)",
                 (dev_id, name, desc, ip, plen, ios._network(ip, plen),
                  "up", "up", "1000", "full", now))
+
+    for idx, next_hop in DEFAULT_ROUTES.items():
+        conn.execute("INSERT INTO routes (device_id, vrf, kind, prefix, protocol, next_hop, interface, distance, metric, last_seen) "
+                     "VALUES (?, 'default', 'rib', '0.0.0.0/0', 'static', ?, '', 1, 0, ?)", (ids[idx], next_hop, now))
 
     for idx, local_if, sysname, port, remote_idx, rip in LLDP:
         conn.execute(

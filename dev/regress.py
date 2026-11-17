@@ -1569,6 +1569,73 @@ def _():
     return p
 
 
+@check("R38", "Default and Connected layers: a default route points at the unique owner of its next hop (else a ghost, never itself), a shared subnet is one line or a subnet node, the management subnet and /32 are skipped, nothing stored")
+def _():
+    p = []
+    m, conn = fresh_db()
+    from app import topology
+    a = add_device(conn, "192.0.2.1", "a")
+    b = add_device(conn, "192.0.2.2", "b")
+    c = add_device(conn, "192.0.2.3", "c")
+    now = "2026-01-01 00:00:00"
+
+    def iface(dev, name, ip, net, plen, oper="up"):
+        conn.execute("INSERT INTO interfaces (device_id, name, ip, prefix_len, network, oper_status, last_seen) "
+                     "VALUES (?, ?, ?, ?, ?, ?, ?)", (dev, name, ip, plen, net, oper, now))
+
+    def route(dev, nh, vrf="default", kind="rib", prefix="0.0.0.0/0"):
+        conn.execute("INSERT INTO routes (device_id, vrf, kind, prefix, protocol, next_hop, interface, last_seen) "
+                     "VALUES (?, ?, ?, ?, 'static', ?, '', ?)", (dev, vrf, kind, prefix, nh, now))
+
+    iface(b, "Gi1", "10.1.1.2", "10.1.1.0/30", 30)        # a's next hop: only b owns it
+    iface(b, "Gi9", "10.9.9.9", "10.9.9.0/24", 24)        # an address on two devices stays a ghost
+    iface(c, "Gi9", "10.9.9.9", "10.9.9.0/24", 24)
+    iface(a, "Gi0", "10.0.0.1", "10.0.0.0/24", 24)        # a's own address
+    route(a, "10.1.1.2")                                  # -> b
+    route(a, "10.77.0.1")                                 # -> ghost
+    route(a, "10.0.0.1")                                  # its own address -> ghost, not a self-loop
+    route(a, "10.9.9.9")                                  # two owners -> ghost
+    route(c, "10.1.1.2", kind="fib")                      # RIB only
+    route(c, "10.1.1.2", prefix="10.5.0.0/16")            # not a default route
+    # Connected: a /30 shared by a and b, a /24 shared by all three, a /32 pair, the management subnet.
+    iface(a, "Gi1", "10.1.1.1", "10.1.1.0/30", 30)
+    for dev, n in ((a, 1), (b, 2), (c, 3)):
+        iface(dev, "Gi5", "10.5.5.%d" % n, "10.5.5.0/24", 24)
+        iface(dev, "Lo9", "10.255.9.%d" % n, "10.255.9.%d/32" % n, 32)
+        iface(dev, "Mgmt", "192.0.2.%d" % n, "192.0.2.0/24", 24)
+    iface(c, "Gi7", "10.7.7.1", "10.7.7.0/24", 24)        # a subnet with one device
+    conn.commit()
+    before = {t: conn.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0] for t in ("device_aliases", "routes", "interfaces")}
+    g = topology.build(conn)
+    dflt = [e for e in g["edges"] if e["layer"] == "default"]
+    to = sorted(e["to"] for e in dflt)
+    need(to == sorted(["dev:%d" % b, "ghost:peer:10.77.0.1", "ghost:peer:10.0.0.1", "ghost:peer:10.9.9.9"]),
+         "default edges must go to b and three ghosts (unknown, own address, two owners): %r" % to, p)
+    need(all(e["from"] == "dev:%d" % a for e in dflt), "only a has a RIB default route: %r" % [e["from"] for e in dflt], p)
+    conn_edges = [e for e in g["edges"] if e["layer"] == "connected"]
+    pair = [e for e in conn_edges if e["label"] == "10.1.1.0/30"]
+    need(len(pair) == 1 and {pair[0]["from"], pair[0]["to"]} == {"dev:%d" % a, "dev:%d" % b},
+         "a /30 shared by two devices must be one direct line: %r" % pair, p)
+    hub = [n for n in g["nodes"] if n["id"] == "subnet:10.5.5.0/24"]
+    need(len(hub) == 1 and not hub[0]["ghost"], "a /24 shared by three devices must make one subnet node", p)
+    need(len([e for e in conn_edges if e["to"] == "subnet:10.5.5.0/24"]) == 3, "the subnet node needs one line from each of the three devices", p)
+    need(not [e for e in conn_edges if "192.0.2" in e["label"] or "192.0.2" in e["to"]], "the management subnet must draw nothing", p)
+    need(not [n for n in g["nodes"] if "/32" in n["label"]] and not [e for e in conn_edges if "/32" in e["label"]], "a /32 must draw nothing", p)
+    need(not [e for e in conn_edges if "10.7.7.0" in e["label"] or "10.7.7.0" in e["to"]], "a subnet with one device must draw nothing", p)
+    need(all(e["from"] != e["to"] for e in g["edges"]), "an edge loops back to its own device", p)
+    conn.execute("UPDATE interfaces SET oper_status = 'down' WHERE device_id = ? AND name = 'Gi1'", (b,))
+    conn.commit()
+    pair = [e for e in topology.build(conn)["edges"] if e["layer"] == "connected" and e["label"] == "10.1.1.0/30"]
+    need(len(pair) == 1 and pair[0]["up"] is False, "a down port must draw the connected line down", p)
+    layers = lambda s: {e["layer"] for e in topology.build(conn, s)["edges"]}
+    need(layers("default") == {"default"} and layers("connected") == {"connected"}, "?layer= must limit to the one new layer", p)
+    need(not layers("lldp,bgp,ospf"), "?layer=lldp,bgp,ospf must not draw the new layers", p)
+    after = {t: conn.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0] for t in ("device_aliases", "routes", "interfaces")}
+    need(before == after, "building the map must not store anything (an alias, a route or an interface): %r -> %r" % (before, after), p)
+    need("INSERT" not in read("topo/app/topology.py").split("def _connected")[1].split("def _as_numbers")[0], "_connected must not write to the database", p)
+    return p
+
+
 def run_live():
     """Start the real server (serve.py) from a temp copy on free ports and
     drive it over HTTP and UDP."""

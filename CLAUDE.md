@@ -133,6 +133,16 @@ Who is that neighbor? Two steps:
 
 NULL after these steps is the expected result for peers outside the lab, not a bug.
 
+**Default and Connected layers** (`topology.build`, `_connected`; buttons Default / Connected, `?layer=default|connected`): built at
+query time from stored `routes` and `interfaces`, never stored. *Default* = one green arrow per RIB `0.0.0.0/0` next hop, to the
+unique owner of that address (constraint 12), else a `ghost:peer:<ip>` shared with BGP/OSPF; not de-duplicated. *Connected* = devices
+with an address in the same subnet (orange): two devices get one line, three or more meet at a `subnet:<cidr>` node (`device_type`
+`subnet`, not a ghost, `device_id` null); a subnet holding a device's `mgmt_ip`, a /32 and a subnet with one device draw nothing;
+a port reported not up draws the line red and dashed. Constraint 23.
+The **Layout** dropdown (Free / Hierarchical, `confetti-topo-layout-mode`, per browser) lays the map out as the focus tree does
+(`treePositions`), from the Focus device if one is set, else from the shown device with the most links (`autoRoot`); places are
+never saved (`treeOn`).
+
 ### Routing table
 
 The `routes` task stores a device's IPv4 routing table in `routes` (one row per next hop, `vrf`, `kind` = `rib` or
@@ -439,6 +449,10 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
     Established peer, and is silent on a first poll.** A peer cycling Idle/Active/Connect never flaps. Flapping = `TOPO_FLAP_COUNT`
     changes inside `TOPO_FLAP_WINDOW_S`; one `bgp_flapping` event at the start and one `bgp_flap_stopped` at the end, never one per
     poll. BGP only, no device command, `bgp_changes` is age-pruned in the poller tick. Checked by R37.
+23. **Default and Connected are drawn from stored routes and interfaces at query time and store nothing.** A default route's next hop
+    resolves only to the unique owner of that address, never to the device itself, else it is a ghost; a RIB row only (not FIB).
+    A Connected subnet skips any subnet holding a device's `mgmt_ip`, /32s and subnets with one device; three or more devices
+    meet at a `subnet:` node. Never an alias (constraints 1, 12). No new device command. Checked by R38.
 
 ## Regression gate
 
@@ -450,7 +464,7 @@ HTTP; `R21`..`R26` cover the ICMP state machine, `/metrics` format, LLDP crawl, 
 container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R27` checks the OpenSSH
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
-the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti projects' URLs; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll. Output is one line per check
+the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti projects' URLs; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

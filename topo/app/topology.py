@@ -15,6 +15,7 @@ back as an identity alias (CLAUDE.md constraints 1 and 2): a re-addressed
 interface must not become a permanent claim on a device.
 """
 
+import ipaddress
 import re
 
 from . import config, db
@@ -198,9 +199,9 @@ def _is_up(row):
 
 
 def build(conn, layer=None):
-    """layer limits the edges to some sources: "lldp", "bgp", "ospf", or a comma list
-    such as "lldp,bgp". None or "" overlays all three; an unknown name draws none."""
-    wanted = {"lldp", "bgp", "ospf"} if not layer else {x.strip() for x in layer.split(",")}
+    """layer limits the edges to some sources: "lldp", "bgp", "ospf", "default", "connected", or a comma list
+    such as "lldp,bgp". None or "" overlays all five; an unknown name draws none."""
+    wanted = {"lldp", "bgp", "ospf", "default", "connected"} if not layer else {x.strip() for x in layer.split(",")}
     ctx = lldp_context(conn)
     owners = ctx["owners"]
     device_as = bgp_as_numbers(conn, owners)
@@ -335,6 +336,24 @@ def build(conn, layer=None):
                     "details": [_session_report(x, names) for x in ends],
                 })
 
+    if "default" in wanted:
+        # A device's 0.0.0.0/0 route(s): one edge per next hop, from the device to the owner of the next hop.
+        # RIB only (a PAN-OS FIB row would draw the same line twice). Not de-duplicated: a default is one-way.
+        for r in conn.execute("SELECT device_id, vrf, next_hop, interface, protocol, distance, metric FROM routes "
+                              "WHERE kind = 'rib' AND prefix = '0.0.0.0/0' AND next_hop <> '' ORDER BY device_id, vrf, next_hop"):
+            remote = resolve(owners, r["device_id"], None, r["next_hop"])
+            target = "dev:{}".format(remote) if remote else ghost_id("peer", r["next_hop"])
+            edges.append({
+                "from": "dev:{}".format(r["device_id"]), "to": target, "layer": "default",
+                "label": "default via {}{}".format(r["next_hop"], "" if r["vrf"] == "default" else " vrf " + r["vrf"]),
+                "details": [{"reported_by": names.get(r["device_id"]), "vrf": r["vrf"], "next_hop": r["next_hop"],
+                             "interface": r["interface"], "protocol": r["protocol"], "distance": r["distance"],
+                             "metric": r["metric"]}],
+            })
+
+    if "connected" in wanted:
+        _connected(conn, nodes, edges, names)
+
     # Saved places from the topology page; a node with no row is left for the page to lay out.
     # "positions" has every saved place, also those of nodes the page makes up itself (a group of unknown nodes).
     positions = {}
@@ -344,6 +363,51 @@ def build(conn, layer=None):
             nodes[p["node_id"]].update(x=p["x"], y=p["y"])
 
     return {"nodes": list(nodes.values()), "edges": edges, "positions": positions}
+
+
+def _connected(conn, nodes, edges, names):
+    """Connected layer: devices with an address in the same subnet. Two devices get one line; three or more get a
+    "subnet:<cidr>" node with a line from each. A subnet that holds a device's management IP, a /32 and a subnet
+    with one device draw nothing. Built from stored interfaces, never stored, never an alias (constraint 12)."""
+    mgmt = []
+    for d in conn.execute("SELECT mgmt_ip FROM devices WHERE mgmt_ip IS NOT NULL AND mgmt_ip <> ''"):
+        try:
+            mgmt.append(ipaddress.ip_address(d["mgmt_ip"].strip()))
+        except ValueError:
+            pass
+    subnets = {}   # network -> {device_id: (interface name, ip, oper_status)}
+    for i in conn.execute("SELECT device_id, name, ip, network, prefix_len, oper_status FROM interfaces "
+                          "WHERE ip IS NOT NULL AND ip <> '' AND network IS NOT NULL AND network <> '' "
+                          "AND prefix_len IS NOT NULL AND prefix_len < 32 ORDER BY device_id, name"):
+        subnets.setdefault(i["network"], {}).setdefault(i["device_id"], (i["name"], i["ip"], i["oper_status"]))
+    for network in sorted(subnets):
+        ends = subnets[network]
+        if len(ends) < 2:
+            continue
+        try:
+            net = ipaddress.ip_network(network, strict=False)
+        except ValueError:
+            continue
+        if any(ip in net for ip in mgmt):
+            continue
+        reports = {dev: {"reported_by": names.get(dev), "interface": ifname, "ip": ip, "subnet": network,
+                         "state": state} for dev, (ifname, ip, state) in ends.items()}
+        if len(ends) == 2:
+            lo, hi = sorted(ends)
+            edges.append({
+                "from": "dev:{}".format(lo), "to": "dev:{}".format(hi), "layer": "connected", "label": network,
+                "up": not any(ends[d][2] not in (None, "up") for d in ends),
+                "details": [reports[lo], reports[hi]],
+            })
+            continue
+        sid = "subnet:{}".format(network)
+        nodes[sid] = {"id": sid, "label": network, "group": "subnet", "device_id": None, "ghost": False,
+                      "device_type": "subnet", "vendor": ""}
+        for dev in sorted(ends):
+            edges.append({
+                "from": "dev:{}".format(dev), "to": sid, "layer": "connected", "label": ends[dev][0],
+                "up": ends[dev][2] in (None, "up"), "details": [reports[dev]],
+            })
 
 
 def _as_numbers(ends, lo):
