@@ -142,6 +142,9 @@ a port reported not up draws the line red and dashed. Constraint 23.
 The **Layout** dropdown (Free / Hierarchical, `confetti-topo-layout-mode`, per browser) lays the map out as the focus tree does
 (`treePositions`), from the Focus device if one is set, else from the shown device with the most links (`autoRoot`); places are
 never saved (`treeOn`).
+The **Labels** dropdown (Default / Hover only / Off, `confetti-topo-label-mode`, per browser) sets when link labels show (`edgeLabel`).
+The **Fit** button is `fitMap`. Selecting a device fades every node and link that is not it or one link away (`dimMap`, `selNear`,
+`edgeOpacity`; combined with the search fade, nothing saved).
 
 ### Routing table
 

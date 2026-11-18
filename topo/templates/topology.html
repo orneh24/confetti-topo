@@ -84,6 +84,8 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <button class="active" id="as-btn" aria-pressed="true" onclick="toggleAsAreas(this)" title="Draw a box around the routers of each BGP AS (needs BGP shown)">AS areas</button>
     <label class="hist-label" title="How thick the connector lines are drawn. Only this browser remembers it">Lines
         <select id="width-sel" onchange="setLineWidth(this.value)"><option value="small">Small</option><option value="medium" selected>Medium</option><option value="large">Large</option></select></label>
+    <label class="hist-label" title="Link labels. Default: BGP, OSPF and default-route labels always show, LLDP and subnet labels on hover. Hover only: every label on hover or selection. Off: no labels. Only this browser remembers it">Labels
+        <select id="label-sel" onchange="setLabelMode(this.value)"><option value="default" selected>Default</option><option value="hover">Hover only</option><option value="off">Off</option></select></label>
     <label class="hist-label" title="Free: the saved places. Hierarchical: a tree from the best connected device, one row per hop. Only this browser remembers it; the places are not saved">Layout
         <select id="layout-sel" onchange="setLayoutMode(this.value)"><option value="free" selected>Free</option><option value="tree">Hierarchical</option></select></label>
     <button id="changed-btn" aria-pressed="false" onclick="toggleChanged(this)" title="Glow around devices that had a change event in the last 24 hours">Changed 24h</button>
@@ -91,6 +93,7 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
     <button id="rearrange-btn" onclick="rearrange()" title="Forget every saved place and lay the whole map out again from scratch (the same map for everyone)">Re-arrange</button>
     <label class="hist-label" title="Look at the map as it was when it last changed. Read-only; pick Live to go back">History
         <select id="hist-sel" onchange="pickHistory(this.value)"><option value="">Live</option></select></label>
+    <button id="fit-btn" onclick="if (network) { fitMap(); }" title="Zoom and move the view so the whole map fits">Fit</button>
     <button id="png-btn" onclick="exportPng()" title="Download the map as a PNG picture">Export PNG</button>
     <button id="json-btn" onclick="exportJson()" title="Download the map data (devices, neighbors, sessions) as a JSON file">Export JSON</button>
 </div>
@@ -299,18 +302,39 @@ function edgeKey(e) { return [e.from, e.to, e.layer, e.label].join('|'); }
 var hoveredEdge = null;
 var lldpLabels = {};   // edge id -> the full label of an LLDP link
 
+// Labels dropdown (this browser only): default = the rule above, hover = every label only on hover or selection,
+// off = no label at all (the link card still has everything).
+var LABEL_KEY = 'confetti-topo-label-mode';
+var labelMode = 'default';
+
 function edgeLabel(e) {
     var id = edgeKey(e);
-    if ((e.layer !== 'lldp' && e.layer !== 'connected') || e.to.indexOf('group:') === 0) { return e.label; }
-    lldpLabels[id] = e.label;
-    return (id === hoveredEdge || id === selectedLink) ? e.label : '';
+    var text = e.label + (e.flapping && e.layer === 'bgp' ? ' FLAPPING' : '');
+    if (labelMode === 'off') { return ''; }
+    var group = e.to.indexOf('group:') === 0;
+    var hoverOnly = labelMode === 'hover' ? !group : ((e.layer === 'lldp' || e.layer === 'connected') && !group);
+    if (!hoverOnly) { return text; }
+    lldpLabels[id] = text;
+    return (id === hoveredEdge || id === selectedLink) ? text : '';
 }
 
 function updateLldpLabels() {
-    if (!edgeSet) { return; }
+    if (!edgeSet || labelMode === 'off') { return; }
     edgeSet.update(Object.keys(lldpLabels).filter(function (id) { return edgeSet.get(id); }).map(function (id) {
         return { id: id, label: (id === hoveredEdge || id === selectedLink) ? lldpLabels[id] : '' };
     }));
+}
+
+function restoreLabelMode() {
+    try { var v = localStorage.getItem(LABEL_KEY); labelMode = (v === 'hover' || v === 'off') ? v : 'default'; } catch (e) { labelMode = 'default'; }
+    document.getElementById('label-sel').value = labelMode;
+}
+
+function setLabelMode(value) {
+    labelMode = (value === 'hover' || value === 'off') ? value : 'default';
+    try { localStorage.setItem(LABEL_KEY, labelMode); } catch (e) { /* not remembered */ }
+    lldpLabels = {};
+    load();
 }
 
 // Connector line thickness: Small, Medium (the default look) or Large. A look setting for this browser, like the icons.
@@ -335,12 +359,13 @@ function toVisEdges(edges) {
             id: edgeKey(e),
             from: e.from,
             to: e.to,
-            label: edgeLabel(e) + (e.flapping && e.layer === 'bgp' ? ' FLAPPING' : ''),
+            label: edgeLabel(e),
             // A BGP/OSPF session that is not Established/FULL is drawn red and dashed.
             // A BGP session that keeps going down and up (flapping) is thick, yellow and dotted.
             color: {
                 color: e.up === false ? themeColor('--red') : (e.flapping ? themeColor('--yellow') : (ebgp ? themeColor('--purple') : (LAYER_COLOR[e.layer] || themeColor('--gray')))),
                 highlight: themeColor('--text'),   // the selected link
+                opacity: edgeOpacity(e.from, e.to),   // a selected device dims the links that do not touch it
             },
             // A link to an unidentified neighbor is short, so the ghost sits next to the router that sees it.
             // A BGP/OSPF label is about 150px wide and always shown: that link is long enough for the label to sit
@@ -817,6 +842,7 @@ function load() {
             if (newFree.length) { startSettling(nodeSet.getIds()); }   // the old nodes stand still, the new ones find a place
             syncSet(nodeSet, items);
             syncSet(edgeSet, toVisEdges(data.edges));
+            dimMap();   // a selected device keeps its links in focus through a refresh
             if (newFree.length) { network.stabilize(200); }
             if (treeChanged) { setTimeout(fitMap, 100); }
             return;
@@ -840,6 +866,7 @@ function load() {
             edges: { arrows: { to: false }, selectionWidth: function (width) { return width + 3; } },
         };
         network = new vis.Network(container, { nodes: nodeSet, edges: edgeSet }, options);
+        dimMap();
         if (anyFree) { network.once('stabilizationIterationsDone', settled); }
         else { setTimeout(function () { tuckUnknown(); fitMap(); centerPending(); }, 100); }
         network.on('dragEnd', function (params) {
@@ -1342,14 +1369,45 @@ function searchOpacity(n) {
     if (!q || (!n.ghost && !n.members && devMatches(n, q))) { return 1; }
     return searchNear[n.id] ? 0.6 : 0.2;
 }
+// Selecting a device on the map fades everything that is not that device or linked to it, so its links stand out.
+// Nothing is saved or hidden: selecting nothing (click the empty map, the card's x) brings it all back.
+var selNear = {};   // node id -> true for the selected node and the nodes one link away
+function focusId() {
+    return selectedNode && nodeSet && nodeSet.get(selectedNode) ? selectedNode : null;
+}
+function findSelNear() {
+    selNear = {};
+    var id = focusId();
+    if (!id || !edgeSet) { return; }
+    selNear[id] = true;
+    edgeSet.get().forEach(function (e) {
+        if (e.from === id) { selNear[e.to] = true; }
+        if (e.to === id) { selNear[e.from] = true; }
+    });
+}
+function selOpacity(id) {
+    return focusId() && !selNear[id] ? 0.25 : 1;
+}
+function edgeOpacity(from, to) {
+    var id = focusId();
+    return id && from !== id && to !== id ? 0.12 : 1;
+}
+
 function dimMap() {
     if (!nodeSet || !rawData) { return; }
     findSearchNear();
+    findSelNear();
     var byId = {};
     rawData.nodes.forEach(function (n) { byId[n.id] = n; });
     nodeSet.update(nodeSet.getIds().map(function (id) {
-        return { id: id, opacity: byId[id] ? searchOpacity(byId[id]) : (devSearchText() ? 0.2 : 1) };
+        var base = byId[id] ? searchOpacity(byId[id]) : (devSearchText() ? 0.2 : 1);
+        return { id: id, opacity: Math.min(base, selOpacity(id)) };
     }));
+    if (edgeSet) {
+        edgeSet.update(edgeSet.get().map(function (e) {
+            return { id: e.id, color: Object.assign({}, e.color, { opacity: edgeOpacity(e.from, e.to) }) };
+        }));
+    }
 }
 
 function markDeviceList() {
@@ -1374,6 +1432,7 @@ function showNodePanel(id) {
     hideLinkPanel();
     selectedNode = id;
     markDeviceList();
+    dimMap();
     var node = rawData && rawData.nodes.filter(function (n) { return n.id === id; })[0];
     if (!node) { return; }
     var label = {};
@@ -1457,6 +1516,7 @@ function fitNodePanel() {
 function closeNodePanel() {
     selectedNode = null;
     markDeviceList();
+    dimMap();
     document.getElementById('node-panel').style.display = 'none';
 }
 
@@ -1655,6 +1715,7 @@ restoreHiddenNodes();
 restoreHiddenIcons();
 restoreMaster();
 restoreLayoutMode();
+restoreLabelMode();
 fillLegendIcons();
 restoreLayers();
 try { var savedWidth = localStorage.getItem(LINE_KEY); if (LINE_SCALE[savedWidth]) { document.getElementById('width-sel').value = savedWidth; } } catch (e) { /* medium */ }

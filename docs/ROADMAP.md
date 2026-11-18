@@ -19,8 +19,17 @@ Ideas only. Nothing here is built until the user picks it.
 - **L2 view, rest:** per-port spanning-tree roles (VLANs, trunks, the spanning-tree summary and the MAC table are done: the `vlans`, `trunks`, `stp` and `mac` tasks, switches only). Each needs its own command, verified on a real switch first.
 - **Pair parallel sessions properly** by the local address of each session instead of by position.
 - **History, rest:** the banner counts what changed since a snapshot and gone devices glow red, but new devices and links are not marked; snapshots keep the shape only when it changes, so a link that flaps within one interval is not seen.
-- **Label crowding:** LLDP labels show only on hover or selection now; BGP/OSPF labels and the vendor mark can
-  still overlap on a dense map.
+- **Label crowding:** LLDP and Connected labels show only on hover or selection, and the Labels dropdown can make every
+  label hover-only or hide them; BGP/OSPF labels and the vendor mark can still overlap on a dense map in the default mode.
+- **Default / Connected layers, docs:** add them to `docs/TOPOLOGY-MAPPING.md` (limits: RIB only, IPv4 only), re-record `docs/img/`
+  (`readme-image-capturer`) and run `docs-drift-checker`.
+- **Down-links badge:** a small "N links down" badge by the FILTERED marker; clicking it selects the first down link, so a red
+  link on a big map is easy to find.
+- **Keyboard shortcuts** on the topology page: `F` to fit, `/` to focus the device search, `Esc` to close the cards. Only the
+  search box handles keys today.
+- **Collapse ghosts in Hierarchical:** the bottom row of unknown nodes makes the tree wide; group them like the "N unknown"
+  node does.
+- **Shorter legend:** it is long and covers the left of the map; fold it into Devices / Links sections that open one at a time.
 - **Linux detection on real hosts:** the "LLDP says Linux" rule and the System Description parser are only
   tested on sample text. Check them against a real Linux host's `show lldp neighbors detail`.
 - **Selection outline** is a wide rectangle that includes the vendor mark. A tighter outline around the icon alone
