@@ -35,7 +35,7 @@ ENV TOPO_DB_PATH=/var/lib/confetti-topo/topo.db \
 
 WORKDIR /opt/confetti-topo
 VOLUME /var/lib/confetti-topo
-EXPOSE 80
+EXPOSE 80 514/udp
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
     CMD curl -fs "http://127.0.0.1:${TOPO_PORT}/api/health" >/dev/null || exit 1

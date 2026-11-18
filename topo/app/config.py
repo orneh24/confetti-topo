@@ -45,6 +45,21 @@ PING_WORKERS = int(os.environ.get("TOPO_PING_WORKERS", "16"))
 PING_FAILS_TO_DOWN = int(os.environ.get("TOPO_PING_FAILS_TO_DOWN", "2"))
 
 # ---------------------------------------------------------------------------
+# Syslog (syslog_server.py, syslog_trigger.py, syslog_pull.py). On by default, like
+# confetti-butler and confetti-traffic; a device that logs to this server gets polled early.
+# ---------------------------------------------------------------------------
+SYSLOG_ENABLED = _flag("TOPO_SYSLOG_ENABLED", "true")
+SYSLOG_BIND = os.environ.get("TOPO_SYSLOG_BIND", "0.0.0.0")
+SYSLOG_PORT = int(os.environ.get("TOPO_SYSLOG_PORT", "514"))
+SYSLOG_MAX_ROWS = int(os.environ.get("TOPO_SYSLOG_MAX_ROWS", "300000"))
+SYSLOG_RETENTION_DAYS = int(os.environ.get("TOPO_SYSLOG_RETENTION_DAYS", "14"))   # 0 = row cap only
+# A copy pulled from another server inside this many seconds of a stored one is a duplicate.
+SYSLOG_DEDUP_S = int(os.environ.get("TOPO_SYSLOG_DEDUP_S", "10"))
+# A device is asked for an early poll at most this often because of syslog.
+SYSLOG_TRIGGER_MIN_S = int(os.environ.get("TOPO_SYSLOG_TRIGGER_MIN_S", "30"))
+SYSLOG_PULL_INTERVAL_S = int(os.environ.get("TOPO_SYSLOG_PULL_INTERVAL_S", "15"))
+
+# ---------------------------------------------------------------------------
 # Scheduled discovery (discovery.py). 0 = off; nothing runs unless asked for.
 # ---------------------------------------------------------------------------
 DISCOVERY_INTERVAL_S = int(os.environ.get("TOPO_DISCOVERY_INTERVAL_S", "0"))

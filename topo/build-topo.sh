@@ -248,6 +248,15 @@ TOPO_PING_INTERVAL_S=30
 # Failed pings in a row before a device is marked down.
 TOPO_PING_FAILS_TO_DOWN=2
 
+# --- Syslog ----------------------------------------------------------------
+# UDP syslog receiver. A device that logs here and reports a link or BGP/OSPF change is
+# polled early. Point the device's logging host at this server (topo never configures devices).
+TOPO_SYSLOG_ENABLED=true
+# TOPO_SYSLOG_PORT=514
+# TOPO_SYSLOG_RETENTION_DAYS=14
+# Seconds a device is left alone after an early poll was asked for.
+# TOPO_SYSLOG_TRIGGER_MIN_S=30
+
 # --- Discovery (all off until configured) --------------------------------
 # Seconds between scheduled runs of the sources below; 0 = never.
 TOPO_DISCOVERY_INTERVAL_S=0

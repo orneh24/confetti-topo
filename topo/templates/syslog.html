@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}Syslog{% endblock %}
+{% block head %}
+<style>
+.filters {
+    padding: 12px 24px; display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+    background: var(--bg-card); border-bottom: 1px solid var(--border);
+}
+th { position: sticky; top: 0; background: var(--bg-card); }
+.sev0, .sev1, .sev2, .sev3 { color: var(--red); }
+.sev4 { color: var(--yellow); }
+.sev5, .sev6 { color: var(--text); }
+.sev7 { color: var(--text-dim); }
+.sev-null { color: var(--gray); }
+.mono { white-space: pre-wrap; word-break: break-word; }
+.count { color: var(--text-dim); font-size: 11px; margin-left: auto; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="filters">
+    <select id="f-minutes">
+        <option value="15">last 15m</option>
+        <option value="60" selected>last 60m</option>
+        <option value="360">last 6h</option>
+        <option value="1440">last 24h</option>
+    </select>
+    <select id="f-host"><option value="">all hosts</option></select>
+    <select id="f-severity">
+        <option value="">all severities</option>
+        <option value="3">error or worse</option>
+        <option value="4">warning or worse</option>
+        <option value="6">info or worse</option>
+    </select>
+    <input type="text" id="f-q" placeholder="search message...">
+    <span class="count" id="row-count"></span>
+</div>
+<div class="container stack">
+    <div class="section">
+        <div class="section-body">
+            <table>
+                <thead><tr><th>Time</th><th>Host</th><th>Sev</th><th>Mnemonic</th><th>Message</th><th>Via</th></tr></thead>
+                <tbody id="rows"></tbody>
+            </table>
+            <div class="empty" id="empty" style="display:none">no messages in this window</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+{% raw %}
+<script>
+var SEV_NAMES = {0: 'emerg', 1: 'alert', 2: 'crit', 3: 'err', 4: 'warn', 5: 'notice', 6: 'info', 7: 'debug'};
+
+function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s === null || s === undefined ? '' : String(s);
+    return d.innerHTML;
+}
+
+function loadSources() {
+    fetch('/api/syslog/sources').then(function (r) { return r.json(); }).then(function (list) {
+        var sel = document.getElementById('f-host');
+        var current = sel.value;
+        var html = '<option value="">all hosts</option>';
+        for (var i = 0; i < list.length; i++) {
+            html += '<option value="' + ctxMenu.attr(list[i].name) + '">' + esc(list[i].name) + ' (' + list[i].count + ')</option>';
+        }
+        sel.innerHTML = html;
+        sel.value = current;
+    });
+}
+
+function load() {
+    var params = [];
+    params.push('minutes=' + document.getElementById('f-minutes').value);
+    var host = document.getElementById('f-host').value;
+    if (host) { params.push('host=' + encodeURIComponent(host)); }
+    var sev = document.getElementById('f-severity').value;
+    if (sev !== '') { params.push('severity=' + sev); }
+    var q = document.getElementById('f-q').value.trim();
+    if (q) { params.push('q=' + encodeURIComponent(q)); }
+
+    fetch('/api/syslog?' + params.join('&')).then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '';
+        var band = false, lastSrc = null;
+        for (var i = 0; i < list.length; i++) {
+            var m = list[i];
+            var sevCls = m.severity === null || m.severity === undefined ? 'sev-null' : 'sev' + m.severity;
+            var sevLabel = m.severity === null || m.severity === undefined ? '' : (m.severity + ' ' + (SEV_NAMES[m.severity] || ''));
+            var hostCell = m.host || m.source_ip;
+            if (i && hostCell !== lastSrc) band = !band;
+            lastSrc = hostCell;
+            if (m.device_id) {
+                hostCell = '<a href="/devices/' + m.device_id + '">' + esc(hostCell) + '</a>';
+            } else {
+                hostCell = esc(hostCell);
+            }
+            rows += '<tr' + (band ? ' class="stripe"' : '') + ' data-ctx="syslog" data-host="' + ctxMenu.attr(m.host || m.source_ip) +
+                '" data-dev="' + ctxMenu.attr(m.device_id || '') + '" data-mnem="' + ctxMenu.attr(m.mnemonic || '') + '" data-msg="' + ctxMenu.attr(m.message) +
+                '" data-at="' + ctxMenu.attr(m.received_at) + '">' +
+                '<td>' + new Date(m.received_at).toLocaleString() + '</td>' +
+                '<td>' + hostCell + '</td>' +
+                '<td class="' + sevCls + '">' + esc(sevLabel) + '</td>' +
+                '<td>' + esc(m.mnemonic || '') + '</td>' +
+                '<td class="mono">' + esc(m.message) + '</td>' +
+                '<td>' + (m.origin && m.origin !== 'local' ? esc(m.origin) : '') + '</td>' +
+                '</tr>';
+        }
+        document.getElementById('rows').innerHTML = rows;
+        document.getElementById('empty').style.display = list.length ? 'none' : 'block';
+        document.getElementById('row-count').textContent = list.length + ' messages';
+    });
+}
+
+document.getElementById('f-minutes').addEventListener('change', load);
+document.getElementById('f-host').addEventListener('change', load);
+document.getElementById('f-severity').addEventListener('change', load);
+document.getElementById('f-q').addEventListener('input', function () {
+    clearTimeout(window._q_timer);
+    window._q_timer = setTimeout(load, 300);
+});
+
+// Right-click a log line.
+function filterBy(id, value) {
+    document.getElementById(id).value = value;
+    load();
+}
+
+ctxMenu.register('syslog', function (row) {
+    var host = row.getAttribute('data-host'), dev = row.getAttribute('data-dev');
+    var mnem = row.getAttribute('data-mnem'), msg = row.getAttribute('data-msg');
+    return { title: host, items: [
+        { label: 'Copy message', action: function () { ctxMenu.copy(msg); } },
+        { label: 'Copy whole line', action: function () {
+            ctxMenu.copy(row.getAttribute('data-at') + ' ' + host + ' ' + (mnem ? mnem + ' ' : '') + msg);
+        } },
+        { label: 'Copy host', action: function () { ctxMenu.copy(host); } },
+        { label: 'Show only this host', action: function () { filterBy('f-host', host); } },
+        { label: 'Search this mnemonic', action: function () { filterBy('f-q', mnem); }, disabled: !mnem },
+        { label: 'Open device page', action: function () { window.location.href = '/devices/' + dev; }, disabled: !dev },
+    ] };
+});
+
+loadSources();
+load();
+setInterval(function () { loadSources(); load(); }, 15000);
+
+// The whole page is one more menu target, so empty space has a menu. Header, nav, taskbar, DOS bars and footer keep the browser's menu.
+document.documentElement.setAttribute('data-ctx', 'page');
+ctxMenu.register('page', function (el, ev) {
+    if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
+    return { title: 'Syslog', items: [
+        { label: 'Refresh', action: function () { loadSources(); load(); } },
+        { label: 'Go to Dashboard', action: function () { location.href = '/'; } },
+        { label: 'Go to Devices', action: function () { location.href = '/devices'; } },
+        { label: 'Go to Recent changes', action: function () { location.href = '/changes'; } },
+        { label: 'Go to Topology', action: function () { location.href = '/topology'; } },
+        { label: 'Go to Conflicts', action: function () { location.href = '/conflicts'; } },
+        { label: 'Go to Settings', action: function () { location.href = '/settings'; } },
+    ] };
+});
+</script>
+{% endraw %}
+{% endblock %}

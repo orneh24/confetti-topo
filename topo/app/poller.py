@@ -84,14 +84,17 @@ def _tick(executor):
         rows = conn.execute(
             """SELECT id FROM devices
                WHERE enabled = 1 AND poll_state = 'idle' AND role != 'node'
-                 AND (next_poll_at = '' OR next_poll_at <= ?)
+                 AND (next_poll_at = '' OR next_poll_at <= ?
+                      OR (poll_requested_at != '' AND fail_count = 0))
                LIMIT ?""",
             (now, config.POLL_WORKERS * 2),
         ).fetchall()
         device_ids = [r["id"] for r in rows]
         if device_ids:
+            # A syslog request (syslog_trigger) is answered by this claim; one that arrives while
+            # the poll runs stays set and is claimed on the tick after _finish.
             conn.executemany(
-                "UPDATE devices SET poll_state = 'running' WHERE id = ?",
+                "UPDATE devices SET poll_state = 'running', poll_requested_at = '' WHERE id = ?",
                 [(d,) for d in device_ids],
             )
         conn.execute(
@@ -102,6 +105,11 @@ def _tick(executor):
             "DELETE FROM events WHERE at < datetime('now', ? || ' days')",
             ("-{:d}".format(config.EVENT_RETENTION_DAYS),),
         )
+        if config.SYSLOG_RETENTION_DAYS > 0:
+            conn.execute(
+                "DELETE FROM syslog WHERE received_at < datetime('now', ? || ' days')",
+                ("-{:d}".format(config.SYSLOG_RETENTION_DAYS),),
+            )
         try:
             flap.prune(conn)
             history.maybe_snapshot(conn)

@@ -339,6 +339,9 @@ def init_db():
         db.execute("ALTER TABLE interfaces ADD COLUMN mac TEXT")
     if "mgmt_mac" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
         db.execute("ALTER TABLE devices ADD COLUMN mgmt_mac TEXT")
+    # Set by syslog_trigger when a device's syslog says the topology changed: poll it early.
+    if "poll_requested_at" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
+        db.execute("ALTER TABLE devices ADD COLUMN poll_requested_at TEXT NOT NULL DEFAULT ''")
     db.commit()
     db.close()
 

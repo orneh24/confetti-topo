@@ -20,16 +20,17 @@ from app import config  # noqa: E402
 
 
 def _start_background_services():
-    """Start the poller, the ICMP checker and the discovery timer.
+    """Start the poller, the ICMP checker, the discovery timer and the syslog listener.
 
     Each start() is idempotent and returns quietly on failure (nothing to
     poll yet, feature switched off): a missing background service must never
     stop the server from serving requests, which is the job that matters.
     """
-    from app import poller, reach, discovery
+    from app import poller, reach, discovery, syslog_server
     poller.start()
     reach.start()
     discovery.start()
+    syslog_server.start()
 
 
 def main():

@@ -24,6 +24,7 @@ from . import lldp_crawl
 from . import metrics
 from . import poller
 from . import reach
+from . import syslog_server
 from . import topology
 from .collectors import butler, confetti
 from .collectors import seedfile
@@ -237,6 +238,7 @@ def api_health():
         "services": services,
         "poller_running": poller.is_running(),
         "reach_running": reach.is_running(),
+        "syslog_listening": syslog_server.is_listening(),
         "discovery": discovery.status(),
         "load_avg": _load_avg(),
         "memory": _memory_info(),
@@ -282,6 +284,11 @@ def devices_page():
 @app.route("/devices/<int:device_id>")
 def device_page(device_id):
     return render_template("device.html", device_id=device_id)
+
+
+@app.route("/syslog")
+def syslog_page():
+    return render_template("syslog.html")
 
 
 @app.route("/changes")
@@ -1074,6 +1081,142 @@ def api_events():
         d.update(events.describe(d["kind"], d["subject"], d["detail"], d["hostname"]))
         out.append(d)
     return jsonify(out)
+
+
+# ---------------------------------------------------------------------------
+# Syslog
+#
+# The receiver is syslog_server.py (started by serve.py); these routes only read what it stored.
+# device_id is resolved here, at query time, against device_aliases and never stamped at insert, so
+# a device added or re-addressed after a message arrived still correlates. Rows are text from
+# anything that can reach UDP/514: rendered as text, never interpreted.
+# ---------------------------------------------------------------------------
+
+SYSLOG_MAX_LIMIT = 2000
+SYSLOG_PULL_LIMIT = 500
+
+
+def syslog_row(r, pulling):
+    d = dict(r)
+    d["received_at"] = db.iso(d["received_at"])
+    if not pulling:
+        d.pop("raw", None)
+        d.pop("msg_hash", None)
+    return d
+
+
+@app.route("/api/syslog", methods=["GET"])
+def api_syslog():
+    """Stored syslog messages, newest first.
+
+    ?minutes=N (default 60), or ?from=&to= for a pinned window (from/to win). Also ?host= (parsed
+    hostname or source IP), ?severity=N, ?q= substring, ?limit=N, ?device_id=N.
+
+    For another Confetti server pulling this one: ?after_id=N returns rows with id > N, oldest
+    first, at most 500, each with raw and msg_hash, and ignores the time window. ?origin=local
+    returns only messages this server received itself, so a pulled row is never passed on.
+    """
+    args = request.args
+    where = []
+    params = []
+
+    after_id = None
+    if args.get("after_id") not in (None, ""):
+        try:
+            after_id = max(0, int(args["after_id"]))
+        except ValueError:
+            return jsonify({"error": "after_id must be a number"}), 400
+        where.append("s.id > ?")
+        params.append(after_id)
+    else:
+        frm = db.sqlite_ts_arg(args.get("from"))
+        to = db.sqlite_ts_arg(args.get("to"))
+        if frm or to:
+            if frm:
+                where.append("s.received_at >= ?")
+                params.append(frm)
+            if to:
+                where.append("s.received_at <= ?")
+                params.append(to)
+        else:
+            try:
+                minutes = int(args.get("minutes", "60"))
+            except ValueError:
+                minutes = 60
+            where.append("s.received_at >= datetime('now', ? || ' minutes')")
+            params.append("-{:d}".format(abs(minutes)))
+
+    if args.get("origin"):
+        where.append("s.origin = ?")
+        params.append(args["origin"])
+
+    host = args.get("host")
+    if host:
+        where.append("(s.host = ? OR s.source_ip = ?)")
+        params.extend([host, host])
+
+    device_id = args.get("device_id")
+    if device_id:
+        where.append("COALESCE(dia.device_id, dih.device_id) = ?")
+        params.append(device_id)
+
+    severity = args.get("severity")
+    if severity not in (None, "", "all"):
+        try:
+            level = int(severity)
+        except ValueError:
+            level = None
+        if level is not None:
+            where.append("(s.severity <= ? OR s.severity IS NULL)")
+            params.append(level)
+
+    q = args.get("q")
+    if q:
+        where.append("(s.message LIKE ? ESCAPE '\' OR s.mnemonic LIKE ? ESCAPE '\' "
+                     "OR s.raw LIKE ? ESCAPE '\')")
+        params.extend([db.like_arg(q)] * 3)
+
+    cap = SYSLOG_PULL_LIMIT if after_id is not None else SYSLOG_MAX_LIMIT
+    try:
+        limit = int(args.get("limit", cap))
+    except ValueError:
+        limit = cap
+    limit = max(1, min(limit, cap))
+
+    sql = """SELECT s.id, s.received_at, s.source_ip, s.host, s.facility, s.severity,
+                    s.mnemonic, s.device_time, s.message, s.origin, s.raw, s.msg_hash,
+                    COALESCE(dia.device_id, dih.device_id) AS device_id
+             FROM syslog s
+             LEFT JOIN device_aliases dia ON dia.kind = 'mgmt_ip' AND dia.value = s.source_ip
+             LEFT JOIN device_aliases dih ON dih.kind = 'hostname' AND dih.value = LOWER(s.host)"""
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    if after_id is not None:
+        sql += " ORDER BY s.id ASC LIMIT ?"      # a puller must never skip a row
+    else:
+        # id breaks ties: received_at has one-second resolution, and a flap can fit in one second.
+        sql += " ORDER BY s.received_at DESC, s.id DESC LIMIT ?"
+    params.append(limit)
+
+    rows = db.get_db().execute(sql, params).fetchall()
+    return jsonify([syslog_row(r, after_id is not None) for r in rows])
+
+
+@app.route("/api/syslog/sources", methods=["GET"])
+def api_syslog_sources():
+    """Distinct senders with message counts, for the page's filter. Bounded to a window
+    (?minutes=, default 1440) so it stays an indexed range."""
+    try:
+        minutes = abs(int(request.args.get("minutes", "1440")))
+    except ValueError:
+        minutes = 1440
+    rows = db.get_db().execute(
+        """SELECT COALESCE(NULLIF(host, ''), source_ip) AS name, COUNT(*) AS count
+           FROM syslog WHERE received_at >= datetime('now', ? || ' minutes')
+           GROUP BY name ORDER BY count DESC, name""",
+        ("-{:d}".format(minutes),),
+    ).fetchall()
+    return jsonify([dict(r) for r in rows])
 
 
 # ---------------------------------------------------------------------------

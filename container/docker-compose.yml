@@ -10,6 +10,7 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "514:514/udp"
     volumes:
       - topo-data:/var/lib/confetti-topo
     environment:

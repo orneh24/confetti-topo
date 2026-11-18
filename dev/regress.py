@@ -40,7 +40,7 @@ VERBOSE = "-v" in sys.argv
 STATIC_ONLY = "--static" in sys.argv
 
 results = []   # (status, id, desc, [detail lines])
-LIVE = [("R20", "live: real server answers, pages render, /metrics, topology API, saved node positions")]
+LIVE = [("R20", "live: real server answers, pages render, /metrics, topology API, saved node positions, UDP syslog round trip")]
 TMP = tempfile.mkdtemp(prefix="topo-regress-")
 
 
@@ -1743,6 +1743,87 @@ def _():
     return p
 
 
+@check("R41", "syslog poll trigger: only a topology message from a known, enabled, healthy device asks for an early poll, never touches poll_state, never stored as an alias")
+def _():
+    # Constraint 25. A spoofed UDP packet must cost at most one extra poll: the trigger only sets
+    # devices.poll_requested_at; poller._tick claims it through the normal 'idle' check.
+    p = []
+    m, conn = fresh_db()
+    trig = importlib.import_module("app.syslog_trigger")
+    sc = _syslog_core()
+    poller = m["poller"]
+
+    def rec(line, ip):
+        return sc.parse(line, ip)
+    down = "<189>Nov 18 10:15:02 R1 %LINK-3-UPDOWN: Interface GigabitEthernet1, changed state to down"
+    a = add_device(conn, "192.0.2.1", "a")
+    conn.execute("UPDATE devices SET enabled = 1 WHERE id = ?", (a,))
+    conn.commit()
+
+    def requested(did):
+        return conn.execute("SELECT poll_requested_at, poll_state, next_poll_at FROM devices WHERE id = ?", (did,)).fetchone()
+    before = requested(a)
+    trig._last_request.clear()
+    need(trig.maybe_request(conn, rec(down, "192.0.2.1"), min_s=30) == a, "a link-down message from the device's management IP did not ask for a poll", p)
+    after = requested(a)
+    need(after["poll_requested_at"] != "", "poll_requested_at was not set", p)
+    need((after["poll_state"], after["next_poll_at"]) == (before["poll_state"], before["next_poll_at"]),
+         "the trigger must not touch poll_state or next_poll_at: %r -> %r" % (tuple(before), tuple(after)), p)
+    need(trig.maybe_request(conn, rec(down, "192.0.2.1"), min_s=30) is None, "a second message inside the window asked again", p)
+
+    def asks(line, ip, **setup):
+        trig._last_request.clear()
+        conn.execute("UPDATE devices SET poll_requested_at = '', enabled = ?, role = ?, fail_count = ? WHERE id = ?",
+                     (setup.get("enabled", 1), setup.get("role", "router"), setup.get("fail", 0), a))
+        conn.commit()
+        return trig.maybe_request(conn, rec(line, ip), min_s=30)
+    need(asks("<189>Nov 18 10:15:02 R1 %SYS-5-CONFIG_I: Configured from console", "192.0.2.1") is None, "a message that is not a topology change asked for a poll", p)
+    need(asks(down, "192.0.2.99") is None, "a message from an unknown address asked for a poll", p)
+    need(asks(down, "192.0.2.1", fail=1) is None, "a failing device (backoff) was asked for a poll", p)
+    need(asks(down, "192.0.2.1", role="node") is None, "a role='node' device was asked for a poll", p)
+    need(asks(down, "192.0.2.1", enabled=0) is None, "a disabled device was asked for a poll", p)
+    need(asks("<189>Nov 18 10:15:02 R1 %BGP-5-ADJCHANGE: neighbor 192.0.2.9 Down", "192.0.2.1") == a, "a BGP adjacency message did not ask for a poll", p)
+    need(asks("<189>Nov 18 10:15:02 R1 %OSPF-5-ADJCHG: Process 1, Nbr 192.0.2.9 on Gi1 from FULL to DOWN", "192.0.2.1") == a, "an OSPF adjacency message did not ask for a poll", p)
+
+    # source address = an interface address held by exactly one device; never stored as an alias
+    b = add_device(conn, "192.0.2.2", "b")
+    c2 = add_device(conn, "192.0.2.3", "c")
+    conn.execute("UPDATE devices SET enabled = 1 WHERE id IN (?, ?)", (b, c2))
+    _put_iface(conn, b, "Lo0", "10.9.9.1")
+    _put_iface(conn, b, "Lo1", "10.9.9.2")
+    _put_iface(conn, c2, "Lo0", "10.9.9.2")      # held by two devices: ambiguous
+    conn.commit()
+    aliases = conn.execute("SELECT COUNT(*) FROM device_aliases").fetchone()[0]
+    trig._last_request.clear()
+    need(trig.maybe_request(conn, rec(down, "10.9.9.1"), min_s=30) == b, "an address held by exactly one device did not resolve", p)
+    need(trig.maybe_request(conn, rec(down, "10.9.9.2"), min_s=30) is None, "an address held by two devices was resolved to a guess", p)
+    need(conn.execute("SELECT COUNT(*) FROM device_aliases").fetchone()[0] == aliases, "the trigger stored an alias (constraint 12)", p)
+
+    # the poller claims a requested device, clears the request, and skips a failing one
+    class FakePool:
+        def __init__(self):
+            self.ids = []
+
+        def submit(self, fn, did):
+            self.ids.append(did)
+    conn.execute("UPDATE devices SET poll_requested_at = '', poll_state = 'idle', fail_count = 0, next_poll_at = '2999-01-01 00:00:00'")
+    conn.execute("UPDATE devices SET poll_requested_at = '2026-01-01 00:00:00' WHERE id = ?", (a,))
+    conn.execute("UPDATE devices SET poll_requested_at = '2026-01-01 00:00:00', fail_count = 2 WHERE id = ?", (b,))
+    conn.commit()
+    pool = FakePool()
+    poller._tick(pool)
+    need(pool.ids == [a], "_tick claimed %r, expected only the requested healthy device %r" % (pool.ids, a), p)
+    row = requested(a)
+    need(row["poll_state"] == "running" and row["poll_requested_at"] == "", "a claimed request must set 'running' and clear the request: %r" % (tuple(row),), p)
+    need(requested(b)["poll_state"] == "idle", "a failing device with a request was claimed (backoff bypassed)", p)
+
+    src = read("topo/app/syslog_trigger.py")
+    need("poll_state" not in src.split('"""')[2], "syslog_trigger.py must not touch poll_state", p)
+    need("allow_reuse_address" not in re.sub(r"#.*", "", read("topo/app/syslog_server.py")), "the syslog listener must not set allow_reuse_address", p)
+    need("syslog_core.insert" in read("topo/app/syslog_server.py"), "syslog_server.py must store through syslog_core.insert", p)
+    return p
+
+
 def run_live():
     """Start the real server (serve.py) from a temp copy on free ports and
     drive it over HTTP and UDP."""
@@ -1753,7 +1834,8 @@ def run_live():
     shutil.copytree("topo", work, ignore=shutil.ignore_patterns(
         "topo.db*", "__pycache__", "*.pyc", "topo.env"))
     port = free_port()
-    env = dict(os.environ, TOPO_PORT=str(port),
+    syslog_port = free_port()
+    env = dict(os.environ, TOPO_PORT=str(port), TOPO_SYSLOG_PORT=str(syslog_port),
                TOPO_DB_PATH=os.path.join(work, "live.db"), PYTHONDONTWRITEBYTECODE="1",
                TOPO_POLL_TICK_S="3600")
     log = open(os.path.join(TMP, "live.log"), "w")
@@ -1780,7 +1862,7 @@ def run_live():
         need(health.get("poller_running") is True, "poller is not running", problems)
         need(health.get("reach_running") is True, "ICMP checker is not running", problems)
         need(b"topo_up 1" in get("/metrics")[1], "/metrics does not answer", problems)
-        for url in ("/", "/devices", "/topology", "/conflicts", "/settings"):
+        for url in ("/", "/devices", "/topology", "/conflicts", "/settings", "/syslog", "/changes"):
             code = get(url)[0]
             need(code == 200, "GET %s -> %s" % (url, code), problems)
         req = urllib.request.Request(base + "/api/devices", method="POST",
@@ -1810,6 +1892,25 @@ def run_live():
         need(send("DELETE", "/api/topology/positions", None) == 200, "clearing positions failed", problems)
         cleared = next(n for n in json.loads(get("/api/topology")[1])["nodes"] if n["id"] == nid)
         need("x" not in cleared, "position still returned after DELETE", problems)
+        # syslog: a real UDP datagram is stored, parsed, served and not passed on as a pulled row
+        need(health.get("syslog_listening") is True, "the syslog listener is not bound", problems)
+        udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        udp.sendto(b"<189>123: SW1: *Sep  8 12:00:00.123 UTC: %LINK-3-UPDOWN: Interface Gi2, changed state to down",
+                   ("127.0.0.1", syslog_port))
+        udp.close()
+        rows = []
+        for _ in range(25):
+            rows = json.loads(get("/api/syslog?minutes=5")[1])
+            if rows:
+                break
+            time.sleep(0.2)
+        need(rows and rows[0]["host"] == "SW1" and rows[0]["mnemonic"] == "%LINK-3-UPDOWN" and rows[0]["origin"] == "local",
+             "UDP syslog was not stored and parsed: %r" % (rows,), problems)
+        pulled = json.loads(get("/api/syslog?after_id=0&origin=local")[1])
+        need(pulled and pulled[0].get("raw") and len(pulled[0].get("msg_hash", "")) == 40, "after_id must return raw and msg_hash", problems)
+        need(rows and "raw" not in rows[0] and "msg_hash" not in rows[0], "the page API must not return raw or msg_hash", problems)
+        need(json.loads(get("/api/syslog?after_id=0&origin=butler")[1]) == [], "origin=butler returned local rows", problems)
+        need(b"topo_syslog_received_total 1" in get("/metrics")[1], "/metrics does not count the stored message", problems)
         results.append(("FAIL" if problems else "PASS", "R20", desc, problems))
     except Exception as e:
         results.append(("FAIL", "R20", desc, ["live tier crashed: %r" % e]))

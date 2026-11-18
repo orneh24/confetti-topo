@@ -10,6 +10,8 @@ import os
 from . import config
 from . import poller
 from . import reach
+from . import syslog_server
+from . import syslog_trigger
 
 BGP_UP = "Established"
 OSPF_UP = "FULL"
@@ -42,6 +44,10 @@ def render(conn):
     o.sample("topo_up", "confetti-topo is serving requests", "gauge", 1)
     o.sample("topo_poller_running", "the SSH poller thread is alive", "gauge", int(poller.is_running()))
     o.sample("topo_reach_running", "the ICMP checker thread is alive", "gauge", int(reach.is_running()))
+    o.sample("topo_syslog_listening", "the UDP syslog listener is bound", "gauge", int(syslog_server.is_listening()))
+    o.sample("topo_syslog_received_total", "syslog messages stored since start", "counter", syslog_server.stats["received"])
+    o.sample("topo_syslog_duplicates_total", "syslog messages skipped as duplicates since start", "counter", syslog_server.stats["duplicates"])
+    o.sample("topo_syslog_triggers_total", "early polls requested by syslog since start", "counter", syslog_trigger.stats["triggers"])
     try:
         o.sample("topo_db_size_bytes", "size of the SQLite file", "gauge", os.path.getsize(config.DB_PATH))
     except OSError:

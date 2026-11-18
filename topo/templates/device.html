@@ -87,6 +87,16 @@
         </div>
     </div>
     <div class="section wide">
+        <div class="section-header"><span>Syslog (last 24 h)</span></div>
+        <div class="section-body">
+            <table>
+                <thead><tr><th>Time</th><th>Sev</th><th>Mnemonic</th><th>Message</th></tr></thead>
+                <tbody id="syslog-rows"></tbody>
+            </table>
+            <div class="empty" id="syslog-empty" style="display:none">no syslog from this device (point its logging host at this server)</div>
+        </div>
+    </div>
+    <div class="section wide">
         <div class="section-header"><span>LLDP neighbors</span></div>
         <div class="section-body">
             <table data-sortable>
@@ -543,6 +553,20 @@ function loadEvents() {
     });
 }
 
+function loadSyslog() {
+    fetch('/api/syslog?limit=50&minutes=1440&device_id=' + deviceId).then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '';
+        for (var i = 0; i < list.length; i++) {
+            var m = list[i];
+            rows += '<tr><td>' + new Date(m.received_at).toLocaleString() + '</td>' +
+                '<td>' + (m.severity === null || m.severity === undefined ? '' : esc(m.severity)) + '</td>' +
+                '<td>' + esc(m.mnemonic || '') + '</td><td>' + esc(m.message) + '</td></tr>';
+        }
+        document.getElementById('syslog-rows').innerHTML = rows;
+        document.getElementById('syslog-empty').style.display = list.length ? 'none' : 'block';
+    });
+}
+
 function pollNow() {
     var btn = document.getElementById('poll-btn');
     var msg = document.getElementById('poll-msg');
@@ -569,6 +593,7 @@ function pollNow() {
         loadLldp();
         loadAdjacencies();
         loadEvents();
+        loadSyslog();
     }).catch(function () {
         msg.textContent = 'poll failed';
         btn.disabled = false;
@@ -648,6 +673,7 @@ loadMac();
 loadLldp();
 loadAdjacencies();
 loadEvents();
+loadSyslog();
 loadCredentials();
 </script>
 {% endblock %}
