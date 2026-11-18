@@ -1209,7 +1209,10 @@ def api_syslog():
     device_id = args.get("device_id")
     if device_id:
         where.append("COALESCE(dia.device_id, dih.device_id) = ?")
-        params.append(device_id)
+        try:
+            params.append(int(device_id))   # a text value never equals the integer id
+        except ValueError:
+            return jsonify({"error": "device_id must be a number"}), 400
 
     severity = args.get("severity")
     if severity not in (None, "", "all"):
