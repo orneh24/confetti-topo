@@ -18,10 +18,13 @@ are NOT RUN, never PASS. R39 also needs ruff (pip install -r
 dev/requirements-dev.txt), else it is NOT RUN.
 """
 import glob
+import importlib.util
+import json
 import os
 import re
 import shutil
 import socket
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -1638,7 +1641,7 @@ def _():
 
 @check("R39", "ruff F rules: no undefined names, unused imports or variables, redefinitions (topo/, dev/)")
 def _():
-    # Not a constraint check; the next constraint (24) takes R40. ruff is a dev tool
+    # Not a constraint check; the next constraint (25) takes R41. ruff is a dev tool
     # (dev/requirements-dev.txt), so a machine without it is NOT RUN, never a pass.
     ruff = [shutil.which("ruff")] if shutil.which("ruff") else [sys.executable, "-m", "ruff"]
     if subprocess.run(ruff + ["--version"], capture_output=True).returncode != 0:
@@ -1648,6 +1651,96 @@ def _():
     if r.returncode == 0:
         return []
     return [l for l in r.stdout.splitlines() if l.strip() and not l.startswith(("Found", "[*]"))] or [r.stderr.strip()[:200]]
+
+
+SYSLOG_CORE = "topo/app/syslog_core.py"
+SYSLOG_CASES = "dev/samples/syslog_cases.json"
+# The other two repos: (repo directory, the directory in it that holds syslog_core.py)
+SYSLOG_SIBLINGS = (("../confetti-butler", "butler/app"), ("../confetti-traffic", "hub/app"))
+
+
+def _syslog_core():
+    spec = importlib.util.spec_from_file_location("syslog_core", SYSLOG_CORE)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@check("R40", "syslog_core: every fixture line parses as expected, a copy pulled from another server is stored once, two local repeats are both kept")
+def _():
+    # syslog_core.py is the SAME file in confetti-butler, confetti-traffic and here. It imports no
+    # app code, so this check needs no app packages.
+    p = []
+    sc = _syslog_core()
+    cases = json.loads(read(SYSLOG_CASES))["cases"]
+    need(len(cases) >= 9, "dev/samples/syslog_cases.json lost cases", p)
+    for c in cases:
+        got = sc.parse(c["raw"], c["source_ip"])
+        need(got["raw"] == c["raw"] and got["source_ip"] == c["source_ip"], "%s: raw or source_ip changed" % c["name"], p)
+        for k, v in c["expect"].items():
+            need(got[k] == v, "%s: %s expected %r, got %r" % (c["name"], k, v, got[k]), p)
+    for raw in ("", " ", "<>", "<999>x", "<1>1 2026-01-01T00:00:00Z"):
+        try:
+            sc.parse(raw, "192.0.2.1")
+        except Exception as e:
+            p.append("parse(%r) raised %r; it must never raise" % (raw, e))
+
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE syslog (id INTEGER PRIMARY KEY AUTOINCREMENT, received_at TEXT NOT NULL, "
+               "source_ip TEXT NOT NULL, host TEXT, facility INTEGER, severity INTEGER, mnemonic TEXT, "
+               "device_time TEXT, message TEXT, raw TEXT)")
+    sc.migrate(db)
+    sc.migrate(db)          # twice: must be harmless
+    cols = [r[1] for r in db.execute("PRAGMA table_info(syslog)")]
+    need({"origin", "origin_id", "msg_hash"} <= set(cols), "migrate() did not add the extra columns: %r" % cols, p)
+    rec = sc.parse("<189>Nov 18 10:15:02 R1 %LINK-3-UPDOWN: Interface Gi1, changed state to down", "192.0.2.1")
+    t0 = "2026-11-18 10:00:00"
+    a = sc.insert(db, rec, t0)
+    b = sc.insert(db, rec, "2026-11-18 10:00:02")
+    need(a and b, "two identical messages this server received itself must both be kept (a real repeat)", p)
+    pulled = dict(rec, received_at="2026-11-18T10:00:01Z")
+    need(sc.insert(db, pulled, t0, origin="butler", origin_id=7) is None,
+         "a copy pulled from another server within the window must not be stored again", p)
+    later = dict(rec, received_at="2026-11-18T10:05:00Z")
+    need(sc.insert(db, later, t0, origin="butler", origin_id=8) is not None,
+         "the same text five minutes later is a new message and must be stored", p)
+    need(sc.insert(db, later, t0, origin="butler", origin_id=8) is None,
+         "the same (origin, origin_id) twice must store once", p)
+    other = sc.parse(rec["raw"], "192.0.2.2")
+    need(sc.insert(db, dict(other, received_at="2026-11-18T10:05:01Z"), t0, origin="traffic", origin_id=1) is not None,
+         "the same line from a different source IP is a different message", p)
+    first_pull = sc.insert(db, dict(rec, received_at="2026-11-18T11:00:00Z"), t0, origin="butler", origin_id=9)
+    need(first_pull is not None and sc.insert(db, rec, "2026-11-18 11:00:03") is None,
+         "a local copy arriving just after a pulled copy must not be stored again", p)
+    need(sc.insert(db, dict(rec, received_at="2026-11-18T11:00:02Z"), t0, origin="traffic", origin_id=3) is None,
+         "a copy pulled from a second server must not duplicate one pulled from the first", p)
+    n = db.execute("SELECT COUNT(*) FROM syslog").fetchone()[0]
+    db.rollback()
+    need(db.execute("SELECT COUNT(*) FROM syslog").fetchone()[0] == 0 and n > 0,
+         "insert() must not commit (the caller does)", p)
+    need(".commit(" not in read(SYSLOG_CORE), "syslog_core.py must never call commit (the caller does)", p)
+    need("syslog_core.migrate" in read("topo/app/db.py"), "db.init_db must call syslog_core.migrate", p)
+    return p
+
+
+def _lf_bytes(path):
+    with open(path, "rb") as f:
+        return f.read().replace(b"\r\n", b"\n")
+
+
+@check("R40-sync", "syslog_core.py and syslog_cases.json are byte-identical in confetti-butler, confetti-traffic and confetti-topo")
+def _():
+    p = []
+    for repo, appdir in SYSLOG_SIBLINGS:
+        if not os.path.isdir(repo):
+            raise Skip("%s is not next to this repo, cannot compare" % repo)
+        for mine, theirs in ((SYSLOG_CORE, os.path.join(repo, appdir, "syslog_core.py")),
+                             (SYSLOG_CASES, os.path.join(repo, "dev/samples/syslog_cases.json"))):
+            if not os.path.exists(theirs):
+                p.append("%s does not exist" % theirs)
+                continue
+            need(_lf_bytes(mine) == _lf_bytes(theirs), "%s differs from %s" % (mine, theirs), p)
+    return p
 
 
 def run_live():

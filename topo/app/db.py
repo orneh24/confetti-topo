@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from flask import g
 
 from . import config
+from . import syslog_core
 
 
 def get_db():
@@ -304,7 +305,27 @@ def init_db():
             y          REAL NOT NULL,
             updated_at TEXT NOT NULL
         );
+
+        -- Syslog from devices (same table and parser as confetti-butler and confetti-traffic;
+        -- see syslog_core.py). The origin, origin_id and msg_hash columns and their indexes
+        -- are added by syslog_core.migrate() below.
+        CREATE TABLE IF NOT EXISTS syslog (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            received_at TEXT NOT NULL,
+            source_ip   TEXT NOT NULL,
+            host        TEXT,
+            facility    INTEGER,
+            severity    INTEGER,
+            mnemonic    TEXT,
+            device_time TEXT,
+            message     TEXT,
+            raw         TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_syslog_received ON syslog(received_at);
+        CREATE INDEX IF NOT EXISTS idx_syslog_host ON syslog(host);
+        CREATE INDEX IF NOT EXISTS idx_syslog_source_ip ON syslog(source_ip);
     """)
+    syslog_core.migrate(db)
     # CREATE TABLE IF NOT EXISTS never adds a column to a table that exists already.
     if "remote_descr" not in [r[1] for r in db.execute("PRAGMA table_info(lldp_neighbors)")]:
         db.execute("ALTER TABLE lldp_neighbors ADD COLUMN remote_descr TEXT")
