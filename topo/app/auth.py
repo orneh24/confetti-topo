@@ -14,7 +14,7 @@ import time
 
 import urllib.parse
 
-from flask import Response, jsonify, redirect, render_template, request
+from flask import jsonify, redirect, render_template, request
 
 from . import config
 

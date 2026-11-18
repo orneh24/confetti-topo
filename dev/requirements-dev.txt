@@ -1,0 +1,2 @@
+# Dev machine only; never installed on the VM or container.
+ruff==0.17.5

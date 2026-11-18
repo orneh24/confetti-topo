@@ -14,7 +14,8 @@ The reasoning behind each check is the matching constraint in CLAUDE.md.
 
 The script itself is stdlib only. The unit tier imports the app, so it needs
 the app's own packages (flask, jinja2, netmiko ...); without them those checks
-are NOT RUN, never PASS.
+are NOT RUN, never PASS. R39 also needs ruff (pip install -r
+dev/requirements-dev.txt), else it is NOT RUN.
 """
 import glob
 import os
@@ -409,7 +410,6 @@ def _():
     _put_lldp(conn, a, "Gi1", "r-b", "Gi1", mgmt_ip="10.255.0.2")    # LLDP falls back to the same lookup
     conn.commit()
     g = topology.build(conn)
-    to = {(e["layer"], e["label"].split()[-1] if e["layer"] != "lldp" else "lldp"): e["to"] for e in g["edges"]}
     need(any(e["layer"] == "bgp" and e["to"] == "dev:%d" % b for e in g["edges"]), "bgp peer on b's loopback did not resolve to b", p)
     need(any(e["layer"] == "bgp" and e["to"] == "ghost:peer:10.9.9.9" for e in g["edges"]), "an address held by two devices was resolved instead of staying a ghost", p)
     need(any(e["layer"] == "ospf" and e["to"] == "ghost:peer:10.255.0.1" for e in g["edges"]), "a device's own address became a self-loop or vanished", p)
@@ -1634,6 +1634,20 @@ def _():
     need(before == after, "building the map must not store anything (an alias, a route or an interface): %r -> %r" % (before, after), p)
     need("INSERT" not in read("topo/app/topology.py").split("def _connected")[1].split("def _as_numbers")[0], "_connected must not write to the database", p)
     return p
+
+
+@check("R39", "ruff F rules: no undefined names, unused imports or variables, redefinitions (topo/, dev/)")
+def _():
+    # Not a constraint check; the next constraint (24) takes R40. ruff is a dev tool
+    # (dev/requirements-dev.txt), so a machine without it is NOT RUN, never a pass.
+    ruff = [shutil.which("ruff")] if shutil.which("ruff") else [sys.executable, "-m", "ruff"]
+    if subprocess.run(ruff + ["--version"], capture_output=True).returncode != 0:
+        raise Skip("ruff is not installed (pip install -r dev/requirements-dev.txt)")
+    r = subprocess.run(ruff + ["check", "--config", "ruff.toml", "--output-format", "concise", "topo", "dev"],
+                       capture_output=True, text=True)
+    if r.returncode == 0:
+        return []
+    return [l for l in r.stdout.splitlines() if l.strip() and not l.startswith(("Found", "[*]"))] or [r.stderr.strip()[:200]]
 
 
 def run_live():

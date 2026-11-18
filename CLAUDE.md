@@ -335,7 +335,8 @@ topo/
   scripts/  — topo-setup.sh, topo-update.sh, seed_mock_lab.py (fake lab in a new scratch DB),
               capture_readme.py (re-records docs/img/ from that mock lab; run after any UI change)
 container/ — Dockerfile + compose
-dev/regress.py — the regression gate (see below); dev/samples/ = parser fixtures
+dev/regress.py — the regression gate (see below); dev/samples/ = parser fixtures;
+dev/requirements-dev.txt — ruff (dev machine only); ruff.toml — F rules only (repo root)
 docs/ — TOPOLOGY-MAPPING.md, HANDOFF.md, ROADMAP.md, img/
 .claude/ — agents: dashboard-ui-checker, lab-validator, leak-scanner, readme-image-capturer;
            skills: 4 reference skills (cisco-ios-patterns, netmiko-ssh-automation, network-bgp-diagnostics,
@@ -459,7 +460,7 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
 
 ## Regression gate
 
-`python dev/regress.py` (stdlib only; `--static` skips the live tier, `-v` shows detail for passes) is the
+`python dev/regress.py` (stdlib only, except that `R39` runs ruff: `pip install -r dev/requirements-dev.txt`, else R39 is `NOT RUN`; `--static` skips the live tier, `-v` shows detail for passes) is the
 gate to run before handing back any code change. `R1`..`R14` are constraints 1..14 above; `R15`..`R19` are
 cross-file checks (docs vs code task count, shell/Alpine hygiene, poller lock, files the build scripts copy,
 platform registry and read-only commands); `R20` starts the real server from a temp copy and drives it over
@@ -467,7 +468,7 @@ HTTP; `R21`..`R26` cover the ICMP state machine, `/metrics` format, LLDP crawl, 
 container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R27` checks the OpenSSH
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
-the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti projects' URLs; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll. Output is one line per check
+the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti projects' URLs; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll; `R39` is the ruff `F` lint over `topo/` and `dev/`, not a constraint check, so the next constraint (24) takes `R40`. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the
