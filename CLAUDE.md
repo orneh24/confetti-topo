@@ -197,6 +197,11 @@ the server a row was pulled from), `GET /api/syslog` and `/api/syslog/sources` r
 `topo_syslog_*`, `/api/health` has `syslog_listening`. A device is matched to a row at query time by its `mgmt_ip` or hostname alias, never
 stored. There is no alerting; butler has it.
 
+**Pulling from the other servers** (`app/syslog_pull.py`, `pull_once` in `syslog_core.py`, constraint 26; the same two files as in confetti-butler and
+confetti-traffic): a device logs to one Confetti server only. The Settings page has a switch per other server (`GET|PUT /api/settings/syslog-pull`, off by
+default, needs its URL) and `TOPO_SYSLOG_PULL_INTERVAL_S` (15) sets the round. A pulled message is stored with `origin` = that server and goes through the same
+dedup and the poll trigger as a received one. `/api/syslog?after_id=N&origin=local` is what a puller reads from here (`X-Syslog-Max-Id` header).
+
 **The poll trigger** (`app/syslog_trigger.py`, constraint 25): a stored message whose `%FAC-SEV-MNEMONIC` is in `TOPOLOGY_MNEMONICS` (today
 `LINEPROTO-UPDOWN`, `LINK-UPDOWN`, `BGP-ADJCHANGE`, `BGP-NOTIFICATION`, `OSPF-ADJCHG`; extend it from messages seen on real routers) sets
 `devices.poll_requested_at` on the device that sent it (a `mgmt_ip` alias, else an interface address held by exactly one device). The trigger
@@ -334,6 +339,7 @@ topo/
     syslog_core.py     — syslog parser + the one insert path; the SAME file in confetti-butler and confetti-traffic (constraint 24)
     syslog_server.py   — UDP syslog listener (port of butler's), stores through syslog_core
     syslog_trigger.py  — a topology message asks for an early poll of its device (constraint 25)
+    syslog_pull.py     — pulls syslog from the other Confetti servers on a timer; the SAME file in confetti-butler and confetti-traffic (constraint 26)
     auth.py            — optional access token (TOPO_AUTH_TOKEN): /login, cookie or bearer; off by default
     collectors/        — ssh.py, panos.py (XML API), sweep.py, confetti.py, butler.py, seedfile.py
     parsers/           — ios.py (regex only), panos.py (XML)
@@ -465,11 +471,11 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
 20. **Topology history is written only when the map changed, pruned by age, read-only over the API, and holds no secrets.** A snapshot
     is the `/api/topology` data and nothing else (no credentials, no device output). An unchanged map adds no row, and
     `TOPO_SNAPSHOT_INTERVAL_S=0` stores nothing. A history failure must never stop the poller tick. Checked by R35.
-21. **The URLs of the other Confetti projects are only link targets: http(s) with a host, validated on write, never fetched.** The Settings page
+21. **The URLs of the other Confetti projects are only link targets: http(s) with a host, validated on write, fetched only by the syslog pull.** The Settings page
     keeps the Butler and Traffic URLs (`settings` keys `url_butler` / `url_traffic`, `GET|PUT /api/settings/links`); a value that is not
     http:// or https:// with a host, or has a user:password, whitespace or markup characters, is a 400 and changes nothing (all or nothing); an empty
     value clears. `static/confetti-links.js` (the same file as in confetti-butler and confetti-traffic) turns them into small header buttons that
-    open in a new tab with `noopener`, re-checks http(s) and never builds HTML from the URL. The server never connects to them. Checked by R36.
+    open in a new tab with `noopener`, re-checks http(s) and never builds HTML from the URL. The server connects to one only for the syslog pull (constraint 26), opt-in per server, and never otherwise. Checked by R36.
 22. **BGP flap detection works only from what a poll already read, counts only changes to or from Established or a timer reset of an
     Established peer, and is silent on a first poll.** A peer cycling Idle/Active/Connect never flaps. Flapping = `TOPO_FLAP_COUNT`
     changes inside `TOPO_FLAP_WINDOW_S`; one `bgp_flapping` event at the start and one `bgp_flap_stopped` at the end, never one per
@@ -483,13 +489,20 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
     `parse()` never raises and never drops a line (RFC 3164 and Cisco, plus RFC 5424). `insert()` is the only way a row is stored, and it
     never commits. It skips a message when its `(origin, origin_id)` is already stored, or when a copy was pulled from another server within `dedup_s` (`syslog.origin`, `origin_id`,
     `msg_hash`); two copies this server received itself are both kept (a link that flaps twice is two messages). Pulling from another
-    server is not built yet; the table, the parser and the rule are. Checked by R40 and R40-sync.
+    server is constraint 26. Checked by R40 and R40-sync.
 25. **A syslog message may only ask for an early poll; it never polls and never changes the topology.** `syslog_trigger.maybe_request` only
     sets `devices.poll_requested_at`, and only for a topology mnemonic from a device that is enabled, not `role='node'` and not failing
     (`fail_count = 0`), at most once per `TOPO_SYSLOG_TRIGGER_MIN_S`. The source address resolves to a `mgmt_ip` alias or to an interface address
     held by exactly one device, and is never stored as an alias (constraints 1, 12). `poller._tick` claims a requested device through the
     normal `idle` check, sets `'running'` and clears the request, and skips a failing device (constraint 14's lock and backoff hold). The
     listener never sets `allow_reuse_address`. Checked by R41 and the live R20 (a real UDP datagram is stored and parsed).
+26. **Syslog may be pulled from the other Confetti servers, opt-in per server, and only their own messages.** `GET|PUT /api/settings/syslog-pull` has a switch per server
+    (`syslog_pull_<name>`, off by default; the URL from constraint 21 must be set first). Switching on starts from the other server's newest message, never its history
+    (`syslog_cursor_<name>`; a different URL or an id that goes backwards resets it). The request is `GET <url>/api/syslog?after_id=N&origin=local` only, http(s) only, no
+    redirect followed, a server that does not answer with `X-Syslog-Max-Id` is refused, every field is length-limited text and `msg_hash` is recomputed here. `origin=local`
+    is what stops a message travelling around a loop. Rows go through `syslog_core.insert` (constraint 24). A failed request stores nothing and keeps the cursor; one server
+    failing never stops the other. The token for a server that has one is write-only: sent in an `Authorization` header, never in a URL, never returned by a GET (butler and
+    traffic have none, so topo sends none). Checked by R42.
 
 ## Regression gate
 
@@ -501,7 +514,7 @@ HTTP; `R21`..`R26` cover the ICMP state machine, `/metrics` format, LLDP crawl, 
 container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R27` checks the OpenSSH
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
-the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti projects' URLs; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll; `R39` is the ruff `F` lint over `topo/` and `dev/` (not a constraint check); `R40` (constraint 24) the shared syslog parser and insert rule, `R40-sync` that its file is byte-identical in the three repos (`NOT RUN` if a sibling is not next to this repo); `R41` (constraint 25) the syslog poll trigger; the next constraint (26) takes `R42`. Output is one line per check
+the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti projects' URLs; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll; `R39` is the ruff `F` lint over `topo/` and `dev/` (not a constraint check); `R40` (constraint 24) the shared syslog parser and insert rule, `R40-sync` that `syslog_core.py`, `syslog_pull.py` and `syslog_cases.json` are byte-identical in the three repos (`NOT RUN` if a sibling is not next to this repo); `R41` (constraint 25) the syslog poll trigger; `R42` (constraint 26) the syslog pull; the next constraint (27) takes `R43`. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

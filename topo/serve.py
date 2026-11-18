@@ -26,11 +26,14 @@ def _start_background_services():
     poll yet, feature switched off): a missing background service must never
     stop the server from serving requests, which is the job that matters.
     """
-    from app import poller, reach, discovery, syslog_server
+    from app import poller, reach, discovery, syslog_server, syslog_pull, syslog_trigger, db
     poller.start()
     reach.start()
     discovery.start()
     syslog_server.start()
+    # Pulls syslog from the other Confetti servers, once an operator switches that on in Settings.
+    syslog_pull.start(db.connect, "topo", db.get_setting, db.set_setting, config.SYSLOG_PULL_INTERVAL_S,
+                      config.SYSLOG_DEDUP_S, on_stored=syslog_trigger.maybe_request)
 
 
 def main():

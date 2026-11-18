@@ -256,6 +256,10 @@ TOPO_SYSLOG_ENABLED=true
 # TOPO_SYSLOG_RETENTION_DAYS=14
 # Seconds a device is left alone after an early poll was asked for.
 # TOPO_SYSLOG_TRIGGER_MIN_S=30
+# Seconds between pulls from the other Confetti servers (switched on per server on the Settings page; 0 = thread off).
+# TOPO_SYSLOG_PULL_INTERVAL_S=15
+# Seconds in which a copy of a message pulled from another server counts as one this server already has.
+# TOPO_SYSLOG_DEDUP_S=10
 
 # --- Discovery (all off until configured) --------------------------------
 # Seconds between scheduled runs of the sources below; 0 = never.

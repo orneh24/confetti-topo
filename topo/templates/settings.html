@@ -26,6 +26,19 @@
         </div>
     </div>
     <div class="section">
+        <div class="section-header"><span>Syslog from other servers</span></div>
+        <div class="section-body">
+            <div class="hint" id="sp-status">loading</div>
+            <form id="sp-form" onsubmit="return false;">
+                <div id="sp-rows"></div>
+                <div class="hint">Lets a device log to one Confetti server only. This server then reads the other one's own messages every few seconds
+                    (nothing it pulled itself is passed on) and skips a message it already has. Switching a server on starts from its newest message; its
+                    history is not copied. Set its URL in the section above first. A pulled message from a device here also asks for an early poll.</div>
+                <span class="msg" id="sp-msg"></span>
+            </form>
+        </div>
+    </div>
+    <div class="section">
         <div class="section-header"><span>Other Confetti projects</span></div>
         <div class="section-body">
             <form id="links-form" onsubmit="saveLinks(); return false;" autocomplete="off">
@@ -33,7 +46,7 @@
                     <label for="l-traffic" data-ctx="link" data-field="traffic">Confetti Traffic URL</label><input id="l-traffic" name="traffic" placeholder="http://confetti-hub.example">
                     <label for="l-butler" data-ctx="link" data-field="butler">Confetti Butler URL</label><input id="l-butler" name="butler" placeholder="http://confetti-butler.example">
                 </div>
-                <div class="hint">A small button for each URL that is filled in appears at the right of the top menu on every page and opens that project in a new tab. Only http:// or https://. Leave a field empty to remove its button. The server never connects to these addresses; they are only links.</div>
+                <div class="hint">A small button for each URL that is filled in appears at the right of the top menu on every page and opens that project in a new tab. Only http:// or https://. Leave a field empty to remove its button. The server connects to one of these addresses only for the syslog pull below, and only if you switch that on.</div>
                 <button type="submit" class="primary">Save</button>
                 <span class="msg" id="links-msg"></span>
             </form>
@@ -124,6 +137,50 @@ function saveDefaults() {
 
 function clearDefaults() {
     sendDefaults({ password: '', enable_secret: '' }, 'secrets cleared');
+}
+
+var SP_NAMES = { butler: 'Confetti Butler', traffic: 'Confetti Traffic' };
+
+function loadSyslogPull() {
+    fetch('/api/settings/syslog-pull').then(function (r) { return r.json(); }).then(function (s) {
+        var box = document.getElementById('sp-rows');
+        box.innerHTML = '';
+        Object.keys(SP_NAMES).forEach(function (name) {
+            var sv = s.servers[name];
+            var row = document.createElement('div');
+            var label = document.createElement('label');
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.checked = sv.pull;
+            cb.disabled = !sv.url && !sv.pull;
+            cb.onchange = function () { saveSyslogPull(name, cb.checked); };
+            label.appendChild(cb);
+            label.appendChild(document.createTextNode(' Pull syslog from ' + SP_NAMES[name] + (sv.url ? '' : ' (set its URL above first)')));
+            row.appendChild(label);
+            var info = document.createElement('div');
+            info.className = 'hint';
+            if (sv.pull) {
+                info.textContent = sv.last_error ? 'last error: ' + sv.last_error :
+                    (sv.last_ok ? 'last pull ' + new Date(sv.last_ok).toLocaleString() + ', ' + sv.stored + ' stored since start' : 'waiting for the first pull');
+            }
+            row.appendChild(info);
+            box.appendChild(row);
+        });
+        document.getElementById('sp-status').textContent = s.running ? 'Checks every ' + s.interval_s + ' s.' : 'The pull thread is not running.';
+    });
+}
+
+function saveSyslogPull(name, on) {
+    var body = {};
+    body[name] = { pull: on };
+    fetch('/api/settings/syslog-pull', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+    }).then(function (res) {
+        say('sp-msg', res.ok, res.ok ? 'saved' : (res.data.error || 'save failed'));
+        loadSyslogPull();
+    });
 }
 
 function loadLinks() {
@@ -273,7 +330,7 @@ document.documentElement.setAttribute('data-ctx', 'page');
 ctxMenu.register('page', function (el, ev) {
     if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
     return { title: 'Settings', items: [
-        { label: 'Reload all sections', action: function () { loadDefaults(); loadLinks(); loadLldp(); loadDevices(); } },
+        { label: 'Reload all sections', action: function () { loadDefaults(); loadLinks(); loadSyslogPull(); loadLldp(); loadDevices(); } },
         { label: 'Select all devices', action: function () { selectAll(true); } },
         { label: 'Unselect all devices', action: function () { selectAll(false); } },
     ] };
@@ -281,6 +338,7 @@ ctxMenu.register('page', function (el, ev) {
 
 loadDefaults();
 loadLinks();
+loadSyslogPull();
 loadLldp();
 loadDevices();
 </script>

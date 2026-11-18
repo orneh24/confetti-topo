@@ -10,6 +10,7 @@ import os
 from . import config
 from . import poller
 from . import reach
+from . import syslog_pull
 from . import syslog_server
 from . import syslog_trigger
 
@@ -47,6 +48,11 @@ def render(conn):
     o.sample("topo_syslog_listening", "the UDP syslog listener is bound", "gauge", int(syslog_server.is_listening()))
     o.sample("topo_syslog_received_total", "syslog messages stored since start", "counter", syslog_server.stats["received"])
     o.sample("topo_syslog_duplicates_total", "syslog messages skipped as duplicates since start", "counter", syslog_server.stats["duplicates"])
+    for name, st in sorted(syslog_pull.status.items()):
+        o.sample("topo_syslog_pull_ok", "the last syslog pull from that server worked (1) or failed (0)", "gauge",
+                 int(not st["last_error"]), server=name)
+        o.sample("topo_syslog_pull_stored_total", "syslog messages stored from that server since start", "counter",
+                 st["stored"], server=name)
     o.sample("topo_syslog_triggers_total", "early polls requested by syslog since start", "counter", syslog_trigger.stats["triggers"])
     try:
         o.sample("topo_db_size_bytes", "size of the SQLite file", "gauge", os.path.getsize(config.DB_PATH))

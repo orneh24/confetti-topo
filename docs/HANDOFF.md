@@ -10,8 +10,9 @@ Split the topology mapping out of confetti-butler into this project. The plan an
   `lldp_crawl.py`, `events.py`, `metrics.py`, `collectors/{ssh,sweep,seedfile,confetti}.py`,
   `parsers/ios.py`, the base page, themes and layouts, the build, update, backup and setup scripts, the
   container files, and the regression harness. Left behind: IPAM, config templates and drift, running-config
-  backup, syslog, alerting, SNMP, vCenter discovery, interface error history, Packer, the lab-butler migration.
-- **New:** `app/topology.py` (the graph moved out of `app.py`), interface-IP peer resolution
+  backup, alerting, SNMP, vCenter discovery, interface error history, Packer, the lab-butler migration.
+- **New:** syslog (UDP receiver, `/syslog` page, early-poll trigger, pull from butler and traffic: `syslog_core.py`, `syslog_server.py`,
+  `syslog_trigger.py`, `syslog_pull.py`, constraints 24-26), `app/topology.py` (the graph moved out of `app.py`), interface-IP peer resolution
   (constraint 12), one edge for a session both routers report, `GET /api/lldp-neighbors`, the
   `?device_id=` filter on `/api/adjacencies`, a per-device LLDP and BGP/OSPF section on the device page,
   `interfaces` polled for addresses only.
