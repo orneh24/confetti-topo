@@ -35,6 +35,23 @@ SNAPSHOT_RETENTION_DAYS = int(os.environ.get("TOPO_SNAPSHOT_RETENTION_DAYS", "14
 FLAP_COUNT = int(os.environ.get("TOPO_FLAP_COUNT", "3"))
 FLAP_WINDOW_S = int(os.environ.get("TOPO_FLAP_WINDOW_S", "3600"))
 
+# Running-config backups (merged from confetti-butler): keep this many per device (0 = all), and error-counter history days.
+CONFIG_VERSIONS_KEEP = int(os.environ.get("TOPO_CONFIG_VERSIONS_KEEP", "0"))
+STATS_RETENTION_DAYS = int(os.environ.get("TOPO_STATS_RETENTION_DAYS", "7"))
+
+# ---------------------------------------------------------------------------
+# Alerting (alerts.py, merged from confetti-butler): rules send a webhook or mail for events and syslog.
+# ---------------------------------------------------------------------------
+ALERTS_ENABLED = _flag("TOPO_ALERTS_ENABLED", "true")
+ALERT_TICK_S = int(os.environ.get("TOPO_ALERT_TICK_S", "10"))
+ALERT_MAX_AGE_S = int(os.environ.get("TOPO_ALERT_MAX_AGE_S", "600"))
+SMTP_HOST = os.environ.get("TOPO_SMTP_HOST", "")
+SMTP_PORT = int(os.environ.get("TOPO_SMTP_PORT", "25"))
+SMTP_USER = os.environ.get("TOPO_SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("TOPO_SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("TOPO_SMTP_FROM", "confetti-topo@localhost")
+SMTP_TLS = _flag("TOPO_SMTP_TLS", "false")
+
 # ---------------------------------------------------------------------------
 # ICMP reachability checker (reach.py)
 # ---------------------------------------------------------------------------
@@ -79,6 +96,8 @@ LLDP_AUTO_ADOPT = _flag("TOPO_LLDP_AUTO_ADOPT", "false")
 DEFAULT_SSH_USERNAME = os.environ.get("TOPO_SSH_USERNAME", "admin")
 DEFAULT_SSH_PASSWORD = os.environ.get("TOPO_SSH_PASSWORD", "")
 DEFAULT_SSH_SECRET = os.environ.get("TOPO_SSH_SECRET", "")
+DEFAULT_SNMP_COMMUNITY = os.environ.get("TOPO_SNMP_COMMUNITY", "")
+DEFAULT_SNMP_VERSION = os.environ.get("TOPO_SNMP_VERSION", "2c")
 
 # PAN-OS XML API (collectors/panos.py). A firewall ships with a self-signed management certificate, so
 # the certificate is not checked unless asked: the same isolated-lab posture as the other defaults.

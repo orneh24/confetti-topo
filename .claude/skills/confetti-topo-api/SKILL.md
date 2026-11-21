@@ -38,7 +38,14 @@ those two columns to NULL, so its neighbors become ghosts again.
 
 ## Routes
 
-**Pages:** `/` `/devices` `/devices/<id>` `/topology` `/conflicts` `/settings`
+**Pages:** `/` `/devices` `/devices/<id>` `/topology` `/conflicts` `/settings` `/syslog` `/changes` `/ipam` `/templates` `/alerts`
+
+**Merged from butler (routes in `app/butler_routes.py`):**
+- `GET /api/devices/<id>/drift|interface-stats|configs`, `/configs/<vid>`, `/configs/diff` (`?raw=1` unmasks); `GET|PUT /api/devices/<id>/vars`
+- `GET /api/ipam/addresses|prefixes|findings`, `POST /api/ipam/analyze`
+- `GET|POST /api/templates`, `GET|PUT|DELETE /api/templates/<name>`, `/versions`, `POST /preview`
+- `GET /configs/` and `GET /configs/<key>.cfg` — unauthenticated on purpose (constraint 28)
+- `GET|POST /api/alert-rules`, `PUT|DELETE /api/alert-rules/<id>`, `POST /api/alert-rules/<id>/test`; `POST /api/discover/vcenter`
 
 **Devices:**
 - `GET|POST /api/devices` — POST goes through `identity.ingest`
@@ -83,8 +90,8 @@ load/memory/disk/uptime) — both never 500; every check degrades to `null`/`"un
 ## Poller scheduling
 
 `devices.poll_state` (`idle`/`running`) is the per-device lock; `next_poll_at` is the schedule. Each tick
-claims due devices, marks them `running`, and runs ten tasks per device — `version`, `interfaces`, `lldp`,
-`bgp`, `ospf`, `routes`, and on IOS switches `vlans`, `trunks`, `stp`, `mac` — over one SSH session (PAN-OS: six over the XML API), each committing its own transaction. Rows a *successful* task no longer
+claims due devices, marks them `running`, and runs eleven tasks per device — `version`, `interfaces`, `lldp`,
+`bgp`, `ospf`, `routes`, `config`, and on IOS switches `vlans`, `trunks`, `stp`, `mac` — over one SSH session (PAN-OS: six over the XML API; SNMP: two), each committing its own transaction. Rows a *successful* task no longer
 sees are deleted; a failed task changes nothing. `running` is released in a `finally` and reset at startup.
 `role='node'` devices are excluded from the claim query. Success: `fail_count=0`,
 `next_poll_at = now + poll_interval_s`. Failure: `fail_count += 1`,

@@ -261,7 +261,7 @@ def _():
     did = add_device(conn, "192.0.2.1")
     conn.close()
     client = m["appmod"].app.test_client()
-    for url in ("/", "/devices", "/devices/%d" % did, "/conflicts", "/topology", "/settings"):
+    for url in ("/", "/devices", "/devices/%d" % did, "/conflicts", "/topology", "/settings", "/ipam", "/templates", "/alerts"):
         code = client.get(url).status_code
         need(code == 200, "GET %s -> %s" % (url, code), p)
     return p
@@ -566,7 +566,7 @@ def _():
 def _():
     p = []
     tasks = app_modules()["ssh"].TASKS
-    words = {"four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+    words = {"four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
     doc = read("CLAUDE.md")
     for pat in (r"Per device, (\w+) tasks", r"All (\w+) tasks share"):
         m = re.search(pat, doc)
@@ -648,12 +648,18 @@ def _():
     from app import platforms
     ios_tasks = tuple(platforms.IOS["commands"])
     core = ("version", "interfaces", "lldp", "bgp", "ospf", "routes")
-    need(ios_tasks == core + ("vlans", "trunks", "stp", "mac"), "IOS tasks are %r" % (ios_tasks,), p)
+    need(ios_tasks == core + ("vlans", "trunks", "stp", "mac", "config"), "IOS tasks are %r" % (ios_tasks,), p)
     for name, plat in platforms.PLATFORMS.items():
-        # "vlans" is a switch task of the IOS entry only; every platform has the six core tasks.
-        have = tuple(t for t in plat["commands"] if t not in platforms.SWITCH_TASKS)
+        if plat["transport"] == "snmp":
+            # SNMP (from confetti-butler) asks version and interfaces only, through net-snmp's get and walk: no CLI.
+            need(tuple(plat["tasks"]) == ("version", "interfaces"), "%s tasks are %r" % (name, plat.get("tasks")), p)
+            need("commands" not in plat, "%s: an SNMP platform has no CLI commands" % name, p)
+            continue
+        # "vlans" is a switch task of the IOS entry only, and "config" (the running-config backup) too;
+        # every platform has the six core tasks.
+        have = tuple(t for t in plat["commands"] if t not in platforms.SWITCH_TASKS and t != "config")
         need(have == core, "%s tasks are %r, expected the core %r" % (name, tuple(plat["commands"]), core), p)
-        need(not (set(plat["commands"]) & set(platforms.SWITCH_TASKS)) or plat is platforms.IOS, "%s: vlans, trunks, stp and mac are only for the IOS entry" % name, p)
+        need(not (set(plat["commands"]) & (set(platforms.SWITCH_TASKS) | {"config"})) or plat is platforms.IOS, "%s: vlans, trunks, stp, mac and config are only for the IOS entry" % name, p)
         need(set(plat["parsers"]) == set(plat["commands"]), "%s: commands and parsers differ" % name, p)
         # SSH platforms run `show ...`; the XML API platform sends `<show>...</show>` operations. Nothing else.
         prefix = "<show>" if plat.get("transport") == "xml_api" else "show "
@@ -888,10 +894,11 @@ def _():
     config.DEFAULT_SSH_USERNAME, config.DEFAULT_SSH_PASSWORD, config.DEFAULT_SSH_SECRET = "envuser", "envpw", "envsecret"
     client = m["appmod"].app.test_client()
 
-    def creds(did):
+    def creds(did, fields=("username", "password", "secret")):
         c = m["db"].connect()
         try:
-            return ssh.resolve_credentials(c, did)
+            got = ssh.resolve_credentials(c, did)
+            return {k: got[k] for k in fields}
         finally:
             c.close()
     need(creds(a) == {"username": "envuser", "password": "envpw", "secret": "envsecret"}, "env defaults not used: %r" % creds(a), p)
@@ -913,6 +920,19 @@ def _():
     need(r.status_code == 200 and creds(a)["username"] == creds(b)["username"] == "bulk", "bulk apply did not reach both devices", p)
     client.post("/api/credentials/clear", json={"device_ids": [a, b]})
     need(creds(a)["username"] == "setuser" and creds(a)["password"] == "setpw", "clearing own credentials should fall back to Settings: %r" % creds(a), p)
+    # SNMP community and version (from confetti-butler) follow the same order and are never returned by a GET.
+    snmp = ("snmp_community", "snmp_version")
+    config.DEFAULT_SNMP_COMMUNITY, config.DEFAULT_SNMP_VERSION = "envcomm", "1"
+    need(creds(a, snmp) == {"snmp_community": "envcomm", "snmp_version": "1"}, "env SNMP defaults not used: %r" % creds(a, snmp), p)
+    client.put("/api/settings/credentials", json={"snmp_community": "SETCOMM", "snmp_version": "2c"})
+    need(creds(a, snmp) == {"snmp_community": "SETCOMM", "snmp_version": "2c"}, "Settings SNMP does not beat env: %r" % creds(a, snmp), p)
+    client.put("/api/devices/%d/credentials" % a, json={"snmp_community": "DEVCOMM"})
+    need(creds(a, snmp)["snmp_community"] == "DEVCOMM", "device SNMP community does not beat Settings: %r" % creds(a, snmp), p)
+    need(creds(b, snmp)["snmp_community"] == "SETCOMM", "another device must keep the Settings SNMP community: %r" % creds(b, snmp), p)
+    for url in ("/api/settings/credentials", "/api/credentials", "/api/devices/%d/credentials" % a):
+        body = client.get(url).get_data(as_text=True)
+        for secret in ("DEVCOMM", "SETCOMM"):
+            need(secret not in body, "GET %s returns an SNMP community" % url, p)
     return p
 
 
@@ -1216,6 +1236,461 @@ def _():
     need(got["name"] is True and got["chassis"] is False and got["source"]["name"] == "env", "env default not used when no Settings row: %r" % got, p)
     cfg.LLDP_MATCH_NAME = False
     conn.close()
+    return p
+
+
+
+# ---- merged in from confetti-butler: templates, config backups, drift, alerting, SNMP, error history ----
+
+
+@check("R43", "template rendering: StrictUndefined and sandboxed")
+def _():
+    p = []
+    import jinja2
+    import jinja2.sandbox
+    app_modules()
+    from app import rendering as r
+    need(isinstance(r._ENV, jinja2.sandbox.SandboxedEnvironment), "environment is not a SandboxedEnvironment", p)
+    need(r._ENV.undefined is jinja2.StrictUndefined, "undefined is not StrictUndefined", p)
+    for src, what in (("{{ vars.nope }}", "unset variable"),
+                      ("{{ cycler.__init__.__globals__ }}", "sandbox escape")):
+        try:
+            out = r.render(src, {"vars": {}})
+            p.append("%s rendered instead of raising: %r" % (what, out[:60]))
+        except r.RenderError:
+            pass
+    return p
+
+
+@check("R44", "GET /configs/<key>.cfg stays unauthenticated, also with TOPO_AUTH_TOKEN set (a device cannot send a token); the API still needs it")
+def _():
+    p = []
+    m, conn = fresh_db()
+    did = add_device(conn, "192.0.2.1")
+    key = conn.execute("SELECT key FROM devices WHERE id = ?", (did,)).fetchone()["key"]
+    conn.execute("INSERT INTO templates (name, body, updated_at) VALUES ('t', 'hostname {{ device.hostname }}', ?)",
+                 (m["db"].sqlite_now(),))
+    conn.execute("UPDATE devices SET template_name = 't' WHERE id = ?", (did,))
+    conn.commit()
+    conn.close()
+    client = m["appmod"].app.test_client()
+    resp = client.get("/configs/%s.cfg" % key)
+    need(resp.status_code == 200 and b"hostname rtr" in resp.data,
+         "pull returned %s %r" % (resp.status_code, resp.data[:60]), p)
+    need(client.get("/configs/nope.cfg").status_code == 404, "unknown key should be 404, not an auth error", p)
+    need(client.get("/configs/").status_code == 200, "/configs/ index should be open", p)
+    config = m["config"]
+    old, config.AUTH_TOKEN = config.AUTH_TOKEN, "s3cret-token"
+    try:
+        resp = client.get("/configs/%s.cfg" % key)
+        need(resp.status_code == 200 and b"hostname rtr" in resp.data,
+             "with an access token set, the pull returned %s" % resp.status_code, p)
+        need(client.get("/api/templates").status_code == 401, "with an access token set, /api/templates must need it", p)
+        need(client.get("/api/devices/%d/configs" % did).status_code == 401, "with an access token set, the config backups must need it", p)
+        need(client.get("/templates").status_code == 302, "with an access token set, the templates page must redirect to /login", p)
+    finally:
+        config.AUTH_TOKEN = old
+    return p
+
+
+RUNNING = """Building configuration...
+
+Current configuration : 1234 bytes
+!
+! Last configuration change at 10:00:00 UTC Mon Oct 5 2026
+version 17.3
+hostname r1
+enable secret 9 $9$abc$def
+username bob password 0 hunter2
+snmp-server community lab123 RO
+ntp clock-period 123456
+end
+"""
+
+
+@check("R45", "running-config backup: only complete configs, stored on change only, secrets masked")
+def _():
+    p = []
+    m, conn = fresh_db()
+    ios, ssh = m["ios"], m["ssh"]
+    from app import rendering
+    need(ios.parse_running_config("% Invalid input detected at '^' marker.") == "", "error text accepted as a config", p)
+    need(ios.parse_running_config(RUNNING.replace("end\n", "")) == "", "truncated config (no 'end') accepted", p)
+    a = ios.parse_running_config(RUNNING)
+    b = ios.parse_running_config(RUNNING.replace("10:00:00", "11:11:11").replace("123456", "999"))
+    need(a and a == b, "volatile lines (last change / clock-period) make identical configs differ", p)
+    did = add_device(conn, "192.0.2.1")
+    ssh.apply_result(conn, did, "config", a)
+    ssh.apply_result(conn, did, "config", b)
+    conn.commit()
+    n = conn.execute("SELECT count(*) FROM config_versions").fetchone()[0]
+    need(n == 1, "same config stored %d times" % n, p)
+    masked = rendering.redact_secrets(a)
+    for leak in ("$9$abc", "hunter2", "lab123"):
+        need(leak not in masked, "secret %r survives redact_secrets" % leak, p)
+    # Found leaking on a real router's config (the isakmp pre-shared key came back unmasked).
+    more = rendering.redact_secrets(
+        "crypto isakmp key s3cretpsk address 198.51.100.7\n"
+        "ntp authentication-key 1 md5 ntpk3y\n"
+        "standby 1 authentication md5 key-string hsrpk3y\n"
+        " description crypto isakmp key is a topic\n")
+    for leak in ("s3cretpsk", "ntpk3y", "hsrpk3y"):
+        need(leak not in more, "secret %r survives redact_secrets" % leak, p)
+    need(" description crypto isakmp key is a topic" in more, "redact_secrets masked a description line", p)
+    conn.close()
+    resp = m["appmod"].app.test_client().get("/api/devices/%d/configs/1" % did)
+    need(resp.status_code == 200 and b"hunter2" not in resp.data, "API returns an unmasked secret by default", p)
+    return p
+
+
+class _Capture:
+    def __init__(self, fail=False):
+        self.sent, self.fail = [], fail
+
+    def __call__(self, target, payload):
+        self.sent.append((target, payload))
+        if self.fail:
+            raise RuntimeError("target down")
+
+
+def _rule(conn, **kw):
+    row = dict(name="r", enabled=1, source="event", kinds="", min_severity="info", syslog_max_severity=None,
+               pattern="", device="", target="webhook:http://127.0.0.1:9/x", cooldown_s=300, created_at="2026-01-01 00:00:00")
+    row.update(kw)
+    cols = ",".join(row)
+    conn.execute("INSERT INTO alert_rules (%s) VALUES (%s)" % (cols, ",".join(":" + k for k in row)), row)
+    conn.commit()
+
+
+@check("R46", "alerting: matching, cooldown, no replay of old events, failures contained, no write lock during a send")
+def _():
+    p = []
+    m, conn = fresh_db()
+    from app import alerts, events
+    did = add_device(conn, "192.0.2.1", "core-r1")
+    # --- pure matching
+    ev = {"kind": "bgp_state", "severity": "warning", "subject": "core-r1 BGP peer 10.0.0.2: Active", "detail": "Established -> Active", "hostname": "core-r1"}
+    base = dict(source="event", kinds="", min_severity="info", device="", pattern="")
+    need(alerts.matches_event(dict(base), ev), "empty rule should match every event", p)
+    need(not alerts.matches_event(dict(base, kinds="ping_down"), ev), "kind filter ignored", p)
+    need(alerts.matches_event(dict(base, kinds="ping_down, bgp_state"), ev), "kind list with a space failed", p)
+    need(not alerts.matches_event(dict(base, min_severity="critical"), ev), "min_severity ignored", p)
+    need(alerts.matches_event(dict(base, min_severity="warning"), ev), "min_severity=warning should match a warning", p)
+    need(not alerts.matches_event(dict(base, device="edge"), ev) and alerts.matches_event(dict(base, device="CORE"), ev), "device filter", p)
+    need(alerts.matches_event(dict(base, pattern="established ->"), ev) and not alerts.matches_event(dict(base, pattern="nomatch"), ev), "pattern", p)
+    sysb = dict(source="syslog", syslog_max_severity=3, device="", pattern="")
+    msg = {"severity": 3, "host": "core-r1", "source_ip": "192.0.2.1", "mnemonic": "BGP-3-NOTIFICATION", "message": "sent to neighbor"}
+    need(alerts.matches_syslog(sysb, msg) and not alerts.matches_syslog(sysb, dict(msg, severity=5)), "syslog severity limit", p)
+    need(not alerts.matches_syslog(sysb, dict(msg, severity=None)), "a message without a severity must not pass a severity limit", p)
+    need(alerts.matches_syslog(dict(sysb, pattern="NOTIFICATION"), msg), "syslog pattern over the mnemonic", p)
+    need(not alerts.matches_syslog(dict(base, source="event"), msg), "an event rule matched syslog", p)
+
+    # --- pipeline
+    _rule(conn, name="drift", kinds="config_drift,ping_down", min_severity="warning", cooldown_s=300)
+    events.emit(conn, did, "config_drift", "warning", "core-r1: drifted", "1 line(s) missing")
+    events.emit(conn, did, "interface_up", "info", "core-r1 Gi1: up", "")           # not matched
+    # An old event on a different device key: the cooldown must not be what keeps it quiet.
+    conn.execute("INSERT INTO events (at, device_id, kind, severity, subject, detail) VALUES ('2020-01-01 00:00:00', NULL, 'ping_down', 'warning', 'old', '')")
+    conn.commit()
+    cap = _Capture()
+    now = time.time()
+    alerts.process_once(deliver_fn=cap, now=now)
+    need(len(cap.sent) == 1 and cap.sent[0][1]["kind"] == "config_drift", "first pass sent %r" % [(c[1]["kind"]) for c in cap.sent], p)
+    need(cap.sent and cap.sent[0][1]["text"].startswith("[confetti-topo] core-r1: drifted"), "payload text: %r" % (cap.sent[0][1]["text"] if cap.sent else None), p)
+    alerts.process_once(deliver_fn=cap, now=now + 1)
+    need(len(cap.sent) == 1, "events were alerted twice", p)
+    events.emit(conn, did, "ping_down", "warning", "core-r1: not answering ping", "")
+    events.emit(conn, did, "ping_down", "warning", "core-r1: not answering ping again", "")
+    conn.commit()
+    alerts.process_once(deliver_fn=cap, now=now + 10)
+    need(len(cap.sent) == 1, "cooldown ignored: %d sent" % len(cap.sent), p)
+    events.emit(conn, did, "ping_down", "warning", "core-r1: still down", "")
+    conn.commit()
+    alerts.process_once(deliver_fn=cap, now=now + 400)
+    need(len(cap.sent) == 2 and "held back" in cap.sent[1][1]["text"], "after the cooldown: %r" % (cap.sent[-1][1]["text"] if cap.sent else None), p)
+
+    # --- syslog queue
+    _rule(conn, name="sys", source="syslog", syslog_max_severity=3, cooldown_s=0)
+    for i in range(3):
+        alerts.offer_syslog(dict(msg, message="m%d" % i))
+    alerts.offer_syslog(dict(msg, severity=6))
+    alerts.offer_syslog(None)
+    cap2 = _Capture()
+    alerts.process_once(deliver_fn=cap2, now=now + 500)
+    need(len(cap2.sent) == 3, "syslog alerts sent: %d, expected 3" % len(cap2.sent), p)
+    need(alerts._syslog_queue.maxlen is not None, "the syslog hand-over queue must be bounded", p)
+
+    # --- a failing target is recorded, not raised, not retried forever
+    conn.execute("UPDATE alert_rules SET cooldown_s = 0")      # the cooldown is covered above
+    conn.commit()
+    alerts._last_sent.clear()                                  # the clock above was simulated
+    alerts._held_back.clear()
+    bad = _Capture(fail=True)
+    events.emit(conn, did, "config_drift", "warning", "core-r1: drifted again", "")
+    conn.commit()
+    alerts.process_once(deliver_fn=bad)
+    err = conn.execute("SELECT last_error FROM alert_rules WHERE name = 'drift'").fetchone()[0]
+    need(err and "target down" in err, "failure not recorded on the rule: %r" % err, p)
+    n = len(bad.sent)
+    alerts.process_once(deliver_fn=bad)
+    need(len(bad.sent) == n, "a failed alert was retried on the next pass", p)
+
+    # --- no write lock held while sending
+    import sqlite3
+    seen = []
+
+    def probe(target, payload):
+        c = sqlite3.connect(m["config"].DB_PATH, timeout=0.2)
+        try:
+            c.execute("BEGIN IMMEDIATE")
+            c.rollback()
+            seen.append("free")
+        except sqlite3.OperationalError:
+            seen.append("LOCKED")
+        finally:
+            c.close()
+    events.emit(conn, did, "config_drift", "warning", "core-r1: drifted third time", "")
+    conn.commit()
+    alerts.process_once(deliver_fn=probe)
+    need(seen == ["free"], "database write lock was held during the send: %r" % seen, p)
+    conn.close()
+    need("alerts.offer_syslog" in read("topo/app/syslog_server.py"), "syslog receiver no longer hands messages to alerts", p)
+    return p
+
+
+@check("R47", "alert delivery: webhook JSON, mail, retry once, target never returned in full")
+def _():
+    p = []
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    m, conn = fresh_db()
+    from app import alerts
+    got = []
+
+    class H(BaseHTTPRequestHandler):
+        code = 200
+
+        def do_POST(self):
+            body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            got.append((self.path, self.headers.get("Content-Type"), json.loads(body)))
+            self.send_response(H.code)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+    srv = HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = "http://127.0.0.1:%d/hook/SECRETTOKEN" % srv.server_address[1]
+    try:
+        payload = alerts.make_payload("warning", "ping_down", "r1", "r1: not answering ping", "2 failed")
+        alerts.deliver("webhook:" + url, payload)
+        need(len(got) == 1 and got[0][0] == "/hook/SECRETTOKEN" and "json" in (got[0][1] or ""), "webhook request: %r" % got, p)
+        if got:
+            need(all(k in got[0][2] for k in ("text", "title", "severity", "kind", "device", "at")), "webhook JSON keys: %r" % sorted(got[0][2]), p)
+        H.code = 500
+        try:
+            alerts.deliver("webhook:" + url, payload)
+            p.append("an HTTP 500 from the webhook was treated as success")
+        except RuntimeError:
+            pass
+        n = len(got)
+        real_sleep, alerts.time.sleep = alerts.time.sleep, lambda s: None
+        try:
+            alerts.deliver_with_retry("webhook:" + url, payload)
+        except RuntimeError:
+            pass
+        finally:
+            alerts.time.sleep = real_sleep
+        need(len(got) - n == 2, "retry sent %d requests, expected exactly 2" % (len(got) - n), p)
+    finally:
+        srv.shutdown()
+
+    # mail: smtplib replaced by a recorder
+    config = m["config"]
+    sent = {}
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout=None):
+            sent["conn"] = (host, port)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def starttls(self):
+            sent["tls"] = True
+
+        def login(self, u, pw):
+            sent["login"] = (u, pw)
+
+        def send_message(self, msg):
+            sent["msg"] = msg
+    real = alerts.smtplib.SMTP
+    alerts.smtplib.SMTP = FakeSMTP
+    old = (config.SMTP_HOST, config.SMTP_TLS, config.SMTP_USER, config.SMTP_PASSWORD)
+    try:
+        config.SMTP_HOST, config.SMTP_TLS, config.SMTP_USER, config.SMTP_PASSWORD = "", False, "", ""
+        try:
+            alerts.deliver("mail:ops@example.net", payload)
+            p.append("mail without TOPO_SMTP_HOST did not fail")
+        except RuntimeError as exc:
+            need("SMTP" in str(exc), "unhelpful error: %s" % exc, p)
+        config.SMTP_HOST, config.SMTP_TLS, config.SMTP_USER, config.SMTP_PASSWORD = "smtp.invalid", True, "u", "pw"
+        alerts.deliver("mail:ops@example.net", payload)
+        msg = sent.get("msg")
+        need(msg is not None and msg["To"] == "ops@example.net" and "ping_down" in msg["Subject"], "mail headers: %r" % (dict(msg) if msg else None), p)
+        need(sent.get("tls") and sent.get("login") == ("u", "pw"), "TLS / login not used: %r" % sent, p)
+    finally:
+        alerts.smtplib.SMTP = real
+        config.SMTP_HOST, config.SMTP_TLS, config.SMTP_USER, config.SMTP_PASSWORD = old
+
+    # API: validation, masking, partial update
+    c = m["appmod"].app.test_client()
+    good = {"name": "n", "source": "event", "target": "webhook:" + url}
+    r = c.post("/api/alert-rules", json=good)
+    need(r.status_code == 201 and "SECRETTOKEN" not in r.get_data(as_text=True), "create / the token leaked in the response", p)
+    rid = r.get_json()["id"]
+    need("SECRETTOKEN" not in c.get("/api/alert-rules").get_data(as_text=True), "the webhook token leaked in the list", p)
+    for bad in ({"target": "ftp://x"}, {"target": "mail:nope"}, {"pattern": "("}, {"cooldown_s": "-1"},
+                {"source": "other"}, {"min_severity": "loud"}, {"syslog_max_severity": 9}, {"name": " "}):
+        code = c.post("/api/alert-rules", json=dict(good, **bad)).status_code
+        need(code == 400, "invalid %r accepted (%s)" % (bad, code), p)
+    need(c.put("/api/alert-rules/%d" % rid, json={"enabled": False}).get_json()["enabled"] == 0, "PUT enabled", p)
+    stored = m["db"].connect().execute("SELECT target FROM alert_rules WHERE id = ?", (rid,)).fetchone()[0]
+    need(stored == "webhook:" + url, "a PUT without target changed the stored target: %r" % stored, p)
+    need(c.post("/api/alert-rules/%d/test" % rid).get_json().get("ok") in (True, False), "test endpoint", p)
+    need(c.delete("/api/alert-rules/%d" % rid).status_code == 200 and c.delete("/api/alert-rules/%d" % rid).status_code == 404, "delete", p)
+    need(c.get("/alerts").status_code == 200, "alerts page", p)
+    return p
+
+
+@check("R48", "SNMP collector: parses real snmpd output, refuses v3, bad hosts, missing tools")
+def _():
+    p = []
+    app_modules()
+    from app.collectors import snmp
+    walks = {c: {} for c in (snmp.IF_DESCR, snmp.IF_MTU, snmp.IF_SPEED, snmp.IF_ADMIN, snmp.IF_OPER,
+                             snmp.IF_IN_ERRORS, snmp.IF_ALIAS, snmp.IP_IFINDEX, snmp.IP_MASK)}
+    for col, f in ((snmp.IF_DESCR, "snmp_ifDescr.txt"), (snmp.IF_ADMIN, "snmp_ifAdminStatus.txt"),
+                   (snmp.IF_OPER, "snmp_ifOperStatus.txt"), (snmp.IP_IFINDEX, "snmp_ipAdEntIfIndex.txt"),
+                   (snmp.IP_MASK, "snmp_ipAdEntNetMask.txt")):
+        walks[col] = snmp.parse_pairs(sample(f))
+    rows = {r["name"]: r for r in snmp.parse_interfaces(walks)}
+    need(set(rows) == {"lo", "eth0"}, "interfaces parsed: %r" % sorted(rows), p)
+    if "lo" in rows:
+        need((rows["lo"]["ip"], rows["lo"]["prefix_len"], rows["lo"]["oper_status"]) == ("127.0.0.1", 8, "up"), "lo row: %r" % rows["lo"], p)
+    v = snmp.parse_version(snmp.parse_pairs(sample("snmp_sys.txt")))
+    need((v["hostname_hint"], v["os_version"]) == ("lab-snmp-1", "15.4(1)S2"), "version: %r" % v, p)
+
+    def errors(device, creds):
+        return [e for (_t, ok, _o, e, _p) in snmp.run_tasks(device, creds) if not ok]
+    need(all("not supported" in e for e in errors({"mgmt_ip": "192.0.2.1"}, {"snmp_version": "3"})), "v3 must fail with a clear message", p)
+    need(all("not an IP" in e for e in errors({"mgmt_ip": "192.0.2.1; id"}, {"snmp_version": "2c"})), "a non-IP host reached the subprocess", p)
+    real = snmp.subprocess.run
+
+    def missing(*a, **k):
+        raise FileNotFoundError()
+    snmp.subprocess.run = missing
+    try:
+        errs = errors({"mgmt_ip": "192.0.2.1"}, {"snmp_version": "2c", "snmp_community": "x"})
+    finally:
+        snmp.subprocess.run = real
+    need(errs and all("net-snmp-tools" in e for e in errs), "missing snmpwalk should name the apk package: %r" % errs, p)
+    return p
+
+
+@check("R49", "drift check: containment by parent chain, secrets skipped, statuses, events only on a change")
+def _():
+    p = []
+    m, conn = fresh_db()
+    from app import drift
+    ssh = m["ssh"]
+    run = ("version 17.3\nhostname r1\nenable secret 9 $9$abc\n!\ninterface GigabitEthernet1\n"
+           " ip address 10.0.0.1 255.255.255.0\n no shutdown\n!\nrouter bgp 65000\n"
+           " neighbor 10.0.0.2 remote-as 65001\n address-family ipv4\n  neighbor 10.0.0.2 activate\n"
+           " exit-address-family\nend\n")
+    tpl = ("hostname r1\nenable secret {{ vars.x }}\n\ninterface GigabitEthernet1\n    ip address 10.0.0.1 255.255.255.0\n"
+           "exit\nrouter bgp 65000\n  neighbor 10.0.0.2 remote-as 65001\n  address-family ipv4\n"
+           "      neighbor 10.0.0.2 activate\n")
+    miss, skipped = drift.compare(tpl, run)
+    need(miss == [] and skipped == 1, "matching config reported %r (skipped %r)" % (miss, skipped), p)
+    miss, _ = drift.compare(tpl.replace("65001", "65002").replace("10.0.0.1 255", "10.0.0.9 255"), run)
+    need({x["line"] for x in miss} == {"ip address 10.0.0.9 255.255.255.0", "neighbor 10.0.0.2 remote-as 65002"},
+         "changed values: %r" % miss, p)
+    # the same line under a different parent is NOT a match
+    miss, _ = drift.compare("interface GigabitEthernet2\n ip address 10.0.0.1 255.255.255.0\n", run)
+    need(len(miss) == 2, "a line under the wrong interface counted as present: %r" % miss, p)
+    need(drift.compare(tpl, run + "interface Loopback9\n description extra\n")[0] == [], "extra running lines must not be drift", p)
+    # `no X` in a template: met when X is absent (a default is never printed); drift when X is present
+    nos = "interface GigabitEthernet1\n no shutdown\nno ip http server\n"
+    bare = run.replace(" no shutdown\n", "")                    # IOS prints nothing for an enabled interface
+    need(drift.compare(nos, bare)[0] == [], "`no shutdown` must be met by the line being absent: %r" % drift.compare(nos, bare)[0], p)
+    shut = run.replace(" no shutdown\n", " shutdown\n") + "ip http server\n"
+    need({x["line"] for x in drift.compare(nos, shut)[0]} == {"no shutdown", "no ip http server"},
+         "`no X` with X present must be drift: %r" % drift.compare(nos, shut)[0], p)
+
+    did = add_device(conn, "192.0.2.1", "r1")
+    need(drift.evaluate(conn, did)["status"] == "no_template", "no template -> %r" % drift.evaluate(conn, did)["status"], p)
+    conn.execute("INSERT INTO templates (name, body, updated_at) VALUES ('t', ?, ?)", (tpl, m["db"].sqlite_now()))
+    conn.execute("UPDATE devices SET template_name = 't' WHERE id = ?", (did,))
+    need(drift.evaluate(conn, did)["status"] == "no_backup", "no backup -> %r" % drift.evaluate(conn, did)["status"], p)
+    conn.execute("INSERT INTO config_versions (device_id, sha256, body, captured_at) VALUES (?, 'x', ?, ?)",
+                 (did, run, m["db"].sqlite_now()))
+    need(drift.evaluate(conn, did)["status"] == "render_error", "an unset template variable must be a render_error", p)
+    conn.execute("INSERT INTO template_vars (device_id, key, value) VALUES (?, 'x', 'whatever')", (did,))
+    need(drift.evaluate(conn, did)["status"] == "compliant", "compliant expected: %r" % drift.evaluate(conn, did), p)
+
+    def kinds():
+        return [r["kind"] for r in conn.execute("SELECT kind FROM events WHERE kind LIKE 'config_%' AND kind != 'config_changed' ORDER BY id")]
+    drift.refresh(conn, did)                                    # baseline
+    need(kinds() == [], "baseline evaluation emitted %r" % kinds(), p)
+    drifted = run.replace("10.0.0.1 255", "10.0.0.7 255")
+    ssh.apply_result(conn, did, "config", drifted)              # a poll sees a changed config
+    need(kinds() == ["config_drift"], "compliant -> drifted emitted %r" % kinds(), p)
+    ssh.apply_result(conn, did, "config", drifted)
+    need(kinds() == ["config_drift"], "an unchanged drifted config emitted again: %r" % kinds(), p)
+    ssh.apply_result(conn, did, "config", run)
+    need(kinds() == ["config_drift", "config_compliant"], "drifted -> compliant emitted %r" % kinds(), p)
+    conn.commit()
+    conn.close()
+    # saving the template re-evaluates the devices that use it
+    client = m["appmod"].app.test_client()
+    client.put("/api/templates/t", json={"body": tpl + "banner motd ^hello^\n"})
+    status = client.get("/api/devices").get_json()[0]["drift_status"]
+    need(status == "drifted", "template save did not refresh drift_status (%r)" % status, p)
+    need(client.get("/api/devices/%d/drift" % did).get_json()["status"] == "drifted", "drift API", p)
+    return p
+
+
+@check("R50", "interface error history: sampled on change, resets ignored, 24h growth in the API")
+def _():
+    p = []
+    m, conn = fresh_db()
+    ssh = m["ssh"]
+    need(ssh.growth([{"x": v} for v in (10, 15, 3, 8)], "x") == 10, "growth() should ignore a counter reset", p)
+    did = add_device(conn, "192.0.2.1")
+
+    def intf(crc):
+        return [dict(name="Gi1", description="", ip=None, prefix_len=None, network=None, admin_status="up",
+                     oper_status="up", speed=None, duplex=None, input_errors=crc, crc_errors=crc, mtu=1500)]
+
+    def samples():
+        return conn.execute("SELECT COUNT(*) FROM interface_stats").fetchone()[0]
+    ssh.apply_result(conn, did, "interfaces", intf(5))
+    ssh.apply_result(conn, did, "interfaces", intf(5))
+    need(samples() == 1, "unchanged counters stored %d samples, expected 1" % samples(), p)
+    ssh.apply_result(conn, did, "interfaces", intf(9))
+    need(samples() == 2, "changed counters not sampled (%d)" % samples(), p)
+    conn.commit()
+    conn.close()
+    c = m["appmod"].app.test_client()
+    row = c.get("/api/devices/%d/interfaces" % did).get_json()[0]
+    need(row["crc_errors_24h"] == 4, "crc_errors_24h = %r, expected 4" % row["crc_errors_24h"], p)
+    hist = c.get("/api/devices/%d/interface-stats?name=Gi1" % did).get_json()
+    need([h["crc_errors"] for h in hist] == [5, 9], "history: %r" % hist, p)
     return p
 
 
@@ -2052,7 +2527,7 @@ def run_live():
         need(health.get("poller_running") is True, "poller is not running", problems)
         need(health.get("reach_running") is True, "ICMP checker is not running", problems)
         need(b"topo_up 1" in get("/metrics")[1], "/metrics does not answer", problems)
-        for url in ("/", "/devices", "/topology", "/conflicts", "/settings", "/syslog", "/changes"):
+        for url in ("/", "/devices", "/topology", "/conflicts", "/settings", "/syslog", "/changes", "/ipam", "/templates", "/alerts", "/configs/", "/api/ipam/findings", "/api/templates", "/api/alert-rules"):
             code = get(url)[0]
             need(code == 200, "GET %s -> %s" % (url, code), problems)
         req = urllib.request.Request(base + "/api/devices", method="POST",

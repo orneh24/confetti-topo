@@ -79,10 +79,17 @@ def render(conn):
                  "gauge", int(a["state"] == up), device=a["hostname"], proto=a["proto"], peer=a["peer_ip"])
 
     for i in conn.execute(
-            """SELECT d.hostname, i.name, i.oper_status FROM interfaces i
+            """SELECT d.hostname, i.name, i.oper_status, i.input_errors, i.crc_errors FROM interfaces i
                JOIN devices d ON d.id = i.device_id ORDER BY d.hostname, i.name"""):
+        lab = dict(device=i["hostname"], interface=i["name"])
         o.sample("topo_interface_up", "1 if the interface is operationally up", "gauge",
-                 int(i["oper_status"] == "up"), device=i["hostname"], interface=i["name"])
+                 int(i["oper_status"] == "up"), **lab)
+        if i["input_errors"] is not None:
+            o.sample("topo_interface_input_errors", "input error counter as last polled", "gauge",
+                     i["input_errors"], **lab)
+        if i["crc_errors"] is not None:
+            o.sample("topo_interface_crc_errors", "CRC error counter as last polled", "gauge",
+                     i["crc_errors"], **lab)
 
     for r in conn.execute(
             """SELECT d.hostname, COUNT(*) AS n FROM lldp_neighbors l
@@ -90,6 +97,14 @@ def render(conn):
         o.sample("topo_lldp_neighbors", "LLDP neighbors a device currently reports", "gauge",
                  r["n"], device=r["hostname"])
 
+    o.sample("topo_alert_rules_failing", "alert rules whose last send failed", "gauge",
+             conn.execute("SELECT COUNT(*) FROM alert_rules WHERE last_error IS NOT NULL").fetchone()[0])
+    for r in conn.execute("SELECT name, fired_count FROM alert_rules ORDER BY id"):
+        o.sample("topo_alert_rule_fired", "alerts a rule has sent", "gauge", r["fired_count"], rule=r["name"])
+    o.sample("topo_syslog_rows", "syslog messages currently stored", "gauge",
+             conn.execute("SELECT COUNT(*) FROM syslog").fetchone()[0])
+    o.sample("topo_ipam_findings", "current IPAM overlap/duplicate findings", "gauge",
+             conn.execute("SELECT COUNT(*) FROM ipam_findings").fetchone()[0])
     o.sample("topo_merge_conflicts_open", "unresolved device merge conflicts", "gauge",
              conn.execute("SELECT COUNT(*) FROM merge_conflicts WHERE resolved = 0").fetchone()[0])
     for r in conn.execute(

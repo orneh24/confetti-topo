@@ -1,6 +1,6 @@
 ---
 name: dashboard-ui-checker
-description: Look at confetti-topo's pages (dashboard, devices, device, recent changes, topology, conflicts, settings) in a real browser after a change to topo/templates/ or topo/static/ — layout, colours, themes, layouts, the graph, console errors — and report back in plain text. Use instead of taking screenshots in the main conversation, which uses a lot of context. Checks only; never edits files.
+description: Look at confetti-topo's pages (dashboard, devices, device, recent changes, topology, conflicts, settings, syslog, IPAM, Templates, Alerts) in a real browser after a change to topo/templates/ or topo/static/ — layout, colours, themes, layouts, the graph, console errors — and report back in plain text. Use instead of taking screenshots in the main conversation, which uses a lot of context. Checks only; never edits files.
 tools: Read, Grep, Bash, ToolSearch, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__tabs_close_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__find, mcp__claude-in-chrome__javascript_tool, mcp__claude-in-chrome__read_console_messages
 model: sonnet
 ---

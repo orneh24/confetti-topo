@@ -59,7 +59,7 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
                 <thead>
                     <tr>
                         <th>Hostname</th><th>Poll</th><th>Role</th><th>Mgmt IP</th><th>Site</th>
-                        <th>Key</th><th>Ping</th><th>Last seen</th><th></th>
+                        <th>Key</th><th>Ping</th><th>Template</th><th>Last seen</th><th></th>
                     </tr>
                 </thead>
                 <tbody id="device-rows"></tbody>
@@ -148,6 +148,14 @@ function deviceMatches(d, q) {
     return [d.hostname, d.mgmt_ip, d.site, d.role, d.vendor, d.platform, d.model, d.key].join(' ').toLowerCase().indexOf(q) >= 0;
 }
 
+function driftCell(d) {
+    var t = d.template_name ? esc(d.template_name) + ' ' : '';
+    if (d.drift_status === 'compliant') { return t + '<span class="pill ok">matches</span>'; }
+    if (d.drift_status === 'drifted') { return t + '<span class="pill bad">drifted</span>'; }
+    if (d.drift_status === 'render_error') { return t + '<span class="pill running">template error</span>'; }
+    return t;
+}
+
 function renderDevices(fresh) {
     if (fresh) { allDevices = fresh; }
     var q = document.getElementById('dev-filter').value.trim().toLowerCase();
@@ -166,6 +174,7 @@ function renderDevices(fresh) {
             '<td>' + esc(d.site || '') + '</td>' +
             '<td>' + esc(d.key) + '</td>' +
             '<td>' + pingCell(d.reachable) + '</td>' +
+            '<td>' + driftCell(d) + '</td>' +
             '<td data-sort="' + attr(d.last_seen || '') + '">' + timeAgo(d.last_seen) + '</td>' +
             '<td>' + (d.role === 'node' || !d.enabled ? '' :
                 '<button onclick="pollDevice(' + d.id + ', this)">Poll now</button> ') +

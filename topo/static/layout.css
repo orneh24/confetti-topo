@@ -133,6 +133,17 @@ body.full-height .page { flex: 1 1 auto; min-height: 0; display: flex; flex-dire
 .page-footer .btn-small { margin: 0 3px; }
 .side-nav, .kpi-row, .taskbar { display: none; }
 
+/* The pages from confetti-butler: a second row under the header in Classic (no data-layout), where the header's own
+   copies are hidden. Every other layout hides the row and shows them with the rest of its page buttons. */
+.nav-row-butler { display: none; }
+:root:not([data-layout]) .nav-row-butler {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    background: var(--bg-card); border-bottom: 1px solid var(--border);
+    padding: 6px 24px;
+}
+:root:not([data-layout]) .header-left .butler-nav { display: none; }
+.nav-row-label { color: var(--text-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 4px; }
+
 /* Shared bits */
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }

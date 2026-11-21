@@ -13,13 +13,17 @@
 {# The page list lives here once. The current page is picked from the URL, so
    /devices/5 counts as Devices. #}
 {% set pages = [('/', 'Dashboard'), ('/devices', 'Devices'), ('/changes', 'Recent changes'), ('/syslog', 'Syslog'), ('/topology', 'Topology'), ('/conflicts', 'Conflicts'), ('/settings', 'Settings')] %}
+{# The pages that came from confetti-butler. Classic shows them on their own row under the topo row; every other
+   layout lists them with the rest (all_pages). #}
+{% set butler_pages = [('/ipam', 'IPAM'), ('/templates', 'Templates'), ('/alerts', 'Alerts')] %}
+{% set all_pages = pages + butler_pages %}
 {% set here = '/' if request.path == '/' else '/' + request.path.strip('/').split('/')[0] %}
 <body class="{% block body_class %}{% endblock %}">
 
 <!-- Modern layout only: a menu down the left side. Hidden in the others. -->
 <nav class="side-nav" aria-label="Pages">
     <div class="side-brand"><span class="side-mark"></span>Confetti Topo</div>
-    {% for path, label in pages %}
+    {% for path, label in all_pages %}
     {% if path == here %}<span class="side-link current">{{ label }}</span>
     {% else %}<a class="side-link" href="{{ path }}">{{ label }}</a>{% endif %}
     {% endfor %}
@@ -33,6 +37,10 @@
         {% if path == here %}<span class="btn-nav-current">{{ label }}</span>
         {% else %}<a href="{{ path }}" class="btn-nav">{{ label }}</a>{% endif %}
         {% endfor %}
+        {% for path, label in butler_pages %}
+        {% if path == here %}<span class="btn-nav-current butler-nav">{{ label }}</span>
+        {% else %}<a href="{{ path }}" class="btn-nav butler-nav">{{ label }}</a>{% endif %}
+        {% endfor %}
     </div>
     <div class="status">
         <span class="dot" id="health-dot"></span><span id="health-text">checking...</span>
@@ -41,6 +49,15 @@
         <select id="layout-select" class="btn-nav theme-select" aria-label="Layout" onchange="setLayout(this.value)"></select>
         <select id="variant-select" class="btn-nav theme-select" aria-label="MS-DOS colour variant" title="MS-DOS colour variant" onchange="setVariant(this.value)"></select>
     </div>
+</div>
+
+<!-- Classic layout only: the pages from confetti-butler on a second row. Hidden in the other layouts, which list them in the header or menu. -->
+<div class="nav-row-butler" aria-label="Butler pages">
+    <span class="nav-row-label">Butler</span>
+    {% for path, label in butler_pages %}
+    {% if path == here %}<span class="btn-nav-current">{{ label }}</span>
+    {% else %}<a href="{{ path }}" class="btn-nav">{{ label }}</a>{% endif %}
+    {% endfor %}
 </div>
 
 {% block kpis %}{% endblock %}
@@ -64,7 +81,7 @@
         <div class="start-menu">
             <div class="start-band"><b>Topo</b>95</div>
             <div class="start-items">
-                {% for path, label in pages %}<a href="{{ path }}">{{ label }}</a>
+                {% for path, label in all_pages %}<a href="{{ path }}">{{ label }}</a>
                 {% endfor %}
                 <hr>
                 <a href="https://isitdns.com/" target="_blank" rel="noopener noreferrer">Is it DNS..?</a>
@@ -72,7 +89,7 @@
             </div>
         </div>
     </details>
-    {% for path, label in pages %}{% if path == here %}<span class="btn-nav-current">{{ label }}</span>{% endif %}{% endfor %}
+    {% for path, label in all_pages %}{% if path == here %}<span class="btn-nav-current">{{ label }}</span>{% endif %}{% endfor %}
     <span class="tray" id="tray-clock"></span>
 </div>
 
@@ -90,7 +107,7 @@
     <div class="dos-menu" data-menu="g">
         <button type="button" role="menuitem" aria-haspopup="true"><span class="dos-hot">G</span>o</button>
         <div class="dos-drop" role="menu">
-            {% for path, label in pages %}<a href="{{ path }}" data-key="{{ loop.index }}"><span class="dos-hot">{{ loop.index }}</span> {{ label }}</a>
+            {% for path, label in all_pages %}{% set k = loop.index if loop.index < 10 else 0 %}<a href="{{ path }}" data-key="{{ k }}"><span class="dos-hot">{{ k }}</span> {{ label }}</a>
             {% endfor %}
         </div>
     </div>

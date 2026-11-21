@@ -324,6 +324,85 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_syslog_received ON syslog(received_at);
         CREATE INDEX IF NOT EXISTS idx_syslog_host ON syslog(host);
         CREATE INDEX IF NOT EXISTS idx_syslog_source_ip ON syslog(source_ip);
+
+        -- Merged in from confetti-butler: IPAM findings, config templates, running-config
+        -- backups, interface error history and alert rules.
+        -- Rebuilt wholesale by each POST /api/ipam/analyze run.
+        CREATE TABLE IF NOT EXISTS ipam_findings (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            checked_at TEXT NOT NULL,
+            kind       TEXT NOT NULL,
+            a          TEXT NOT NULL,
+            b          TEXT,
+            detail     TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS templates (
+            name       TEXT PRIMARY KEY,
+            body       TEXT NOT NULL,
+            note       TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL,
+            version    INTEGER NOT NULL DEFAULT 1
+        );
+        -- Append-only: a bad edit must be recoverable.
+        CREATE TABLE IF NOT EXISTS template_versions (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            name     TEXT NOT NULL,
+            version  INTEGER NOT NULL,
+            body     TEXT NOT NULL,
+            saved_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_template_versions_name ON template_versions(name);
+
+        -- Operator-set values a template needs that polled facts cannot give.
+        CREATE TABLE IF NOT EXISTS template_vars (
+            device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+            key       TEXT NOT NULL,
+            value     TEXT NOT NULL,
+            PRIMARY KEY (device_id, key)
+        );
+
+        -- Running-config backups: one row per distinct config, not per poll.
+        -- The body is stored raw (it is the backup); the API masks secrets.
+        CREATE TABLE IF NOT EXISTS config_versions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id   INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+            sha256      TEXT NOT NULL,
+            body        TEXT NOT NULL,
+            captured_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_config_device ON config_versions(device_id, id);
+
+        -- Error-counter history per interface: a row when the counters change, plus an hourly heartbeat. Age-pruned.
+        CREATE TABLE IF NOT EXISTS interface_stats (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id    INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+            name         TEXT NOT NULL,
+            at           TEXT NOT NULL,
+            input_errors INTEGER,
+            crc_errors   INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_ifstats ON interface_stats(device_id, name, id);
+        CREATE INDEX IF NOT EXISTS idx_ifstats_at ON interface_stats(at);
+
+        -- Alert rules (alerts.py). target is 'webhook:<url>' or 'mail:<address>'; the API never returns it in full.
+        CREATE TABLE IF NOT EXISTS alert_rules (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            name                TEXT NOT NULL,
+            enabled             INTEGER NOT NULL DEFAULT 1,
+            source              TEXT NOT NULL,
+            kinds               TEXT NOT NULL DEFAULT '',
+            min_severity        TEXT NOT NULL DEFAULT 'info',
+            syslog_max_severity INTEGER,
+            pattern             TEXT NOT NULL DEFAULT '',
+            device              TEXT NOT NULL DEFAULT '',
+            target              TEXT NOT NULL,
+            cooldown_s          INTEGER NOT NULL DEFAULT 300,
+            last_fired_at       TEXT,
+            fired_count         INTEGER NOT NULL DEFAULT 0,
+            last_error          TEXT,
+            created_at          TEXT NOT NULL
+        );
     """)
     syslog_core.migrate(db)
     # CREATE TABLE IF NOT EXISTS never adds a column to a table that exists already.
@@ -342,6 +421,24 @@ def init_db():
     # Set by syslog_trigger when a device's syslog says the topology changed: poll it early.
     if "poll_requested_at" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
         db.execute("ALTER TABLE devices ADD COLUMN poll_requested_at TEXT NOT NULL DEFAULT ''")
+    # Columns that came with the merge of confetti-butler.
+    if "template_name" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
+        db.execute("ALTER TABLE devices ADD COLUMN template_name TEXT REFERENCES templates(name) ON DELETE SET NULL")
+    if "drift_status" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
+        db.execute("ALTER TABLE devices ADD COLUMN drift_status TEXT")
+    if "snmp_community" not in [r[1] for r in db.execute("PRAGMA table_info(credentials)")]:
+        db.execute("ALTER TABLE credentials ADD COLUMN snmp_community TEXT")
+    if "snmp_version" not in [r[1] for r in db.execute("PRAGMA table_info(credentials)")]:
+        db.execute("ALTER TABLE credentials ADD COLUMN snmp_version TEXT NOT NULL DEFAULT '2c'")
+    if "input_errors" not in [r[1] for r in db.execute("PRAGMA table_info(interfaces)")]:
+        db.execute("ALTER TABLE interfaces ADD COLUMN input_errors INTEGER")
+    if "crc_errors" not in [r[1] for r in db.execute("PRAGMA table_info(interfaces)")]:
+        db.execute("ALTER TABLE interfaces ADD COLUMN crc_errors INTEGER")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_if_network ON interfaces(network)")
+    # events.alerted: existing rows are history, so mark them done and enabling alerting never replays them.
+    if "alerted" not in [r[1] for r in db.execute("PRAGMA table_info(events)")]:
+        db.execute("ALTER TABLE events ADD COLUMN alerted INTEGER NOT NULL DEFAULT 0")
+        db.execute("UPDATE events SET alerted = 1")
     db.commit()
     db.close()
 

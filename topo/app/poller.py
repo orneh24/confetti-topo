@@ -110,6 +110,10 @@ def _tick(executor):
                 "DELETE FROM syslog WHERE received_at < datetime('now', ? || ' days')",
                 ("-{:d}".format(config.SYSLOG_RETENTION_DAYS),),
             )
+        conn.execute(
+            "DELETE FROM interface_stats WHERE at < datetime('now', ? || ' days')",
+            ("-{:d}".format(config.STATS_RETENTION_DAYS),),
+        )
         try:
             flap.prune(conn)
             history.maybe_snapshot(conn)

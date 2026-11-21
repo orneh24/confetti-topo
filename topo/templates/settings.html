@@ -17,8 +17,11 @@
                     <label for="d-username">ssh username</label><input id="d-username" name="username" autocomplete="off">
                     <label for="d-password">ssh password</label><input id="d-password" name="password" type="password" autocomplete="new-password">
                     <label for="d-enable_secret">enable secret</label><input id="d-enable_secret" name="enable_secret" type="password" autocomplete="new-password">
+                    <label for="d-snmp_community">snmp community</label><input id="d-snmp_community" name="snmp_community" type="password" autocomplete="new-password">
+                    <label for="d-snmp_version">snmp version</label>
+                    <select id="d-snmp_version" name="snmp_version"><option value="">(environment, else 2c)</option><option value="2c">2c</option><option value="1">1</option></select>
                 </div>
-                <div class="hint">Used by every device without its own credentials. Per field, a device's own value wins, then this page, then the TOPO_SSH_* environment. A blank secret field keeps the stored value. Stored in plaintext in topo.db.</div>
+                <div class="hint">Used by every device without its own credentials. Per field, a device's own value wins, then this page, then the TOPO_SSH_* / TOPO_SNMP_* environment. A blank secret field keeps the stored value. Stored in plaintext in topo.db.</div>
                 <button type="submit" class="primary">Save</button>
                 <button type="button" onclick="clearDefaults()">Clear secrets</button>
                 <span class="msg" id="def-msg"></span>
@@ -106,14 +109,15 @@ function say(id, ok, text) {
     m.className = ok ? 'msg ok' : 'msg err';
 }
 
-var SOURCE_TEXT = { settings: 'this page', env: 'the TOPO_SSH_* environment', none: 'nothing (not set)' };
+var SOURCE_TEXT = { settings: 'this page', env: 'the environment', none: 'nothing (not set)' };
 
 function loadDefaults() {
     fetch('/api/settings/credentials').then(function (r) { return r.json(); }).then(function (c) {
         var f = document.getElementById('def-form');
         f.username.value = c.username || '';
         f.username.placeholder = c.username_env ? 'environment: ' + c.username_env : '';
-        ['password', 'enable_secret'].forEach(function (k) {
+        f.snmp_version.value = c.snmp_version || '';
+        ['password', 'enable_secret', 'snmp_community'].forEach(function (k) {
             f[k].value = '';
             f[k].placeholder = c[k + '_source'] === 'settings' ? 'stored'
                 : (c[k + '_source'] === 'env' ? 'from the environment' : 'not set');
@@ -122,21 +126,22 @@ function loadDefaults() {
             'In use now: username from ' + SOURCE_TEXT[c.username_source] +
             ', password from ' + SOURCE_TEXT[c.password_source] +
             ', enable secret from ' + SOURCE_TEXT[c.enable_secret_source] +
+            ', SNMP community from ' + SOURCE_TEXT[c.snmp_community_source] +
             (c.updated_at ? '. Last changed ' + c.updated_at + '.' : '.');
     });
 }
 
 function saveDefaults() {
     var f = document.getElementById('def-form');
-    var body = { username: f.username.value.trim() };
-    ['password', 'enable_secret'].forEach(function (k) {
+    var body = { username: f.username.value.trim(), snmp_version: f.snmp_version.value };
+    ['password', 'enable_secret', 'snmp_community'].forEach(function (k) {
         if (f[k].value) { body[k] = f[k].value; }   // blank keeps the stored secret
     });
     sendDefaults(body, 'saved');
 }
 
 function clearDefaults() {
-    sendDefaults({ password: '', enable_secret: '' }, 'secrets cleared');
+    sendDefaults({ password: '', enable_secret: '', snmp_community: '' }, 'secrets cleared');
 }
 
 var SP_NAMES = { butler: 'Confetti Butler', traffic: 'Confetti Traffic' };

@@ -9,17 +9,21 @@ next one — see poller.py, which runs the device pool through a
 ThreadPoolExecutor.
 """
 
+import hashlib
+
 from netmiko import ConnectHandler
 from netmiko.exceptions import NetmikoAuthenticationException, NetmikoTimeoutException
 
 from .. import config
 from .. import db
+from .. import drift
 from .. import events
 from .. import flap
 from .. import identity
 from .. import lldp_crawl
 from .. import platforms
 from .. import topology
+from . import snmp
 from ..parsers import ios
 
 # The IOS entry, kept under these names: it is the default platform, and
@@ -34,13 +38,16 @@ def resolve_credentials(conn, device_id):
     (settings table), then the environment's lab default (config.py's
     DEFAULT_SSH_*). An empty value falls through to the next level."""
     row = conn.execute(
-        "SELECT username, password, enable_secret FROM credentials WHERE device_id = ?", (device_id,)
+        "SELECT username, password, enable_secret, snmp_community, snmp_version "
+        "FROM credentials WHERE device_id = ?", (device_id,)
     ).fetchone()
     saved = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM settings")}
     return {
         "username": (row and row["username"]) or saved.get("ssh_username") or config.DEFAULT_SSH_USERNAME,
         "password": (row and row["password"]) or saved.get("ssh_password") or config.DEFAULT_SSH_PASSWORD,
         "secret": (row and row["enable_secret"]) or saved.get("ssh_enable_secret") or config.DEFAULT_SSH_SECRET,
+        "snmp_community": (row and row["snmp_community"]) or saved.get("snmp_community") or config.DEFAULT_SNMP_COMMUNITY,
+        "snmp_version": (row and row["snmp_version"]) or saved.get("snmp_version") or config.DEFAULT_SNMP_VERSION,
     }
 
 
@@ -53,11 +60,17 @@ def _error_text(exc):
 
 
 def _run_command(conn, task, plat):
-    output = conn.send_command(plat["commands"][task], read_timeout=30 if task == "routes" else 20)
+    # A large config is slow to read over SSH.
+    read_timeout = 60 if task == "config" else 30 if task == "routes" else 20
+    output = conn.send_command(plat["commands"][task], read_timeout=read_timeout)
     if task in platforms.SWITCH_TASKS and _is_cli_error(output):
         # "% Invalid input" is not an empty list: fail the task so nothing stored is deleted.
         raise RuntimeError("device answered: " + output.strip().splitlines()[0][:80])
     parsed = plat["parsers"][task](output)
+    if task == "config" and not parsed:
+        # Unlike the other parsers, an empty result is not a normal device state: it is an error
+        # message or a truncated read, and must never be stored as a backup (constraint 29).
+        raise ValueError("output is not a complete running-config")
     if task == "lldp" and plat.get("lldp_brief_command") and any(not row["local_if"] for row in parsed):
         # Older IOS leaves Local Intf out of the detail output; the brief
         # table has it. Only fetched when needed.
@@ -96,6 +109,9 @@ def run_tasks(device, creds, tasks=None):
     the same error; a failure on one command fails only that task.
     """
     plat = platforms.get(device.get("platform"))
+    if plat["transport"] == "snmp":
+        yield from snmp.run_tasks(device, creds)
+        return
     tasks = tasks or platforms.tasks(plat)
     if not _is_switch(device):
         tasks = tuple(t for t in tasks if t not in platforms.SWITCH_TASKS)   # a router answers "Invalid input": do not ask
@@ -169,6 +185,8 @@ def apply_result(conn, device_id, task, parsed):
         _apply_stp(conn, device_id, parsed, now)
     elif task == "mac":
         _apply_mac(conn, device_id, parsed, now)
+    elif task == "config":
+        _apply_config(conn, device_id, parsed, now)
 
 
 def _apply_version(conn, device_id, parsed, now):
@@ -203,28 +221,38 @@ def _apply_version(conn, device_id, parsed, now):
 def _apply_interfaces(conn, device_id, parsed, now):
     if parsed and not events.is_baseline(conn, device_id, "interfaces"):
         old = {r["name"]: r for r in conn.execute(
-            "SELECT name, oper_status FROM interfaces WHERE device_id = ?", (device_id,))}
+            "SELECT name, oper_status, crc_errors FROM interfaces WHERE device_id = ?", (device_id,))}
         host = _hostname(conn, device_id)
         for row in parsed:
             before = old.get(row["name"])
-            if before is not None and before["oper_status"] != row["oper_status"]:
+            if before is None:
+                continue
+            if before["oper_status"] != row["oper_status"]:
                 events.emit(conn, device_id, "interface_" + ("up" if row["oper_status"] == "up" else "down"),
                             "info" if row["oper_status"] == "up" else "warning",
                             "{} {}: {}".format(host, row["name"], row["oper_status"]),
                             "{} -> {}".format(before["oper_status"], row["oper_status"]))
+            crc = row.get("crc_errors")
+            if crc is not None and before["crc_errors"] is not None and crc > before["crc_errors"]:
+                events.emit(conn, device_id, "interface_errors", "warning",
+                            "{} {}: CRC errors rising".format(host, row["name"]),
+                            "{} -> {}".format(before["crc_errors"], crc))
     for row in parsed:
         conn.execute(
             """INSERT INTO interfaces (device_id, name, description, ip, prefix_len, network,
-                   admin_status, oper_status, speed, duplex, mtu, mac, last_seen)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   admin_status, oper_status, speed, duplex, input_errors, crc_errors, mtu, mac, last_seen)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(device_id, name) DO UPDATE SET
                    description=excluded.description, ip=excluded.ip, prefix_len=excluded.prefix_len,
                    network=excluded.network, admin_status=excluded.admin_status,
                    oper_status=excluded.oper_status, speed=excluded.speed, duplex=excluded.duplex,
+                   input_errors=excluded.input_errors, crc_errors=excluded.crc_errors,
                    mtu=excluded.mtu, mac=excluded.mac, last_seen=excluded.last_seen""",
             (device_id, row["name"], row["description"], row["ip"], row["prefix_len"], row["network"],
-             row["admin_status"], row["oper_status"], row["speed"], row["duplex"], row["mtu"], row.get("mac"), now),
+             row["admin_status"], row["oper_status"], row["speed"], row["duplex"],
+             row.get("input_errors"), row.get("crc_errors"), row["mtu"], row.get("mac"), now),
         )
+    _record_interface_stats(conn, device_id, parsed, now)
     # Drop interfaces this poll no longer reported (removed subinterface,
     # deleted loopback) — otherwise a dead address keeps resolving BGP/OSPF
     # peers to this device. Not on an empty result: every router has
@@ -461,3 +489,70 @@ def _apply_mac(conn, device_id, parsed, now):
             (device_id, r["vlan"], r["mac"], r["port"], now),
         )
     conn.execute("DELETE FROM mac_table WHERE device_id = ? AND last_seen <> ?", (device_id, now))
+
+
+STATS_HEARTBEAT_S = 3600
+
+
+def _record_interface_stats(conn, device_id, parsed, now):
+    """Keep a sample of each interface's error counters when they change, plus
+    one an hour so a flat line still has points. A counter that went DOWN
+    (device reload) is stored like any other change; growth() ignores resets."""
+    last = {r["name"]: r for r in conn.execute(
+        """SELECT name, input_errors, crc_errors, at FROM interface_stats
+           WHERE device_id = ? AND id IN
+                 (SELECT MAX(id) FROM interface_stats WHERE device_id = ? GROUP BY name)""",
+        (device_id, device_id))}
+    for row in parsed:
+        ie, ce = row.get("input_errors"), row.get("crc_errors")
+        if ie is None and ce is None:
+            continue
+        prev = last.get(row["name"])
+        if prev is not None and (prev["input_errors"], prev["crc_errors"]) == (ie, ce):
+            age = conn.execute("SELECT strftime('%s', ?) - strftime('%s', ?)", (now, prev["at"])).fetchone()[0]
+            if age is None or age < STATS_HEARTBEAT_S:
+                continue
+        conn.execute(
+            "INSERT INTO interface_stats (device_id, name, at, input_errors, crc_errors) VALUES (?, ?, ?, ?, ?)",
+            (device_id, row["name"], now, ie, ce))
+
+
+def growth(samples, field):
+    """Total increase of a counter across consecutive samples (oldest first).
+    A decrease means the counters were reset by a reload; it adds nothing."""
+    total = 0
+    prev = None
+    for s in samples:
+        v = s[field]
+        if v is None:
+            continue
+        if prev is not None and v > prev:
+            total += v - prev
+        prev = v
+    return total
+
+
+def _apply_config(conn, device_id, text, now):
+    """Store the running-config only when it differs from the device's latest version (constraint 29)."""
+    sha = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    latest = conn.execute(
+        "SELECT sha256 FROM config_versions WHERE device_id = ? ORDER BY id DESC LIMIT 1",
+        (device_id,),
+    ).fetchone()
+    if latest and latest["sha256"] == sha:
+        drift.refresh(conn, device_id)    # the template may have changed since the last poll
+        return
+    if latest:
+        events.emit(conn, device_id, "config_changed", "info",
+                    "{}: running-config changed".format(_hostname(conn, device_id)))
+    conn.execute(
+        "INSERT INTO config_versions (device_id, sha256, body, captured_at) VALUES (?, ?, ?, ?)",
+        (device_id, sha, text, now),
+    )
+    if config.CONFIG_VERSIONS_KEEP > 0:
+        conn.execute(
+            """DELETE FROM config_versions WHERE device_id = ? AND id NOT IN
+                   (SELECT id FROM config_versions WHERE device_id = ? ORDER BY id DESC LIMIT ?)""",
+            (device_id, device_id, config.CONFIG_VERSIONS_KEEP),
+        )
+    drift.refresh(conn, device_id)

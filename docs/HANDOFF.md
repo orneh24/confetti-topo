@@ -1,5 +1,27 @@
 # confetti-topo — handoff
 
+## Merge of confetti-butler (2026-11-21)
+
+confetti-butler's functionality was ported into this project, which keeps its name, service, paths and `TOPO_*` variables. `../confetti-butler`
+was not touched, and no butler database import exists (decided with the user).
+
+- **Ported (same code, `BUTLER_*` → `TOPO_*`):** `rendering.py`, `drift.py`, `ipam.py`, `alerts.py`, `collectors/snmp.py`, `collectors/vcenter.py`;
+  the `config` task and error-counter history in `collectors/ssh.py`; `parse_running_config`; the `snmp` platform; the routes as `app/butler_routes.py`
+  (a Blueprint); pages `ipam.html`, `templates_editor.html` (+ `static/vendor/codemirror`), `alerts.html`; the device-page boxes (template, SNMP credentials,
+  drift, config history and diff, interface errors); the Template column on Devices; SNMP defaults on Settings; butler's extra `/metrics` lines
+  (`topo_interface_*_errors`, `topo_alert_*`, `topo_ipam_findings`, `topo_syslog_rows`).
+- **Schema (additive, on an existing `topo.db`):** tables `ipam_findings`, `templates`, `template_versions`, `template_vars`, `config_versions`,
+  `interface_stats`, `alert_rules`; columns `devices.template_name` / `drift_status`, `credentials.snmp_community` / `snmp_version`,
+  `interfaces.input_errors` / `crc_errors`, `events.alerted` (existing events are marked alerted, so nothing old is sent).
+- **Menu:** Classic shows IPAM, Templates and Alerts as a second row (`.nav-row-butler`); the other layouts list them with the rest.
+- **Not ported:** the Packer template, `firstboot.initd`, butler's setup/update scripts (topo has its own), the butler-only agents and skills.
+- **Constraints 27..33 and checks R43..R50** are new (butler's checks, adapted); R15, R19 and R28 were extended (eleven tasks, the SNMP platform,
+  SNMP credentials), and R6/R20 list the new pages. `python dev/regress.py` → `CLEAR`, 51 checks including the live tier.
+- **Verified:** the gate, and the mock lab (`scripts/seed_mock_lab.py` now has a template, two backups per router with one drifted, error history, an
+  IPAM overlap, an alert rule and syslog) over HTTP and in a browser.
+- **Not verified:** the `config` task, drift and error counters on a real router; SNMP against a real device; an alert webhook or mail delivered to a
+  real target; the vCenter import; an upgrade of a deployed VM (`topo-update.sh`) with the new schema; `net-snmp-tools` in `build-topo.sh` on a real Alpine VM.
+
 ## What this session did (2026-10-14)
 
 Split the topology mapping out of confetti-butler into this project. The plan and the answers behind it:
@@ -56,8 +78,7 @@ the bare-IP import (both are page or collector behaviour).
   profile) runs healthy on Docker 29.8; topology API, `/metrics` and a restart that keeps the DB were checked. The
   production `docker-compose.yml` (port 80) was not run, and the lab profile was only checked for health and an
   empty device list.
-- **Butler's alert rules on BGP/OSPF/LLDP events no longer fire** once butler drops those tasks; topo has no
-  alerting.
+- Alerting (rules on events and syslog, webhook/mail) is ported but not tried against a real target (see the 2026-11-21 section).
 - Pairing of two sessions between the same pair of routers is by position (Established first). Wrong only if
   the two ends list them in a different order.
 - On Windows `ping` can exit 0 on a "host unreachable" reply, so the ICMP checker misreads fake addresses

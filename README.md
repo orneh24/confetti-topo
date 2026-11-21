@@ -7,9 +7,11 @@ router over SSH (read-only `show` commands), or a Palo Alto firewall over the XM
 operations), reads LLDP neighbors, BGP sessions and OSPF adjacencies, and shows them as one topology graph.
 confetti-topo never writes to a device.
 
-It started as the topology part of [confetti-butler](https://github.com/orneh24/confetti-butler) and is its
-own project now, with its own device list, poller and database. The look follows the hub UI of the sibling
-project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
+It also keeps the inventory around the map: IPAM, config templates a router can pull, running-config backups
+with drift checks, syslog and alerting. Those came from [confetti-butler](https://github.com/orneh24/confetti-butler),
+which was merged into this project; they are the IPAM, Templates and Alerts pages (a second menu row in the
+Classic layout). The look follows the hub UI of the sibling project
+[confetti-traffic](https://github.com/orneh24/confetti-traffic).
 
 ![Tour of confetti-topo: dashboard, devices, a device page, recent changes, topology, conflicts, then the colour themes, the layouts and the Confetti button](docs/img/confetti-topo-demo.gif)
 
@@ -35,8 +37,17 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
   test nodes from confetti-traffic or the device list from confetti-butler. The same router seen by two sources lands on one device. When the
   identifiers disagree (the same IP now answers with a different serial), it raises a conflict instead of
   guessing.
-- **Polling.** Every few minutes it logs in once per router and reads version, interfaces, LLDP, BGP, OSPF and
-  routes (switches also VLANs, trunks, spanning tree and the MAC table). Anything a router stops reporting drops out. A failed poll (timeout, bad login) removes nothing.
+- **Templates, backups and drift.** A Jinja2 config template per device, rendered from what the router reports; the
+  router pulls it with `copy http://<server>/configs/<key>.cfg running-config` (the server never pushes). Every
+  changed running-config is kept as a version (secrets masked in the UI and API) with a diff, and the Template drift
+  box and the Devices list show whether the router still contains its template.
+- **IPAM.** Every interface address in one list, with overlapping prefixes and duplicate addresses flagged.
+- **Alerting.** Rules turn events (a BGP peer down, config drift, a device not answering ping) or syslog messages into a
+  webhook or an e-mail, with a cooldown per rule.
+- **Polling.** Every few minutes it logs in once per router and reads version, interfaces (with error counters and their
+  24-hour growth), LLDP, BGP, OSPF, routes and the running-config
+  (switches also VLANs, trunks, spanning tree and the MAC table). A device can also be polled over SNMP v1/v2c
+  (platform `snmp`: version and interfaces only). Anything a router stops reporting drops out. A failed poll (timeout, bad login) removes nothing.
   Platforms: Cisco IOS / IOS-XE (SSH) and Palo Alto PAN-OS (XML API, set the device's platform to
   `paloalto_panos`; the same username and password as for SSH).
 - **Crawl.** LLDP neighbors that advertise an unknown management IP are listed on the Devices page and can be
@@ -44,7 +55,7 @@ project [confetti-traffic](https://github.com/orneh24/confetti-traffic).
 - **Reachability.** Every device is pinged every 30 seconds; a router that stops answering is outlined red
   on the graph.
 - **Events.** Neighbor, peer and interface changes, OS changes and devices going unreachable are listed on the
-  dashboard, on each device page and on the Recent changes page (filters, sortable, Before and After states coloured green, yellow or red). There is no alerting; see the roadmap.
+  dashboard, on each device page and on the Recent changes page (filters, sortable, Before and After states coloured green, yellow or red). Alerting on them is under Alerts.
 - **Device page.** Interfaces, LLDP neighbors, BGP/OSPF sessions and the routing table (filter, "export CSV"). On a switch also VLANs, trunks, the spanning-tree summary and the learned MAC addresses (filter; a MAC that belongs to a known device names it).
 - **Metrics.** `GET /metrics` serves Prometheus text.
 - **Other Confetti projects.** Type the Butler and Traffic URLs on the Settings page and a small button for each appears at the right of the top menu (opens in a new tab).
@@ -61,7 +72,7 @@ The MS-DOS layout can be driven from the keyboard: F10 or Alt for the menu bar, 
 rows, F6 between panels, F1 for the list.
 
 Built for Cisco IOS / IOS-XE. The parsers come from confetti-butler, where they were checked against CSR1000v
-routers on IOS-XE 17.3 and 15.4; confetti-topo itself has not been run on real routers yet (see
+routers on IOS-XE 17.3 and 15.4; the merged confetti-topo has not been run on real routers yet (see
 [`docs/HANDOFF.md`](docs/HANDOFF.md)). The PAN-OS support was written from real output of a PA-VM on PAN-OS 11.1 and
 polled once against it; other PAN-OS versions, Panorama and several virtual routers are untested.
 
@@ -103,7 +114,7 @@ same pattern as confetti-traffic's hub and confetti-butler.
 ## Security notes
 
 - Credentials are stored in plain text in `topo.db`. Keep the file private; it is gitignored.
-- The web UI and API have no login. Run it on a lab network only. A sweep range or a confetti-traffic or confetti-butler URL
+- The web UI and API have no login unless `TOPO_AUTH_TOKEN` is set. Run it on a lab network only. A sweep range or a confetti-traffic or confetti-butler URL
   given to the API makes the server connect there.
 
 ## More

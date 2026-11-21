@@ -51,10 +51,11 @@
                     <label for="f-serial">serial</label><input id="f-serial" name="serial">
                     <label for="f-os_version">os version</label><input id="f-os_version" name="os_version">
                     <label for="f-poll_interval_s">poll interval (s)</label><input id="f-poll_interval_s" name="poll_interval_s" type="number" min="30" step="1">
+                    <label for="f-template_name">template</label><select id="f-template_name" name="template_name"></select>
                     <label for="f-enabled">polling enabled</label><input id="f-enabled" name="enabled" type="checkbox">
                 </div>
                 <datalist id="role-list"><option value="router"><option value="switch"><option value="firewall"><option value="node"></datalist>
-                <datalist id="platform-list"><option value="cisco_ios"><option value="cisco_xe"><option value="paloalto_panos"><option value="linux"></datalist>
+                <datalist id="platform-list"><option value="cisco_ios"><option value="cisco_xe"><option value="paloalto_panos"><option value="snmp"><option value="linux"></datalist>
                 <button type="submit">Save</button><span class="msg" id="edit-msg"></span>
             </form>
         </div>
@@ -68,6 +69,9 @@
                     <label for="c-username">ssh username</label><input id="c-username" name="username" autocomplete="off">
                     <label for="c-password">ssh password</label><input id="c-password" name="password" type="password" autocomplete="new-password">
                     <label for="c-enable_secret">enable secret</label><input id="c-enable_secret" name="enable_secret" type="password" autocomplete="new-password">
+                    <label for="c-snmp_community">snmp community</label><input id="c-snmp_community" name="snmp_community" type="password" autocomplete="new-password">
+                    <label for="c-snmp_version">snmp version</label>
+                    <select id="c-snmp_version" name="snmp_version"><option value="2c">2c</option><option value="1">1</option><option value="3">3</option></select>
                 </div>
                 <div class="hint">A blank secret field keeps the stored value. Stored in plaintext in topo.db.</div>
                 <button type="submit" class="primary">Save</button>
@@ -116,6 +120,29 @@
             <div class="empty" id="adj-empty" style="display:none">no BGP or OSPF sessions</div>
         </div>
     </div>
+    <div class="section wide" id="drift-section" style="display:none">
+        <div class="section-header"><span>Template drift</span></div>
+        <div class="section-body">
+            <div class="hint">The assigned template, rendered as the device would pull it, compared with the latest config backup. Lines the template does not mention are ignored, and secret lines are not compared.</div>
+            <div id="drift-body"></div>
+        </div>
+    </div>
+    <div class="section wide" id="config-section">
+        <div class="section-header"><span>Config history</span></div>
+        <div class="section-body">
+            <div class="hint">Running-config backups, saved when the config changes. Secrets are masked.</div>
+            <table>
+                <thead><tr><th>Version</th><th>Captured</th><th>Size</th><th></th></tr></thead>
+                <tbody id="config-rows"></tbody>
+            </table>
+            <div class="empty" id="config-empty" style="display:none">no config backed up yet</div>
+            <div id="config-diff-controls" style="display:none;margin-top:8px;">
+                diff <select id="diff-a"></select> &rarr; <select id="diff-b"></select>
+                <button onclick="showDiff()">Show diff</button>
+            </div>
+            <pre id="config-view" style="display:none;margin-top:8px;max-height:480px;overflow:auto;background:var(--bg-code);border:1px solid var(--border);padding:8px;font-size:12px;"></pre>
+        </div>
+    </div>
     <div class="section wide">
         <div class="section-header"><span>Interfaces</span></div>
         <div class="section-body">
@@ -128,7 +155,7 @@
             </div>
             <table data-sortable>
                 <thead><tr><th>Name</th><th>Admin</th><th>Oper</th><th>IP</th><th>Speed/Duplex</th>
-                    <th>MTU</th><th>Last seen</th></tr></thead>
+                    <th>MTU</th><th>Errors (24h)</th><th>Last seen</th></tr></thead>
                 <tbody id="interface-rows"></tbody>
             </table>
             <div class="empty" id="interface-empty" style="display:none">no interfaces polled yet</div>
@@ -244,7 +271,7 @@ function loadDevice() {
 }
 
 var EDIT_FIELDS = ['hostname', 'mgmt_ip', 'role', 'site', 'vendor', 'platform', 'model',
-                   'serial', 'os_version', 'poll_interval_s', 'enabled'];
+                   'serial', 'os_version', 'poll_interval_s', 'template_name', 'enabled'];
 var current = null;   // last loaded device, so Save sends only the fields that changed
 
 function fillEditForm(d) {
@@ -252,13 +279,22 @@ function fillEditForm(d) {
     var f = document.getElementById('edit-form');
     EDIT_FIELDS.forEach(function (k) {
         if (k === 'enabled') { f.enabled.checked = !!d.enabled; }
-        else { f[k].value = d[k] === null || d[k] === undefined ? '' : d[k]; }
+        else if (k !== 'template_name') { f[k].value = d[k] === null || d[k] === undefined ? '' : d[k]; }
+    });
+    fetch('/api/templates').then(function (r) { return r.json(); }).then(function (list) {
+        var names = list.map(function (t) { return t.name; });
+        if (d.template_name && names.indexOf(d.template_name) < 0) { names.push(d.template_name); }
+        var html = '<option value="">(none)</option>';
+        names.forEach(function (n) { html += '<option value="' + esc(n) + '">' + esc(n) + '</option>'; });
+        f.template_name.innerHTML = html;
+        f.template_name.value = d.template_name || '';
     });
 }
 
 function formValue(f, k) {
     if (k === 'enabled') { return f.enabled.checked ? 1 : 0; }
     if (k === 'poll_interval_s') { return parseInt(f[k].value, 10); }
+    if (k === 'template_name') { return f[k].value || null; }
     return f[k].value.trim();
 }
 
@@ -269,7 +305,7 @@ function saveDevice() {
     EDIT_FIELDS.forEach(function (k) {
         var v = formValue(f, k);
         var was = current[k] === undefined ? null : current[k];
-        if (k === 'enabled' || k === 'poll_interval_s') {
+        if (k === 'template_name' || k === 'enabled' || k === 'poll_interval_s') {
             if (v !== was) { body[k] = v; }
         } else if (v !== (was === null ? '' : String(was))) {
             body[k] = v;
@@ -296,7 +332,8 @@ function loadCredentials() {
     fetch('/api/devices/' + deviceId + '/credentials').then(function (r) { return r.json(); }).then(function (c) {
         var f = document.getElementById('cred-form');
         f.username.value = c.username || '';
-        ['password', 'enable_secret'].forEach(function (k) {
+        f.snmp_version.value = c.snmp_version || '2c';
+        ['password', 'enable_secret', 'snmp_community'].forEach(function (k) {
             f[k].value = '';
             f[k].placeholder = c[k + '_set'] ? 'stored' : 'not set';
         });
@@ -321,15 +358,15 @@ function sendCredentials(body, okText) {
 
 function saveCredentials() {
     var f = document.getElementById('cred-form');
-    var body = { username: f.username.value.trim() };
-    ['password', 'enable_secret'].forEach(function (k) {
+    var body = { username: f.username.value.trim(), snmp_version: f.snmp_version.value };
+    ['password', 'enable_secret', 'snmp_community'].forEach(function (k) {
         if (f[k].value) { body[k] = f[k].value; }   // blank keeps the stored secret
     });
     sendCredentials(body, 'saved — use Poll now to test');
 }
 
 function clearSecrets() {
-    sendCredentials({ password: '', enable_secret: '' }, 'secrets cleared');
+    sendCredentials({ password: '', enable_secret: '', snmp_community: '' }, 'secrets cleared');
 }
 
 var interfaceList = [];   // last polled interfaces; the filter works on this, not on a new request
@@ -359,6 +396,10 @@ function renderInterfaces() {
         for (var i = 0; i < list.length; i++) {
             var f = list[i];
             var sd = (f.speed || f.duplex) ? ((f.duplex || '') + ' ' + (f.speed || '')).trim() : '';
+            var errs = (f.input_errors === null || f.input_errors === undefined) ? '' : (f.input_errors + ' / ' + f.crc_errors + ' crc');
+            if (errs && (f.input_errors_24h || f.crc_errors_24h)) {
+                errs += '  +' + f.input_errors_24h + ' in, +' + f.crc_errors_24h + ' crc';
+            }
             rows += '<tr>' +
                 '<td>' + esc(f.name) + '</td>' +
                 '<td>' + (f.admin_status ? '<span class="pill ' + (f.admin_status === 'up' ? 'ok' : 'bad') + '">' + esc(f.admin_status) + '</span>' : '') + '</td>' +
@@ -366,6 +407,7 @@ function renderInterfaces() {
                 '<td>' + esc(f.ip ? f.ip + '/' + f.prefix_len : '') + '</td>' +
                 '<td>' + esc(sd) + '</td>' +
                 '<td>' + esc(f.mtu || '') + '</td>' +
+                '<td>' + esc(errs) + '</td>' +
                 '<td>' + esc(f.last_seen) + '</td>' +
                 '</tr>';
         }
@@ -374,6 +416,84 @@ function renderInterfaces() {
         empty.textContent = interfaceList.length ? 'no interfaces match this filter' : 'no interfaces polled yet';
         empty.style.display = list.length ? 'none' : 'block';
     }
+}
+
+function showConfigText(text, isDiff) {
+    var pre = document.getElementById('config-view');
+    pre.style.display = 'block';
+    if (!isDiff) { pre.textContent = text; return; }
+    if (!text) { pre.textContent = 'no differences'; return; }
+    var html = '';
+    text.split('\n').forEach(function (ln) {
+        var color = '';
+        if (ln.charAt(0) === '+' && ln.indexOf('+++') !== 0) color = 'var(--green)';
+        else if (ln.charAt(0) === '-' && ln.indexOf('---') !== 0) color = 'var(--red)';
+        else if (ln.indexOf('@@') === 0) color = 'var(--cyan)';
+        html += '<div' + (color ? ' style="color:' + color + '"' : '') + '>' + esc(ln) + '</div>';
+    });
+    pre.innerHTML = html;
+}
+
+function viewConfig(id) {
+    fetch('/api/devices/' + deviceId + '/configs/' + id).then(function (r) { return r.json(); }).then(function (c) {
+        showConfigText(c.body, false);
+    });
+}
+
+function showDiff() {
+    var a = document.getElementById('diff-a').value;
+    var b = document.getElementById('diff-b').value;
+    fetch('/api/devices/' + deviceId + '/configs/diff?a=' + encodeURIComponent(a) + '&b=' + encodeURIComponent(b))
+        .then(function (r) { return r.json(); }).then(function (d) {
+            showConfigText(d.diff || '', true);
+        });
+}
+
+function loadConfigs() {
+    fetch('/api/devices/' + deviceId + '/configs').then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '', opts = '';
+        for (var i = 0; i < list.length; i++) {
+            var v = list[i];
+            rows += '<tr data-id="' + v.id + '" data-prev="' + (i + 1 < list.length ? list[i + 1].id : '') +
+                '"><td>#' + esc(v.id) + '</td><td>' + esc(v.captured_at) + '</td><td>' +
+                esc(v.size) + ' bytes</td><td><button onclick="viewConfig(' + v.id + ')">View</button></td></tr>';
+            opts += '<option value="' + v.id + '">#' + v.id + ' ' + esc(v.captured_at) + '</option>';
+        }
+        document.getElementById('config-rows').innerHTML = rows;
+        document.getElementById('config-empty').style.display = list.length ? 'none' : 'block';
+        // Needs two versions to compare. The list is newest first: the default is previous -> latest.
+        document.getElementById('config-diff-controls').style.display = list.length > 1 ? 'block' : 'none';
+        document.getElementById('diff-a').innerHTML = opts;
+        document.getElementById('diff-b').innerHTML = opts;
+        if (list.length > 1) {
+            document.getElementById('diff-a').selectedIndex = 1;
+            document.getElementById('diff-b').selectedIndex = 0;
+        }
+    });
+}
+
+function loadDrift() {
+    fetch('/api/devices/' + deviceId + '/drift').then(function (r) { return r.json(); }).then(function (d) {
+        var sec = document.getElementById('drift-section');
+        if (d.status === 'no_template') { sec.style.display = 'none'; return; }
+        sec.style.display = 'block';
+        var html;
+        if (d.status === 'compliant') {
+            html = '<span class="pill ok">matches</span> the running config contains every line of the template' +
+                (d.skipped ? ' (' + d.skipped + ' secret line(s) not compared)' : '') + '.';
+        } else if (d.status === 'drifted') {
+            html = '<span class="pill bad">drifted</span> ' + d.missing.length + ' template line(s) missing from the running config:<pre style="margin-top:6px;">';
+            d.missing.forEach(function (m) {
+                html += esc(m.path.length ? m.path.join(' > ') + ' > ' : '') + esc(m.line) + '\n';
+            });
+            html += '</pre>';
+        } else if (d.status === 'no_backup') {
+            html = 'No config backup yet — poll the device first.';
+        } else {
+            html = '<span class="pill running">template error</span> ' + esc(d.detail || '');
+        }
+        document.getElementById('drift-body').innerHTML = html;
+    });
 }
 
 var routesScrolled = false;
@@ -594,6 +714,8 @@ function pollNow() {
         loadAdjacencies();
         loadEvents();
         loadSyslog();
+        loadConfigs();
+        loadDrift();
     }).catch(function () {
         msg.textContent = 'poll failed';
         btn.disabled = false;
@@ -603,7 +725,7 @@ function pollNow() {
 // Right-click menus (static/ctxmenu.js). Each table body is one menu target; the row under the pointer is found
 // when the menu opens, so the tables can be rebuilt (poll, refresh) without touching the menu.
 ['alias-rows', 'source-rows', 'event-rows', 'lldp-rows', 'adj-rows', 'interface-rows', 'route-rows', 'mac-rows',
- 'trunk-rows', 'vlan-rows'].forEach(function (id) {
+ 'trunk-rows', 'vlan-rows', 'config-rows'].forEach(function (id) {
     document.getElementById(id).setAttribute('data-ctx', 'row');
 });
 
@@ -635,6 +757,18 @@ ctxMenu.register('row', function (tb, ev) {
     else if (id === 'mac-rows') { copy('Copy MAC address', 1); copy('Copy port', 2); }
     else if (id === 'vlan-rows') { copy('Copy VLAN', 0); copy('Copy name', 1); }
     else if (id === 'trunk-rows') { copy('Copy port', 0); }
+    else if (id === 'config-rows') {
+        var vid = tr.getAttribute('data-id'), prev = tr.getAttribute('data-prev');
+        items.push({ label: 'View', action: function () { viewConfig(vid); } });
+        items.push({ label: 'Diff against previous version', disabled: !prev, action: function () {
+            document.getElementById('diff-a').value = prev;
+            document.getElementById('diff-b').value = vid;
+            showDiff();
+        } });
+        items.push({ label: 'Set as diff A', action: function () { document.getElementById('diff-a').value = vid; } });
+        items.push({ label: 'Set as diff B', action: function () { document.getElementById('diff-b').value = vid; } });
+        copy('Copy version id', 0);
+    }
     else { copy('Copy ' + (id === 'event-rows' ? 'event' : 'value'), id === 'event-rows' ? 2 : 1); }
     items.push({ label: 'Copy row', action: function () {
         ctxMenu.copy(Array.prototype.map.call(tr.cells, function (c) { return c.textContent.trim(); }).join('  '));
@@ -674,6 +808,8 @@ loadLldp();
 loadAdjacencies();
 loadEvents();
 loadSyslog();
+loadConfigs();
+loadDrift();
 loadCredentials();
 </script>
 {% endblock %}

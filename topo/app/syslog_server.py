@@ -20,6 +20,7 @@ import sqlite3
 import sys
 import threading
 
+from . import alerts
 from . import config
 from . import db
 from . import syslog_core
@@ -71,6 +72,9 @@ class _Store:
                 return
             stats["received"] += 1
             syslog_trigger.maybe_request(self.db, rec)
+        # Hand the message to the alert thread: appends to a deque and never raises, so alerting
+        # can not slow or break the receiver.
+        alerts.offer_syslog(rec)
 
 
 class _Handler(socketserver.BaseRequestHandler):

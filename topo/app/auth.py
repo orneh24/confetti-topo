@@ -19,7 +19,9 @@ from flask import jsonify, redirect, render_template, request
 from . import config
 
 COOKIE = "topo_auth"
-OPEN_PATHS = ("/api/health", "/login", "/logout")
+OPEN_PATHS = ("/api/health", "/login", "/logout", "/configs/")
+# /configs/<key>.cfg is what a device pulls with `copy http://...`; a device cannot send a token (constraint 28).
+OPEN_PREFIXES = ("/static/", "/configs/")
 COOKIE_MAX_AGE_S = 30 * 24 * 3600
 
 
@@ -48,7 +50,7 @@ def allowed():
 
 def check():
     """before_request: let the request through, answer 401 (API, metrics) or send a page to /login."""
-    if not config.AUTH_TOKEN or request.path in OPEN_PATHS or request.path.startswith("/static/"):
+    if not config.AUTH_TOKEN or request.path in OPEN_PATHS or request.path.startswith(OPEN_PREFIXES):
         return None
     if allowed():
         return None

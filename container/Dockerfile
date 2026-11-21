@@ -14,7 +14,7 @@ FROM alpine:3.24
 # HEALTHCHECK, sqlite for the backup tool.
 RUN apk add --no-cache \
         python3 py3-pip py3-flask py3-paramiko py3-yaml py3-requests py3-jinja2 \
-        sqlite curl
+        sqlite curl net-snmp-tools
 
 COPY requirements.txt /opt/confetti-topo/requirements.txt
 # netmiko and waitress are not Alpine packages; install them at the pinned versions.

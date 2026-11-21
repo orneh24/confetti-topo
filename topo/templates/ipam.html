@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+{% block title %}IPAM{% endblock %}
+{% block content %}
+<div class="container two">
+    <div class="section wide">
+        <div class="section-header"><span>Findings</span><button onclick="analyze()">Re-analyze</button></div>
+        <div class="section-body">
+            <table><thead><tr><th>Kind</th><th>A</th><th>B</th><th>Detail</th><th>Checked</th></tr></thead>
+                <tbody id="finding-rows"></tbody></table>
+            <div class="empty" id="finding-empty" style="display:none">no findings — run an analysis, or nothing is wrong</div>
+        </div>
+    </div>
+    <div class="section">
+        <div class="section-header"><span>Prefixes in use</span></div>
+        <div class="section-body">
+            <table><thead><tr><th>Network</th><th>Interfaces</th><th>Devices</th></tr></thead>
+                <tbody id="prefix-rows"></tbody></table>
+        </div>
+    </div>
+    <div class="section">
+        <div class="section-header"><span>Addresses</span></div>
+        <div class="section-body">
+            <table><thead><tr><th>IP</th><th>Device</th><th>Interface</th><th>Status</th></tr></thead>
+                <tbody id="address-rows"></tbody></table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s === null || s === undefined ? '' : String(s);
+    return d.innerHTML;
+}
+
+function loadFindings() {
+    fetch('/api/ipam/findings').then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '';
+        for (var i = 0; i < list.length; i++) {
+            var f = list[i];
+            rows += '<tr data-ctx="finding" data-a="' + ctxMenu.attr(f.a) + '" data-b="' + ctxMenu.attr(f.b || '') + '" data-detail="' + ctxMenu.attr(f.detail) +
+                '"><td>' + esc(f.kind) + '</td><td>' + esc(f.a) + '</td><td>' + esc(f.b || '') +
+                '</td><td>' + esc(f.detail) + '</td><td>' + esc(f.checked_at) + '</td></tr>';
+        }
+        document.getElementById('finding-rows').innerHTML = rows;
+        document.getElementById('finding-empty').style.display = list.length ? 'none' : 'block';
+    });
+}
+
+function loadPrefixes() {
+    fetch('/api/ipam/prefixes').then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '';
+        for (var i = 0; i < list.length; i++) {
+            var p = list[i];
+            rows += '<tr data-ctx="prefix" data-net="' + ctxMenu.attr(p.network) + '"><td>' + esc(p.network) + '</td><td>' + p.interfaces + '</td><td>' + p.devices + '</td></tr>';
+        }
+        document.getElementById('prefix-rows').innerHTML = rows || '<tr><td colspan="3" class="empty">none yet</td></tr>';
+    });
+}
+
+function loadAddresses() {
+    fetch('/api/ipam/addresses').then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '';
+        for (var i = 0; i < list.length; i++) {
+            var a = list[i];
+            var cls = a.oper_status === 'up' ? 'ok' : 'bad';
+            rows += '<tr data-ctx="address" data-ip="' + ctxMenu.attr(a.ip) + '" data-len="' + ctxMenu.attr(a.prefix_len) + '" data-dev="' + ctxMenu.attr(a.device_id) +
+                '" data-if="' + ctxMenu.attr(a.interface) + '"><td>' + esc(a.ip) + '/' + a.prefix_len + '</td>' +
+                '<td><a href="/devices/' + a.device_id + '">' + esc(a.hostname) + '</a></td>' +
+                '<td>' + esc(a.interface) + '</td>' +
+                '<td><span class="pill ' + cls + '">' + esc(a.oper_status) + '</span></td></tr>';
+        }
+        document.getElementById('address-rows').innerHTML = rows || '<tr><td colspan="4" class="empty">none yet</td></tr>';
+    });
+}
+
+function loadAll() {
+    loadFindings();
+    loadPrefixes();
+    loadAddresses();
+}
+
+function analyze() {
+    fetch('/api/ipam/analyze', { method: 'POST' }).then(function (r) { return r.json(); }).then(loadAll);
+}
+
+// Right-click a row.
+ctxMenu.register('address', function (row) {
+    var ip = row.getAttribute('data-ip'), len = row.getAttribute('data-len'), dev = row.getAttribute('data-dev');
+    return { title: ip + '/' + len, items: [
+        { label: 'Open device', action: function () { window.location.href = '/devices/' + dev; }, disabled: !dev },
+        { label: 'Copy IP', action: function () { ctxMenu.copy(ip); } },
+        { label: 'Copy IP/length', action: function () { ctxMenu.copy(ip + '/' + len); } },
+        { label: 'Copy interface', action: function () { ctxMenu.copy(row.getAttribute('data-if')); } },
+    ] };
+});
+ctxMenu.register('finding', function (row) {
+    var a = row.getAttribute('data-a'), b = row.getAttribute('data-b');
+    return { title: a, items: [
+        { label: 'Copy first value', action: function () { ctxMenu.copy(a); } },
+        { label: 'Copy second value', action: function () { ctxMenu.copy(b); }, disabled: !b },
+        { label: 'Copy detail', action: function () { ctxMenu.copy(row.getAttribute('data-detail')); } },
+    ] };
+});
+ctxMenu.register('prefix', function (row) {
+    var net = row.getAttribute('data-net');
+    return { title: net, items: [ { label: 'Copy prefix', action: function () { ctxMenu.copy(net); } } ] };
+});
+
+loadAll();
+
+// The whole page is one more menu target, so empty space has a menu. Header, nav, taskbar, DOS bars and footer keep the browser's menu.
+document.documentElement.setAttribute('data-ctx', 'page');
+ctxMenu.register('page', function (el, ev) {
+    if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
+    return { title: 'IPAM', items: [
+        { label: 'Refresh', action: loadAll },
+        { label: 'Go to Dashboard', action: function () { location.href = '/'; } },
+        { label: 'Go to Devices', action: function () { location.href = '/devices'; } },
+        { label: 'Go to Alerts', action: function () { location.href = '/alerts'; } },
+        { label: 'Go to Syslog', action: function () { location.href = '/syslog'; } },
+        { label: 'Go to Templates', action: function () { location.href = '/templates'; } },
+        { label: 'Go to Conflicts', action: function () { location.href = '/conflicts'; } },
+        { label: 'Go to Settings', action: function () { location.href = '/settings'; } },
+    ] };
+});
+</script>
+{% endblock %}

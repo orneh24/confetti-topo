@@ -5,23 +5,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 A simplistic server that maps a network from what its devices say about themselves: LLDP neighbors
-(cables) and BGP/OSPF adjacencies (sessions), drawn as a topology graph. Infrastructure is ESXi 7.0
-with Cisco CSR1000v routers initially; other vendors later.
+(cables) and BGP/OSPF adjacencies (sessions), drawn as a topology graph, and that keeps the inventory
+around it: device inventory, IPAM, config templates and their pull endpoint, running-config backups
+with drift, syslog, change events and alerting. Infrastructure is ESXi 7.0 with Cisco CSR1000v routers
+initially; other vendors later.
 
-confetti-topo was split out of `../confetti-butler` on 2026-10-14. Butler keeps inventory, IPAM, config
-templates, syslog and alerting; this project owns *what is connected to what*. It is **fully standalone**:
-its own device inventory, credentials, discovery, ICMP checker, SSH poller, LLDP crawl, events and graph UI.
-It shares no database or API with butler. Two sibling repos stay related:
+confetti-topo was split out of `../confetti-butler` on 2026-10-14 and **merged back on 2026-11-21**: this
+project now holds everything butler did (IPAM, templates, config backups, drift, alerting, SNMP,
+interface error history, the vCenter import) plus the topology. The name, service (`confetti-topo`),
+install path and `TOPO_*` environment variables did not change. It is **fully standalone**: its own
+device inventory, credentials, discovery, ICMP checker, SSH poller, LLDP crawl, events and graph UI. Two
+sibling repos stay related:
 - `../confetti-traffic` (network connectivity test harness) — confetti-topo can import its node fleet
   (`GET /endpoints`) as `role='node'` devices, and copies its hub UI look by hand.
-- `../confetti-butler` — the code in `topo/app/identity.py`, `poller.py`, `reach.py`, `discovery.py`,
-  `collectors/` and `parsers/ios.py` started as copies of butler's. They are separate now; a fix in one is
-  not automatically a fix in the other (the `confetti-interop-checker` agent looks for drift).
+- `../confetti-butler` — kept as it was and no longer the source of anything. Its code was ported into
+  this repo, so a fix there is not a fix here. A deployed butler can still be a syslog-pull peer and an
+  inventory import source (`POST /api/discover/butler`). There is no import of an old butler database. The
+  shared syslog files stay byte-identical (constraint 24). The `confetti-interop-checker` agent looks for drift.
 
 Reference notes for the feature itself: `docs/TOPOLOGY-MAPPING.md` (design, pitfalls, test checklist).
 
-**Device access is read-only.** confetti-topo never writes to a device: SSH `show` commands, and for PAN-OS
-`<show>` operations over the XML API. There is no config-push path and none should be added without being asked
+**Device access is read-only.** confetti-topo never writes to a device: SSH `show` commands (including
+`show running-config` for the backups), SNMP get/walk, and for PAN-OS `<show>` operations over the XML API.
+Configs reach a device only by the device pulling them (`copy http://<server>/configs/<key>.cfg running-config`).
+There is no config-push path and none should be added without being asked
 for explicitly (regression check R19 fails on any command that is not a `show`; R30 on any XML API request that
 is not a `<show>` op).
 
@@ -58,13 +65,13 @@ Each tick (`TOPO_POLL_TICK_S`, default 15s): claim devices with `poll_state='idl
 `next_poll_at <= now`, mark them `'running'` (this is the per-device lock — a device whose SSH hangs is never
 queued twice), and hand each to a `ThreadPoolExecutor` (`TOPO_POLL_WORKERS`, default 8).
 
-Per device, ten tasks run independently, **each committing its own transaction**: `version`, `interfaces`,
-`lldp`, `bgp`, `ospf`, `routes`, and `vlans`, `trunks`, `stp` and `mac` (IOS **switches** only: `ssh.run_tasks` leaves it out for a router, which answers
+Per device, eleven tasks run independently, **each committing its own transaction**: `version`, `interfaces`,
+`lldp`, `bgp`, `ospf`, `routes`, `config` (IOS only, the running-config backup, last so a slow read delays nothing) and `vlans`, `trunks`, `stp` and `mac` (IOS **switches** only: `ssh.run_tasks` leaves it out for a router, which answers
 `Invalid input`, and PAN-OS has none; a new switch gets it from its second poll, once its model is known). Partial failure is the normal case — an LLDP timeout must never discard interface data
 collected 200ms earlier. `role='node'` devices (confetti-traffic's imported Alpine fleet) are never polled —
 `poller.py`'s device-selection query filters `role != 'node'`.
 
-All ten tasks share **one SSH session** per poll (PAN-OS: one keygen per poll) (`ssh.run_tasks` is a generator, so each task still commits
+All eleven tasks share **one SSH session** per poll (PAN-OS: one keygen per poll) (`ssh.run_tasks` is a generator, so each task still commits
 before the next command runs). Each apply step deletes that device's rows not seen in this poll — a removed
 peer or cable must not stay on the topology forever. But **only a successful task deletes**: a timeout or a
 failed login applies nothing (constraint 14). `interfaces` skips the delete on an empty result, since empty
@@ -80,8 +87,9 @@ availability is unverified (same caution as confetti-traffic CLAUDE.md constrain
 real IOS-XE 17.3 CSR1000v and a 15.4 router; see constraint 3 for command-name gotchas found that way.
 
 `app/platforms.py` maps a device's `platform` to its transport, commands and parsers: `cisco_ios` / `cisco_xe`
-(SSH) and `paloalto_panos` (XML API). An unknown platform falls back to the IOS entry. Junos is planned, not
-started. There is no SNMP collector.
+(SSH), `paloalto_panos` (XML API) and `snmp` (net-snmp `snmpget` / `snmpwalk`, v1 and v2c, `version` and `interfaces`
+only, no CLI; `collectors/snmp.py`, from butler). An unknown platform falls back to the IOS entry. Junos is planned, not
+started.
 
 **PAN-OS** (`collectors/panos.py`, `parsers/panos.py`, skill `panos-xml-api`): the poller picks the collector from the
 platform's `transport` (`xml_api` or `ssh`) and records it in `poll_history.transport`; the six tasks, the apply
@@ -179,6 +187,42 @@ hostname) and stores one row per VLAN in `vlans` (`GET /api/vlans?device_id=N`, 
 has VLAN 1, so an answer with no rows deletes nothing; a real list replaces the old one. No events. Fixture
 `dev/samples/ios_vlan_brief.txt` (real format, Catalyst 3560).
 
+### Merged from confetti-butler
+
+These came over from butler on 2026-11-21 as the same code, `BUTLER_*` renamed to `TOPO_*`.
+
+- **Config templates and the pull endpoint** (`templates` page, `/api/templates*`, `rendering.py`): Jinja2 in a sandbox with
+  `StrictUndefined` (constraint 27), rendered against a device's polled facts plus its own `template_vars`. `GET /configs/<key>.cfg`
+  serves the result as plain text for the device to pull; it is unauthenticated on purpose, also with `TOPO_AUTH_TOKEN` set
+  (constraint 28), and `check_hardcoded_secrets` warns on save instead. Every save appends a `template_versions` row. A device gets a
+  template through `devices.template_name` (the Edit form on its page).
+- **Running-config backups** (`config` task, IOS only, `ssh._apply_config`, `config_versions`): `show running-config` with the
+  volatile lines removed, stored only when complete (a `version` line and a closing `end`) and only when the SHA-256 differs from the latest
+  version (constraint 29). `TOPO_CONFIG_VERSIONS_KEEP` (0 = all). The API (`/api/devices/<id>/configs`, `/configs/<vid>`, `/configs/diff`)
+  masks secrets (`rendering.redact_secrets`) unless `?raw=1`. A change is a `config_changed` event.
+- **Drift** (`drift.py`, `devices.drift_status`, a Template drift box and the Template column): the rendered template must be contained in
+  the latest backup, line by line under the same parent; secret lines are not compared (constraint 32). `config_drift` (warning) and
+  `config_compliant` events on a change between the two, none on the first evaluation. Saving a template re-evaluates its devices.
+- **IPAM** (`ipam.py`, `/ipam`, `/api/ipam/*`): discovery-first, built from `interfaces`; `POST /api/ipam/analyze` rebuilds
+  `ipam_findings` (overlapping prefixes, duplicate addresses).
+- **Interface error history** (`interface_stats`, `interfaces.input_errors` / `crc_errors`): a sample when the counters change plus one an
+  hour, pruned after `TOPO_STATS_RETENTION_DAYS` (7); a counter that goes down (reload) adds nothing to the 24 h growth
+  (`ssh.growth`, constraint 33). Rising CRC errors are an `interface_errors` warning event.
+- **Alerting** (`alerts.py`, `/alerts`, `/api/alert-rules*`, thread started by `serve.py`, `TOPO_ALERTS_ENABLED`): a rule matches events
+  (kind, minimum severity, device, regex) or syslog (worst severity, device, regex) and sends a webhook (`webhook:<url>`) or mail
+  (`mail:<address>`, `TOPO_SMTP_*`). Per rule cooldown (what was held back is counted in the next message), one retry, an old event is
+  never replayed (`events.alerted`, `TOPO_ALERT_MAX_AGE_S`), a failing target is recorded on the rule and not retried forever, no database
+  write lock is held during a send, and the API never returns a target in full (constraint 30). The syslog receiver hands each stored
+  message to `alerts.offer_syslog`; a message pulled from another server is not alerted.
+- **SNMP** (`collectors/snmp.py`): see Architecture. Device and Settings credentials carry `snmp_community` and `snmp_version`
+  (same order as the SSH ones, never returned by a GET, constraint 31).
+- **vCenter import** (`POST /api/discover/vcenter`, `collectors/vcenter.py`): inventory only, through `identity.ingest`. Never tested
+  against a real vCenter (as in butler); it has no page, only the API.
+
+On the **Classic** layout the pages that came from butler (IPAM, Templates, Alerts) are a second row under the header
+(`.nav-row-butler` in `base.html`, shown only while no `data-layout` is set); the other layouts list them with the rest
+(`all_pages` = `pages` + `butler_pages` in `base.html`).
+
 ### Topology history
 
 `app/history.py`: the poller tick (every `TOPO_SNAPSHOT_INTERVAL_S`, default 300; 0 = off) builds the whole map and stores it in
@@ -195,7 +239,7 @@ receiver: no `allow_reuse_address`, `busy_timeout` before `journal_mode`, `MAX_R
 (`TOPO_SYSLOG_RETENTION_DAYS`, 14, pruned in the poller tick). `/syslog` is the page (filters, right-click menu, a "via" column that names
 the server a row was pulled from), `GET /api/syslog` and `/api/syslog/sources` read it, the device page has a Syslog box, `/metrics` has
 `topo_syslog_*`, `/api/health` has `syslog_listening`. A device is matched to a row at query time by its `mgmt_ip` or hostname alias, never
-stored. There is no alerting; butler has it.
+stored. Alerting on syslog is in the Alerting section below.
 
 **Pulling from the other servers** (`app/syslog_pull.py`, `pull_once` in `syslog_core.py`, constraint 26; the same two files as in confetti-butler and
 confetti-traffic): a device logs to one Confetti server only. The Settings page has a switch per other server (`GET|PUT /api/settings/syslog-pull`, off by
@@ -242,7 +286,7 @@ interface oper up/down, BGP/OSPF peer state/added/removed, LLDP neighbor added/r
 transaction of the change it describes. `events.is_baseline()` is true until a task has an `ok=1` row in
 `poll_history`; while true, nothing is emitted, so adding a device doesn't produce one event per interface/peer.
 Read via `GET /api/events` (`device_id`, `kind`, `severity`, `hours`, `limit`); shown on the dashboard (last 15)
-and each device page. **There is no alerting** (butler has it); events are only displayed.
+and each device page. Alerting on them is the Alerting section below.
 
 ### BGP flapping
 
@@ -336,15 +380,20 @@ topo/
     lldp_crawl.py      — adopt unknown LLDP neighbors as inventory-only devices
     metrics.py         — /metrics Prometheus text
     history.py         — topology snapshots on change (TOPO_SNAPSHOT_*)
+    rendering.py       — sandboxed Jinja2 for config templates, secret masking (constraint 27)
+    drift.py           — template vs latest running-config backup (constraint 32)
+    ipam.py            — overlap and duplicate-address findings
+    alerts.py          — alert rules, webhook/mail sender thread (constraint 30)
+    butler_routes.py   — the Flask Blueprint with the routes that came from butler (IPAM, templates, /configs, backups, drift, alerts, vCenter)
     syslog_core.py     — syslog parser + the one insert path; the SAME file in confetti-butler and confetti-traffic (constraint 24)
     syslog_server.py   — UDP syslog listener (port of butler's), stores through syslog_core
     syslog_trigger.py  — a topology message asks for an early poll of its device (constraint 25)
     syslog_pull.py     — pulls syslog from the other Confetti servers on a timer; the SAME file in confetti-butler and confetti-traffic (constraint 26)
     auth.py            — optional access token (TOPO_AUTH_TOKEN): /login, cookie or bearer; off by default
-    collectors/        — ssh.py, panos.py (XML API), sweep.py, confetti.py, butler.py, seedfile.py
+    collectors/        — ssh.py, panos.py (XML API), snmp.py, vcenter.py, sweep.py, confetti.py, butler.py, seedfile.py
     parsers/           — ios.py (regex only), panos.py (XML)
   templates/           — base.html (head, header/nav, theme + layout pickers, footer, Retro taskbar)
-                         + dashboard (widgets: system, services, activity, devices, events, sessions down, open conflicts, unknown LLDP neighbors, map changes), devices, device, changes (Recent changes: filter bar, summary tiles, sortable events table with type/change/before/after from `events.describe()`, banded per device, details pane, right-click menu), topology, syslog, conflicts, settings, each `{% extends "base.html" %}`
+                         + dashboard (widgets: system, services, activity, devices, events, sessions down, open conflicts, unknown LLDP neighbors, map changes), devices, device, changes (Recent changes: filter bar, summary tiles, sortable events table with type/change/before/after from `events.describe()`, banded per device, details pane, right-click menu), topology, syslog, conflicts, settings, ipam, alerts, templates_editor (CodeMirror in static/vendor/codemirror), each `{% extends "base.html" %}`
   static/theme.css     — the ONE place colours live (Dark, Light, Monokai, High Contrast,
                          Terminal green, Confetti Night, Rainbow). Pages must not define their own :root colours
   static/layout.css    — Classic, Modern, Retro 95, MS-DOS (MS-DOS has two colour variants, DOS Blue and Neon Green: `data-variant="green"` on `:root`, a header dropdown shown only in MS-DOS, saved in `confetti-topo-dos-variant`; it also has a keyboard layer:
@@ -356,7 +405,7 @@ topo/
   static/theme.js      — THEMES + LAYOUTS lists and the two header dropdowns (confetti-topo-theme,
                          confetti-topo-layout in localStorage), themeColor() for canvas colours,
                          confettiBlast(), Shuffle, the header health dot
-  static/vendor/       — vis-network/ (vendored pinned version, no CDN)
+  static/vendor/       — vis-network/ (vendored pinned version, no CDN), codemirror/ (the template editor)
   seed/devices.yaml.sample
   services/ — confetti-topo.initd, login-setup.sh, topo-backup.sh
   scripts/  — topo-setup.sh, topo-update.sh, seed_mock_lab.py (fake lab in a new scratch DB),
@@ -504,6 +553,30 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
     failing never stops the other. The token for a server that has one is write-only: sent in an `Authorization` header, never in a URL, never returned by a GET (butler and
     traffic have none, so topo sends none). Checked by R42.
 
+27. **Config templates render in a sandbox with `StrictUndefined`.** `rendering._ENV` is a `SandboxedEnvironment`; an unset variable
+    raises `RenderError` instead of printing nothing, and an attribute escape (`__class__`, `__init__.__globals__`) is refused. A template is
+    operator text that a device will pull and apply. Checked by R43.
+28. **`GET /configs/<key>.cfg` and `/configs/` stay unauthenticated, also with `TOPO_AUTH_TOKEN` set.** A device cannot send a token with
+    `copy http://...`. Everything else (the templates page and API, backups, drift) still needs the token. Do not add a login check to the
+    pull route, and do not widen `auth.OPEN_PREFIXES` beyond `/static/` and `/configs/`. Templates carry no real secrets
+    (`check_hardcoded_secrets`). Checked by R44.
+29. **A running-config is stored only when complete and only when it changed, and leaves the API masked.** `parse_running_config` returns ""
+    for an error text or a read without `end`, and the `config` task then fails and stores nothing (constraint 14); volatile lines
+    (`Building configuration`, last-change stamps, `ntp clock-period`) are dropped so an unchanged config is one version. Secrets are masked by
+    `rendering.redact_secrets` in every API answer unless `?raw=1`. Checked by R45.
+30. **Alerts only go out for new events and matching syslog, once per rule cooldown, and never from inside a database write.** `events.alerted`
+    marks an event done (old ones are marked without sending), a failing target is recorded on the rule and not retried forever, the syslog
+    hand-over queue is bounded, and no SQLite write lock is held while a webhook or mail is sent. The API never returns a rule's target in full
+    (a webhook URL often holds a token); a PUT without `target` keeps the stored one. Checked by R46 and R47.
+31. **SNMP is read-only and refuses what it cannot do safely.** `snmpget` / `snmpwalk` only, v1 and v2c (v3 fails with a clear message), the host
+    must be an IP address before it reaches a subprocess, a missing tool names the apk package. The community is a credential: per device, then Settings,
+    then `TOPO_SNMP_COMMUNITY`, and never in a GET. Checked by R48 (and R28 for the order).
+32. **Drift is containment by parent chain, not text equality.** Every line the rendered template produces must be in the latest backup under the
+    same parent; extra lines in the running config are not drift, secret lines are skipped, and a template `no X` is met when `X` is absent.
+    `config_drift` / `config_compliant` are events only on a change between the two, not on the first evaluation. Checked by R49.
+33. **Interface error history is sampled on change, and a counter reset adds nothing.** `interface_stats` gets a row when the counters change plus an
+    hourly heartbeat; `ssh.growth` ignores a decrease (a reload). Checked by R50.
+
 ## Regression gate
 
 `python dev/regress.py` (stdlib only, except that `R39` runs ruff: `pip install -r dev/requirements-dev.txt`, else R39 is `NOT RUN`; `--static` skips the live tier, `-v` shows detail for passes) is the
@@ -514,7 +587,8 @@ HTTP; `R21`..`R26` cover the ICMP state machine, `/metrics` format, LLDP crawl, 
 container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R27` checks the OpenSSH
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
-the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti projects' URLs; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll; `R39` is the ruff `F` lint over `topo/` and `dev/` (not a constraint check); `R40` (constraint 24) the shared syslog parser and insert rule, `R40-sync` that `syslog_core.py`, `syslog_pull.py` and `syslog_cases.json` are byte-identical in the three repos (`NOT RUN` if a sibling is not next to this repo); `R41` (constraint 25) the syslog poll trigger; `R42` (constraint 26) the syslog pull; the next constraint (27) takes `R43`. Output is one line per check
+the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti projects' URLs; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll; `R39` is the ruff `F` lint over `topo/` and `dev/` (not a constraint check); `R40` (constraint 24) the shared syslog parser and insert rule, `R40-sync` that `syslog_core.py`, `syslog_pull.py` and `syslog_cases.json` are byte-identical in the three repos (`NOT RUN` if a sibling is not next to this repo); `R41` (constraint 25) the syslog poll trigger; `R42` (constraint 26) the syslog pull; `R43`..`R50` (constraints 27..33) the checks that came with the butler merge: template sandbox, the open `/configs/` pull, config backups,
+alert matching (`R46`) and delivery (`R47`), SNMP, drift and interface error history; the next constraint (34) takes `R51`. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

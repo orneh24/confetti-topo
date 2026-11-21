@@ -15,9 +15,11 @@ from urllib.parse import urlparse
 from flask import Flask, jsonify, render_template, request, Response
 
 from . import auth
+from . import butler_routes
 from . import config
 from . import db
 from . import discovery
+from . import drift
 from . import events
 from . import identity
 from . import lldp_crawl
@@ -28,6 +30,7 @@ from . import syslog_pull
 from . import syslog_server
 from . import topology
 from .collectors import butler, confetti
+from .collectors import ssh as ssh_collector
 from .collectors import seedfile
 from .collectors import sweep as sweep_collector
 
@@ -39,6 +42,7 @@ app = Flask(
 
 
 auth.register(app)
+app.register_blueprint(butler_routes.bp)   # IPAM, templates, config backups, alerts (from confetti-butler)
 
 
 @app.context_processor
@@ -340,7 +344,7 @@ def api_list_devices():
         """SELECT id, key, hostname, mgmt_ip, vendor, platform, model, serial,
                   os_version, role, site, enabled, poll_interval_s, next_poll_at,
                   poll_state, fail_count, first_seen, last_seen, last_poll_ok,
-                  reachable, last_ping_at
+                  reachable, last_ping_at, template_name, drift_status
            FROM devices ORDER BY role, hostname"""
     ).fetchall()
     return jsonify([device_row(r) for r in rows])
@@ -411,14 +415,23 @@ def api_device_interfaces(device_id):
     conn = db.get_db()
     rows = conn.execute(
         """SELECT name, description, ip, prefix_len, network, vrf, admin_status, oper_status,
-                  speed, duplex, mtu, last_seen
+                  speed, duplex, input_errors, crc_errors, mtu, last_seen
            FROM interfaces WHERE device_id = ? ORDER BY name""",
         (device_id,),
     ).fetchall()
+    # Counter growth over the last 24h, from interface_stats samples.
+    samples = {}
+    for s in conn.execute(
+            """SELECT name, input_errors, crc_errors FROM interface_stats
+               WHERE device_id = ? AND at >= datetime('now', '-1 day') ORDER BY id""", (device_id,)):
+        samples.setdefault(s["name"], []).append(s)
     out = []
     for r in rows:
         d = dict(r)
         d["last_seen"] = db.iso(d["last_seen"])
+        mine = samples.get(d["name"], [])
+        d["input_errors_24h"] = ssh_collector.growth(mine, "input_errors")
+        d["crc_errors_24h"] = ssh_collector.growth(mine, "crc_errors")
         out.append(d)
     return jsonify(out)
 
@@ -531,8 +544,8 @@ def api_routes():
     return jsonify(out)
 
 
-CREDENTIAL_FIELDS = ("username", "password", "enable_secret")
-CREDENTIAL_SECRETS = ("password", "enable_secret")
+CREDENTIAL_FIELDS = ("username", "password", "enable_secret", "snmp_community", "snmp_version")
+CREDENTIAL_SECRETS = ("password", "enable_secret", "snmp_community")
 
 
 @app.route("/api/devices/<int:device_id>/credentials", methods=["GET"])
@@ -545,6 +558,7 @@ def api_get_device_credentials(device_id):
         return jsonify({"error": "not found"}), 404
     row = conn.execute("SELECT * FROM credentials WHERE device_id = ?", (device_id,)).fetchone()
     out = {"username": row["username"] if row else None,
+           "snmp_version": row["snmp_version"] if row else None,
            "updated_at": db.iso(row["updated_at"]) if row else None}
     for k in CREDENTIAL_SECRETS:
         out[k + "_set"] = bool(row and row[k])
@@ -590,9 +604,11 @@ def _set_credentials(conn, device_id, data):
 
 
 # Settings-page defaults: body field -> settings key -> env fallback in config.py.
-SETTING_KEYS = {"username": "ssh_username", "password": "ssh_password", "enable_secret": "ssh_enable_secret"}
+SETTING_KEYS = {"username": "ssh_username", "password": "ssh_password", "enable_secret": "ssh_enable_secret",
+                "snmp_community": "snmp_community", "snmp_version": "snmp_version"}
 ENV_DEFAULTS = {"username": "DEFAULT_SSH_USERNAME", "password": "DEFAULT_SSH_PASSWORD",
-                "enable_secret": "DEFAULT_SSH_SECRET"}
+                "enable_secret": "DEFAULT_SSH_SECRET", "snmp_community": "DEFAULT_SNMP_COMMUNITY",
+                "snmp_version": "DEFAULT_SNMP_VERSION"}
 
 
 @app.route("/api/settings/credentials", methods=["GET"])
@@ -612,6 +628,8 @@ def api_get_default_credentials():
     out["updated_at"] = db.iso(out["updated_at"]) if out["updated_at"] else None
     out["username"] = (saved.get("ssh_username") or {"value": None})["value"]
     out["username_env"] = config.DEFAULT_SSH_USERNAME
+    out["snmp_version"] = (saved.get("snmp_version") or {"value": None})["value"]
+    out["snmp_version_env"] = config.DEFAULT_SNMP_VERSION
     for k in CREDENTIAL_SECRETS:
         out[k + "_set"] = out[k + "_source"] != "none"
     return jsonify(out)
@@ -796,7 +814,8 @@ def api_put_syslog_pull():
 def api_list_device_credentials():
     """Which devices have their own credentials row. No secrets."""
     rows = db.get_db().execute(
-        """SELECT d.id, d.hostname, d.mgmt_ip, d.role, c.username, c.password, c.enable_secret, c.updated_at
+        """SELECT d.id, d.hostname, d.mgmt_ip, d.role, c.username, c.password, c.enable_secret,
+                  c.snmp_community, c.snmp_version, c.updated_at
            FROM devices d LEFT JOIN credentials c ON c.device_id = d.id
            WHERE d.role != 'node' ORDER BY d.hostname"""
     ).fetchall()
@@ -805,6 +824,7 @@ def api_list_device_credentials():
         "has_override": r["updated_at"] is not None,
         "username": r["username"],
         "password_set": bool(r["password"]), "enable_secret_set": bool(r["enable_secret"]),
+        "snmp_community_set": bool(r["snmp_community"]), "snmp_version": r["snmp_version"],
         "updated_at": db.iso(r["updated_at"]) if r["updated_at"] else None,
     } for r in rows])
 
@@ -877,7 +897,7 @@ def api_poll_device_now(device_id):
     return jsonify({"status": "ok", "results": results})
 
 
-DEVICE_EDITABLE = identity.DEVICE_FIELDS + ("enabled", "poll_interval_s")
+DEVICE_EDITABLE = identity.DEVICE_FIELDS + ("enabled", "poll_interval_s", "template_name")
 
 
 @app.route("/api/devices/<int:device_id>", methods=["PUT"])
@@ -904,6 +924,8 @@ def api_update_device(device_id):
     updates["id"] = device_id
     conn.execute("UPDATE devices SET {} WHERE id = :id".format(set_clause), updates)
     taken = identity.add_operator_aliases(conn, device_id, updates)
+    if "template_name" in updates:
+        drift.refresh(conn, device_id)
     conn.commit()
     row = conn.execute("SELECT * FROM devices WHERE id = ?", (device_id,)).fetchone()
     out = device_row(row)

@@ -2,8 +2,10 @@
 
 Three routers (documentation-range IPs, fake serials 9SIMLAB000x), their
 interfaces, LLDP/OSPF/BGP neighbours (some resolve, some stay ghosts), one
-unknown LLDP neighbour waiting to be added, one identity conflict and a few
-change events. No real lab data.
+unknown LLDP neighbour waiting to be added, one identity conflict, a few
+change events, a config template with two running-config backups per router (one
+drifted), interface error history, an alert rule, an overlapping prefix for IPAM
+and some syslog. No real lab data.
 
     python scripts/seed_mock_lab.py mock-lab.db
 
@@ -24,7 +26,7 @@ if os.path.exists(sys.argv[1]):
     sys.exit("{} already exists - pick a new path".format(sys.argv[1]))
 os.environ["TOPO_DB_PATH"] = sys.argv[1]
 
-from app import db, history, identity  # noqa: E402  (env var must be set first)
+from app import db, drift, history, identity, ipam, rendering  # noqa: E402  (env var must be set first)
 from app.parsers import ios  # noqa: E402
 
 ROUTERS = [
@@ -96,6 +98,29 @@ EVENTS = [
 FLAPPING = (1, "198.51.100.7", [(40, "reset"), (22, "state"), (9, "state")])
 
 
+# minutes ago, router index, severity, mnemonic, message
+SYSLOG = [
+    (1, 0, 5, "BGP-5-ADJCHANGE", "neighbor 203.0.113.9 Up"),
+    (2, 1, 3, "CRYPTO-3-IKMP_NO_SA", "IKE message from 198.51.100.7 has no SA and is not an initialization offer"),
+    (4, 0, 6, "SYS-6-LOGOUT", "User admin has exited tty session 2(192.0.2.5)"),
+    (7, 2, 4, "BGP-4-NOTIFICATION", "received from neighbor 10.255.0.2 4/0 (hold time expired) 0 bytes"),
+    (12, 2, 5, "LINEPROTO-5-UPDOWN", "Line protocol on Interface GigabitEthernet3, changed state to up"),
+    (22, 0, 5, "OSPF-5-ADJCHG", "Process 1, Nbr 10.255.0.3 on GigabitEthernet3 from LOADING to FULL, Loading Done"),
+    (41, 0, 5, "LINK-5-CHANGED", "Interface GigabitEthernet4, changed state to administratively down"),
+]
+
+# The config template every router uses, and what a router's own variables fill in.
+TEMPLATE = """hostname {{ device.hostname }}
+!
+{% for i in interfaces if i.ip %}interface {{ i.name }}
+ description {{ i.description }}
+ ip address {{ i.ip }}/{{ i.prefix_len }}
+ no shutdown
+!
+{% endfor %}enable secret {{ vars.enable_secret }}
+"""
+
+
 def ts(minutes_ago=0):
     t = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
     return t.strftime("%Y-%m-%d %H:%M:%S")
@@ -121,10 +146,16 @@ def main():
         for name, desc, ip, plen in INTERFACES[idx]:
             conn.execute(
                 "INSERT INTO interfaces (device_id, name, description, ip, prefix_len, network, "
-                "admin_status, oper_status, speed, duplex, mtu, last_seen) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,1500,?)",
+                "admin_status, oper_status, speed, duplex, input_errors, crc_errors, mtu, last_seen) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1500,?)",
                 (dev_id, name, desc, ip, plen, ios._network(ip, plen),
-                 "up", "up", "1000", "full", now))
+                 "up", "up", "1000", "full", 0, 0, now))
+    # Error history on lab-rtr-b's link to lab-rtr-a: the counters grew over the last hours.
+    for ago, in_err, crc in ((300, 10, 2), (120, 31, 7), (30, 42, 9)):
+        conn.execute("INSERT INTO interface_stats (device_id, name, at, input_errors, crc_errors) VALUES (?,?,?,?,?)",
+                     (ids[1], "GigabitEthernet2", ts(ago), in_err, crc))
+    conn.execute("UPDATE interfaces SET input_errors = 42, crc_errors = 9 WHERE device_id = ? AND name = 'GigabitEthernet2'",
+                 (ids[1],))
 
     for idx, next_hop in DEFAULT_ROUTES.items():
         conn.execute("INSERT INTO routes (device_id, vrf, kind, prefix, protocol, next_hop, interface, distance, metric, last_seen) "
@@ -152,6 +183,48 @@ def main():
         conn.execute(
             "INSERT INTO events (at, device_id, kind, severity, subject, detail) VALUES (?,?,?,?,?,?)",
             (ts(ago), ids[idx], kind, sev, subject, detail))
+
+    for ago, idx, sev, mnem, msg in SYSLOG:
+        host, ip = ROUTERS[idx][0], ROUTERS[idx][1]
+        conn.execute(
+            "INSERT INTO syslog (received_at, source_ip, host, facility, severity, mnemonic, "
+            "device_time, message, raw) VALUES (?,?,?,23,?,?,?,?,?)",
+            (ts(ago), ip, host, sev, mnem, ts(ago), msg, "%{}: {}".format(mnem, msg)))
+
+    # A template for all three routers, each with the same variable.
+    conn.execute("INSERT INTO templates (name, body, note, updated_at, version) VALUES (?,?,?,?,1)",
+                 ("base-router", TEMPLATE, "Mock lab template", now))
+    conn.execute("INSERT INTO template_versions (name, version, body, saved_at) VALUES (?,1,?,?)",
+                 ("base-router", TEMPLATE, now))
+    conn.execute("UPDATE devices SET template_name = 'base-router'")
+    for dev_id in ids:
+        conn.execute("INSERT INTO template_vars (device_id, key, value) VALUES (?,?,?)",
+                     (dev_id, "enable_secret", "CHANGE-ME"))
+    # Two running-config backups each. The newest one of lab-rtr-c lacks its last interface: that router is drifted.
+    for idx, dev_id in enumerate(ids):
+        rendered = rendering.render_for_device(conn, dev_id, TEMPLATE).rstrip(chr(10)) + chr(10)
+        old = "version 17.3" + chr(10) + rendered.replace("no shutdown", "shutdown") + "end" + chr(10)
+        new = "version 17.3" + chr(10) + rendered + "end" + chr(10)
+        if idx == 2:
+            blocks = new.split("interface ")
+            new = "interface ".join(blocks[:-1]) + "!" + chr(10) + "end" + chr(10)
+        for ago, body in ((240, old), (20, new)):
+            conn.execute("INSERT INTO config_versions (device_id, sha256, body, captured_at) VALUES (?,?,?,?)",
+                         (dev_id, "mock{}{}".format(idx, ago), body, ts(ago)))
+        drift.refresh(conn, dev_id)
+    # An overlapping prefix and an alert rule (its target is never sent anywhere: nothing here polls or alerts).
+    conn.execute(
+        "INSERT INTO interfaces (device_id, name, description, ip, prefix_len, network, admin_status, oper_status, "
+        "speed, duplex, input_errors, crc_errors, mtu, last_seen) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1500,?)",
+        (ids[2], "GigabitEthernet6", "lab segment", "10.0.13.254", 24, ios._network("10.0.13.254", 24),
+         "up", "up", "1000", "full", 0, 0, now))
+    conn.execute(
+        "INSERT INTO alert_rules (name, source, kinds, min_severity, target, cooldown_s, created_at) "
+        "VALUES (?,?,?,?,?,?,?)",
+        ("BGP trouble", "event", "bgp_state,bgp_flapping", "warning", "webhook:http://192.0.2.99/hook", 300, now))
+    ipam.analyze(conn)
+    # Alerting is off for the mock lab's events: they are history, so mark them as handled.
+    conn.execute("UPDATE events SET alerted = 1")
 
     # An identity conflict: lab-rtr-b's IP now reports a different serial.
     try:

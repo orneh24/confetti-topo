@@ -104,7 +104,8 @@ apk_step apk add --no-cache \
     sqlite \
     curl \
     open-vm-tools \
-    chrony
+    chrony \
+    net-snmp-tools
 
 log "Packages installed"
 

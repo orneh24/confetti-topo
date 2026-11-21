@@ -9,6 +9,7 @@ here plus its parsers (Junos is planned, see docs/ROADMAP.md).
 Status of each platform:
   cisco_ios / cisco_xe  verified against real IOS-XE 17.3 and 15.4 hardware
   paloalto_panos        XML API (transport "xml_api"); fixtures captured from a real PA-VM, PAN-OS 11.1
+  snmp                  SNMP v1/v2c via net-snmp, version + interfaces only (from confetti-butler)
 
 An unknown platform string falls back to the IOS entry (netmiko is still given
 the platform string as its device_type).
@@ -33,6 +34,8 @@ IOS = {
         "trunks": "show interfaces trunk",
         "stp": "show spanning-tree summary",
         "mac": "show mac address-table",
+        # Last, so a slow config read never delays the other tasks.
+        "config": "show running-config",
     },
     "parsers": {
         "version": ios.parse_version,
@@ -45,6 +48,7 @@ IOS = {
         "trunks": ios.parse_trunks,
         "stp": ios.parse_stp,
         "mac": ios.parse_mac,
+        "config": ios.parse_running_config,
     },
     # Older IOS leaves "Local Intf" out of the detail output; this table has it.
     "lldp_brief_command": "show lldp neighbors",
@@ -75,10 +79,14 @@ PANOS = {
     "fib_command": "<show><routing><fib/></routing></show>",
 }
 
+# SNMP v1/v2c via net-snmp (collectors/snmp.py, merged from confetti-butler): version + interfaces only.
+SNMP = {"transport": "snmp", "tasks": ("version", "interfaces")}
+
 PLATFORMS = {
     "cisco_ios": IOS,
     "cisco_xe": IOS,
     "paloalto_panos": PANOS,
+    "snmp": SNMP,
 }
 
 
@@ -91,4 +99,4 @@ SWITCH_TASKS = ("vlans", "trunks", "stp", "mac")
 
 
 def tasks(plat):
-    return tuple(plat["commands"])
+    return tuple(plat["commands"]) if plat["transport"] != "snmp" else plat["tasks"]

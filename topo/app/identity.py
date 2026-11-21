@@ -99,7 +99,7 @@ def ingest(conn, candidates, fields, source, ref=""):
         applied — a partial observation (e.g. a bare seed-file entry with
         just a hostname) never blanks a field a richer source already
         populated.
-    source: manual | sweep | confetti | seedfile | lldp
+    source: manual | sweep | vcenter | confetti | seedfile | lldp
     ref: a source-specific reference (filename, sweep CIDR) —
         distinguishes repeat runs of the same source from each other.
 
@@ -355,9 +355,10 @@ def merge(conn, survivor_id, loser_id):
 
     for table, cols in (
         ("device_sources", "source, ref, first_seen, last_seen"),
-        ("credentials", "username, password, enable_secret, updated_at"),
+        ("credentials", "username, password, enable_secret, snmp_community, snmp_version, updated_at"),
         ("interfaces", "name, description, ip, prefix_len, network, vrf, admin_status, "
-                       "oper_status, speed, duplex, mtu, last_seen"),
+                       "oper_status, speed, duplex, input_errors, crc_errors, mtu, last_seen"),
+        ("template_vars", "key, value"),
         ("lldp_neighbors", "local_if, remote_chassis, remote_sysname, remote_port, "
                            "remote_mgmt_ip, remote_device_id, remote_descr, remote_port_descr, last_seen"),
         ("adjacencies", "proto, peer_ip, peer_device_id, remote_as, local_as, area, state, "
@@ -372,6 +373,8 @@ def merge(conn, survivor_id, loser_id):
 
     # Plain reference columns, no uniqueness to protect.
     conn.execute("UPDATE poll_history SET device_id = ? WHERE device_id = ?",
+                 (survivor_id, loser_id))
+    conn.execute("UPDATE config_versions SET device_id = ? WHERE device_id = ?",
                  (survivor_id, loser_id))
     conn.execute("UPDATE events SET device_id = ? WHERE device_id = ?", (survivor_id, loser_id))
     conn.execute("UPDATE lldp_neighbors SET remote_device_id = ? WHERE remote_device_id = ?",

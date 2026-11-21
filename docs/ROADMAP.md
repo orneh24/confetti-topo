@@ -4,8 +4,8 @@ Ideas only. Nothing here is built until the user picks it.
 
 ## Near term
 - **Validate on real routers** (`lab-validator`) and on a fresh Alpine VM; then update HANDOFF.
-- **Alerting.** Butler's alert rules stopped seeing topology events. Port `alerts.py`, the rules page and the
-  sender thread (webhook / mail), or send events to butler.
+- **Check the butler features on real hardware** (merged 2026-11-21): the `config` task and drift on a real router, SNMP against a
+  real `snmpd`, an alert webhook and mail. The unit and mock-lab checks pass; none of it has run against the lab yet.
 
 ## Topology
 - **Routing table follow-ups:** IPv6 (checked 2026-11-03: the lab has one IPv6 route on one router and none on another, so there is no real table to build from yet) and a cap on a very large table; validate ECMP against a real router (the
@@ -44,5 +44,5 @@ Ideas only. Nothing here is built until the user picks it.
 
 ## Operations
 - **Authentication, follow-up:** `TOPO_AUTH_TOKEN` gives one shared token (no users, no TLS). Per-user accounts and HTTPS would be next.
-- **Packer template** for vCenter, once one exists in butler that has actually run.
-- **vCenter discovery**, only together with a real vCenter to test against.
+- **Packer template** for vCenter, once one exists in butler that has actually run (not ported in the merge).
+- **vCenter import**: the API route is ported, it has no page and was never tested against a real vCenter.
