@@ -38,6 +38,8 @@ backup_to() {
     _tmp="${_out}.tmp"
     rm -f "$_tmp"
     sqlite3 "$DB_FILE" ".backup '${_tmp}'" || { rm -f "$_tmp"; die "sqlite3 .backup failed"; }
+    # One self-contained file: a WAL-mode copy leaves -wal/-shm files beside it whenever it is opened later.
+    sqlite3 "$_tmp" "PRAGMA journal_mode=DELETE;" >/dev/null 2>&1 || true
     chmod 600 "$_tmp"
     mv -f "$_tmp" "$_out"
 }
@@ -103,16 +105,23 @@ restore)
     fi
     src="${1:-}"
     [ -n "$src" ] && [ -f "$src" ] || usage
-    check=$(sqlite3 "file:${src}?mode=ro" "PRAGMA quick_check;" 2>&1) || die "$src is not an SQLite database"
-    [ "$check" = "ok" ] || die "$src is damaged: $check"
-    devices=$(sqlite3 "file:${src}?mode=ro" "SELECT COUNT(*) FROM devices;" 2>/dev/null) ||
-        die "$src is not a confetti-topo database (no devices table)"
+    # Check a copy, never the file given: opening a WAL-mode file writes -wal/-shm files beside it.
+    tmp="${DB_FILE}.restore"
+    rm -f "$tmp" "${tmp}-wal" "${tmp}-shm"
+    cp -f "$src" "$tmp" || die "cannot copy $src"
+    chmod 600 "$tmp"
+    drop_tmp() { rm -f "$tmp" "${tmp}-wal" "${tmp}-shm"; }
+    check=$(sqlite3 "$tmp" "PRAGMA quick_check;" 2>&1) || { drop_tmp; die "$src is not an SQLite database"; }
+    [ "$check" = "ok" ] || { drop_tmp; die "$src is damaged: $check"; }
+    devices=$(sqlite3 "$tmp" "SELECT COUNT(*) FROM devices;" 2>/dev/null) ||
+        { drop_tmp; die "$src is not a confetti-topo database (no devices table)"; }
+    sqlite3 "$tmp" "PRAGMA journal_mode=DELETE;" >/dev/null 2>&1 || true
     log "$src: $devices device(s)"
     if [ -z "$auto" ]; then
         printf 'Replace %s with %s? The current database is saved first. [y/N] ' "$DB_FILE" "$src"
         answer=""
         read -r answer || answer=""
-        case "$answer" in y|Y|yes|YES) ;; *) log "cancelled"; exit 0 ;; esac
+        case "$answer" in y|Y|yes|YES) ;; *) drop_tmp; log "cancelled"; exit 0 ;; esac
     fi
     mkdir -p "$BACKUP_DIR"
     chmod 700 "$BACKUP_DIR"
@@ -122,9 +131,6 @@ restore)
         log "current database saved: $saved"
     fi
     rc-service "$SERVICE" stop >/dev/null 2>&1 || true
-    tmp="${DB_FILE}.restore"
-    cp -f "$src" "$tmp"
-    chmod 600 "$tmp"
     rm -f "${DB_FILE}-wal" "${DB_FILE}-shm"
     mv -f "$tmp" "$DB_FILE"
     rc-service "$SERVICE" start >/dev/null 2>&1 || true

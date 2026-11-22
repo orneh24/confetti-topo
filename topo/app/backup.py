@@ -73,6 +73,9 @@ def make(prefix="topo-web"):
     dst = _open(tmp)
     try:
         src.backup(dst)
+        # The copy would keep the live database's WAL mode, and opening a WAL file later (a check, a restore) leaves
+        # -wal/-shm files next to it. A backup is one self-contained file.
+        dst.execute("PRAGMA journal_mode=DELETE")
     finally:
         dst.close()
         src.close()

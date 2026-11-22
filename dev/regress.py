@@ -1802,6 +1802,13 @@ def _():
     conn.close()
     need(str(res.get("saved_as", "")).startswith("topo-pre-restore-") and backup.path_of(res.get("saved_as", "")),
          "the database before the restore was not saved", p)
+    saved = backup.path_of(res.get("saved_as", "")) or good
+    jm = __import__("sqlite3").connect(saved)
+    mode = jm.execute("PRAGMA journal_mode").fetchone()[0]
+    jm.close()
+    need(mode == "delete", "a backup file is in %s mode: opening it later leaves -wal/-shm files beside it" % mode, p)
+    left = [f for f in os.listdir(backup.backup_dir()) if not backup.NAME_RE.match(f)]
+    need(not left, "the backups folder holds leftovers after a restore: %r" % left, p)
     keep = {k: os.environ.get(k) for k in ("TOPO_AUTH_TOKEN", "TOPO_SMTP_PASSWORD", "TOPO_SSH_PASSWORD", "TOPO_PORT")}
     os.environ.update(TOPO_AUTH_TOKEN="r53-token-value", TOPO_SMTP_PASSWORD="r53-smtp-value",
                       TOPO_SSH_PASSWORD="r53-ssh-value", TOPO_PORT="8099")

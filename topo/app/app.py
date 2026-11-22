@@ -850,10 +850,12 @@ def api_backup_restore():
     except backup.RestoreError as exc:
         return jsonify({"error": str(exc)}), 400
     finally:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        # Reading an upload that is in WAL mode creates -wal/-shm files beside it (seen on the lab VM).
+        for leftover in (tmp, tmp + "-wal", tmp + "-shm"):
+            try:
+                os.remove(leftover)
+            except OSError:
+                pass
     return jsonify(dict(result, status="restored"))
 
 

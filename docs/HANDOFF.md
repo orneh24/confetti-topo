@@ -1,5 +1,26 @@
 # confetti-topo — handoff
 
+## Database restore validated on the lab VM (2026-11-22)
+
+The lab VM (Alpine, updated with `topo-update.sh -y <dir>` from an older build without the merged tables; 6 devices) was put on this build and
+the backup/restore was run there:
+- **Web:** a Settings download, a marker map note, then a restore of that download: the note was gone, `topo-pre-restore-*.db` was saved,
+  the server kept the same process (no restart) and the next poll ran and released its lock. A non-database upload was refused (400), a
+  download by a path name was 404 and a GET download 405.
+- **Old schema:** a nightly backup from 2026-11-16 (13 tables, no `config_versions`, no `map_notes`) restored through the web upgraded in
+  place: notes could be saved, `interfaces.in_bps` / `out_bps` were added, every page answered 200.
+- **`topo-db.sh`:** `backup`, `backup <file>`, `list`, `env` (no secret values; `TOPO_SSH_USERNAME` is exported, passwords are not), a junk file
+  refused, `restore` without `-y` and a closed stdin cancelled, `restore -y` stopped and started the service and came back healthy with the data.
+- **Bug found and fixed:** backup copies kept the live database's WAL mode, so opening one (a restore check) left `-wal`/`-shm` files beside it,
+  in the backups folder and next to the file given to `topo-db.sh restore`. Backups are now written in rollback-journal mode (`backup.make`,
+  `topo-db.sh backup_to`), the web restore removes its upload's side files, and `topo-db.sh restore` checks a copy. R53 now checks the mode and
+  that a restore leaves nothing behind. Re-run on the VM after the fix: no leftovers from either path.
+
+Not verified: polling after the restore against a real router with a working login (the VM has no router login stored; every device has
+been failing authentication since 2026-11-18, before this change). The nightly `topo-backup.sh` and `topo-update.sh` still write WAL-mode
+copies (harmless now: both restore paths clean up after reading one). The lab VM's `topo.db` was mode 0644 before the first restore; a
+restore leaves it 0600.
+
 ## Butler retired as a peer (2026-11-22)
 
 Removed the Butler URL (Settings, `url_butler`), its header button, the syslog pull from butler, the `butler` origin name in `syslog_core.PEERS`,
