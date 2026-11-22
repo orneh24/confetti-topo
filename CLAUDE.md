@@ -219,9 +219,9 @@ These came over from butler on 2026-11-21 as the same code, `BUTLER_*` renamed t
 - **vCenter import** (`POST /api/discover/vcenter`, `collectors/vcenter.py`): inventory only, through `identity.ingest`. Never tested
   against a real vCenter (as in butler); it has no page, only the API.
 
-On the **Classic** layout the pages that came from butler (IPAM, Templates, Alerts) are a second row under the header
-(`.nav-row-butler` in `base.html`, shown only while no `data-layout` is set); the other layouts list them with the rest
-(`all_pages` = `pages` + `butler_pages` in `base.html`).
+Menu order (one list in `base.html`, `all_pages`): Dashboard, Topology, Devices, Conflicts, Recent changes, Syslog, Alerts, IPAM, Templates,
+Settings (last). On the **Classic** layout Alerts, IPAM and Templates are a second row labelled Tools (`.nav-row-tools`, shown only while no
+`data-layout` is set); the other layouts list them with the rest. The MS-DOS Go menu hotkeys are the positions in this list.
 
 ### Topology history
 
@@ -576,6 +576,9 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
     `config_drift` / `config_compliant` are events only on a change between the two, not on the first evaluation. Checked by R49.
 33. **Interface error history is sampled on change, and a counter reset adds nothing.** `interface_stats` gets a row when the counters change plus an
     hourly heartbeat; `ssh.growth` ignores a decrease (a reload). Checked by R50.
+34. **A deployed database upgrades in place.** `db.init_db` runs on every start over the existing file: `CREATE TABLE IF NOT EXISTS` never adds a
+    column to an existing table, so every new column needs its own `PRAGMA table_info` + `ALTER TABLE ADD COLUMN` (with a default if `NOT NULL`).
+    Nothing may drop or rewrite rows, and a second run changes nothing. Checked by R51 (the oldest `db.py` in git builds the old schema).
 
 ## Regression gate
 
@@ -588,7 +591,7 @@ container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
 the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti projects' URLs; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll; `R39` is the ruff `F` lint over `topo/` and `dev/` (not a constraint check); `R40` (constraint 24) the shared syslog parser and insert rule, `R40-sync` that `syslog_core.py`, `syslog_pull.py` and `syslog_cases.json` are byte-identical in the three repos (`NOT RUN` if a sibling is not next to this repo); `R41` (constraint 25) the syslog poll trigger; `R42` (constraint 26) the syslog pull; `R43`..`R50` (constraints 27..33) the checks that came with the butler merge: template sandbox, the open `/configs/` pull, config backups,
-alert matching (`R46`) and delivery (`R47`), SNMP, drift and interface error history; the next constraint (34) takes `R51`. Output is one line per check
+alert matching (`R46`) and delivery (`R47`), SNMP, drift and interface error history; `R51` (constraint 34) the in-place upgrade of an old database; the next constraint (35) takes `R52`. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

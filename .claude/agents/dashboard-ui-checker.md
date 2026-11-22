@@ -18,7 +18,7 @@ You check how confetti-topo's pages look and behave in a real browser, and repor
 
 ## Pages, themes, layouts
 
-Pages: `/`, `/devices`, `/devices/1`, `/changes`, `/topology`, `/conflicts`, `/settings`. On `/changes` and on the map, also try the right-click menus (shared `static/ctxmenu.js`) and `/topology?device=<id>` (selects and centres that device).
+Pages: `/`, `/devices`, `/devices/1`, `/changes`, `/topology`, `/conflicts`, `/settings`, `/syslog`, `/ipam`, `/templates`, `/alerts`. On `/changes` and on the map, also try the right-click menus (shared `static/ctxmenu.js`) and `/topology?device=<id>` (selects and centres that device).
 
 Themes: `setTheme('<name>')` in `javascript_tool`; names are in the `THEMES` list in `static/theme.js` (dark, light, monokai, contrast, terminal, confetti-night, rainbow). Layouts: `setLayout('<name>')` (classic, modern, retro95, msdos); MS-DOS has a colour variant, `setVariant('green')` or `setVariant('blue')`, which saves `confetti-topo-dos-variant`. **Both save to the browser's localStorage** (`confetti-topo-theme`, `confetti-topo-layout`, `confetti-topo-dos-variant`), the user's own choice: read them first and put them back before you finish.
 

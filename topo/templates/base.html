@@ -12,11 +12,11 @@
 </head>
 {# The page list lives here once. The current page is picked from the URL, so
    /devices/5 counts as Devices. #}
-{% set pages = [('/', 'Dashboard'), ('/devices', 'Devices'), ('/changes', 'Recent changes'), ('/syslog', 'Syslog'), ('/topology', 'Topology'), ('/conflicts', 'Conflicts'), ('/settings', 'Settings')] %}
-{# The pages that came from confetti-butler. Classic shows them on their own row under the topo row; every other
-   layout lists them with the rest (all_pages). #}
-{% set butler_pages = [('/ipam', 'IPAM'), ('/templates', 'Templates'), ('/alerts', 'Alerts')] %}
-{% set all_pages = pages + butler_pages %}
+{% set main_pages = [('/', 'Dashboard'), ('/topology', 'Topology'), ('/devices', 'Devices'), ('/conflicts', 'Conflicts'), ('/changes', 'Recent changes'), ('/syslog', 'Syslog')] %}
+{# Alerts, IPAM and Templates: Classic shows them on their own row (Tools) under the first row; every other layout lists
+   them with the rest. Settings is always last (all_pages). #}
+{% set tools_pages = [('/alerts', 'Alerts'), ('/ipam', 'IPAM'), ('/templates', 'Templates')] %}
+{% set all_pages = main_pages + tools_pages + [('/settings', 'Settings')] %}
 {% set here = '/' if request.path == '/' else '/' + request.path.strip('/').split('/')[0] %}
 <body class="{% block body_class %}{% endblock %}">
 
@@ -33,13 +33,9 @@
     <div class="header-left">
         <h1>CONFETTI TOPO</h1>
         <span class="page-title" id="page-title">{% block page_title %}{{ self.title() }}{% endblock %}</span>
-        {% for path, label in pages %}
-        {% if path == here %}<span class="btn-nav-current">{{ label }}</span>
-        {% else %}<a href="{{ path }}" class="btn-nav">{{ label }}</a>{% endif %}
-        {% endfor %}
-        {% for path, label in butler_pages %}
-        {% if path == here %}<span class="btn-nav-current butler-nav">{{ label }}</span>
-        {% else %}<a href="{{ path }}" class="btn-nav butler-nav">{{ label }}</a>{% endif %}
+        {% for path, label in all_pages %}{% set tool = (path, label) in tools_pages %}
+        {% if path == here %}<span class="btn-nav-current{% if tool %} tools-nav{% endif %}">{{ label }}</span>
+        {% else %}<a href="{{ path }}" class="btn-nav{% if tool %} tools-nav{% endif %}">{{ label }}</a>{% endif %}
         {% endfor %}
     </div>
     <div class="status">
@@ -51,10 +47,10 @@
     </div>
 </div>
 
-<!-- Classic layout only: the pages from confetti-butler on a second row. Hidden in the other layouts, which list them in the header or menu. -->
-<div class="nav-row-butler" aria-label="Butler pages">
-    <span class="nav-row-label">Butler</span>
-    {% for path, label in butler_pages %}
+<!-- Classic layout only: Alerts, IPAM and Templates on a second row. Hidden in the other layouts, which list them in the header or menu. -->
+<div class="nav-row-tools" aria-label="Tools pages">
+    <span class="nav-row-label">Tools</span>
+    {% for path, label in tools_pages %}
     {% if path == here %}<span class="btn-nav-current">{{ label }}</span>
     {% else %}<a href="{{ path }}" class="btn-nav">{{ label }}</a>{% endif %}
     {% endfor %}

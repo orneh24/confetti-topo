@@ -13,7 +13,7 @@ was not touched, and no butler database import exists (decided with the user).
 - **Schema (additive, on an existing `topo.db`):** tables `ipam_findings`, `templates`, `template_versions`, `template_vars`, `config_versions`,
   `interface_stats`, `alert_rules`; columns `devices.template_name` / `drift_status`, `credentials.snmp_community` / `snmp_version`,
   `interfaces.input_errors` / `crc_errors`, `events.alerted` (existing events are marked alerted, so nothing old is sent).
-- **Menu:** Classic shows IPAM, Templates and Alerts as a second row (`.nav-row-butler`); the other layouts list them with the rest.
+- **Menu:** Classic shows Alerts, IPAM and Templates as a second row (`.nav-row-tools`, label Tools; first named Butler, renamed 2026-11-22); the other layouts list them with the rest.
 - **Not ported:** the Packer template, `firstboot.initd`, butler's setup/update scripts (topo has its own), the butler-only agents and skills.
 - **Constraints 27..33 and checks R43..R50** are new (butler's checks, adapted); R15, R19 and R28 were extended (eleven tasks, the SNMP platform,
   SNMP credentials), and R6/R20 list the new pages. `python dev/regress.py` → `CLEAR`, 51 checks including the live tier.

@@ -1694,6 +1694,49 @@ def _():
     return p
 
 
+@check("R51", "an existing database upgrades in place: the oldest schema in git gets every table and column, keeps its rows, and init_db twice is harmless")
+def _():
+    p = []
+    if not shutil.which("git"):
+        raise Skip("git not found")
+    first = subprocess.run(["git", "log", "--diff-filter=A", "--format=%H", "--", "topo/app/db.py"],
+                           capture_output=True, text=True).stdout.split()
+    if not first:
+        raise Skip("no git history for topo/app/db.py")
+    old = subprocess.run(["git", "show", first[-1] + ":topo/app/db.py"], capture_output=True, text=True).stdout
+    m = re.search(r'executescript\("""(.*?)"""\)', old, re.S)
+    need(m is not None, "cannot find the CREATE script in the oldest db.py (%s)" % first[-1][:7], p)
+    if not m:
+        return p
+    mods, fresh = fresh_db()                       # the schema the current code makes
+    def schema(c):
+        out = {}
+        for (t,) in c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"):
+            out[t] = {r[1] for r in c.execute("PRAGMA table_info(%s)" % t)}
+        return out
+    want = schema(fresh)
+    fresh.close()
+    path = os.path.join(TMP, "upgrade.db")
+    old_db = sqlite3.connect(path)
+    old_db.executescript(m.group(1))
+    old_db.execute("INSERT INTO devices (key, hostname, mgmt_ip, first_seen, last_seen) VALUES ('mgmt:192.0.2.1', 'old-rtr', '192.0.2.1', '2000-01-01 00:00:00', '2000-01-01 00:00:00')")
+    old_db.commit()
+    old_db.close()
+    mods["config"].DB_PATH = path
+    mods["db"].init_db()
+    mods["db"].init_db()                           # twice: must be harmless
+    c = mods["db"].connect()
+    have = schema(c)
+    for t, cols in sorted(want.items()):
+        need(t in have, "table %s missing after the upgrade" % t, p)
+        if t in have:
+            need(cols <= have[t], "%s: columns missing after the upgrade: %s" % (t, sorted(cols - have[t])), p)
+    row = c.execute("SELECT hostname FROM devices WHERE key='mgmt:192.0.2.1'").fetchone()
+    need(row is not None and row[0] == "old-rtr", "the device row did not survive the upgrade", p)
+    c.close()
+    return p
+
+
 # ============================================================ live tier
 
 @check("R32", "routes: real-output fixtures parse, an empty table deletes nothing, one summary event per changed poll, none on baseline")
