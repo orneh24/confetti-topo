@@ -10,18 +10,18 @@ around it: device inventory, IPAM, config templates and their pull endpoint, run
 with drift, syslog, change events and alerting. Infrastructure is ESXi 7.0 with Cisco CSR1000v routers
 initially; other vendors later.
 
-confetti-topo was split out of `../confetti-butler` on 2026-10-14 and **merged back on 2026-11-21**: this
+confetti-topo was split out of the former confetti-butler project on 2026-10-14 and **merged back on 2026-11-21**: this
 project now holds everything butler did (IPAM, templates, config backups, drift, alerting, SNMP,
 interface error history, the vCenter import) plus the topology. The name, service (`confetti-topo`),
 install path and `TOPO_*` environment variables did not change. It is **fully standalone**: its own
-device inventory, credentials, discovery, ICMP checker, SSH poller, LLDP crawl, events and graph UI. Two
-sibling repos stay related:
+device inventory, credentials, discovery, ICMP checker, SSH poller, LLDP crawl, events and graph UI. One
+sibling repo stays related:
 - `../confetti-traffic` (network connectivity test harness) — confetti-topo can import its node fleet
-  (`GET /endpoints`) as `role='node'` devices, and copies its hub UI look by hand.
-- `../confetti-butler` — kept as it was and no longer the source of anything. Its code was ported into
-  this repo, so a fix there is not a fix here. A deployed butler can still be a syslog-pull peer. There is no import of its
-  devices or of an old butler database (the butler import was removed 2026-11-22). The
-  shared syslog files stay byte-identical (constraint 24). The `confetti-interop-checker` agent looks for drift.
+  (`GET /endpoints`) as `role='node'` devices, and copies its hub UI look by hand. The
+  shared syslog files stay byte-identical with confetti-traffic (constraint 24). The `confetti-interop-checker` agent looks for drift.
+
+The former confetti-butler project is retired: its code was ported into this repo and nothing here talks to it any more
+(no import, no Settings URL, no syslog pull; removed 2026-11-22).
 
 Reference notes for the feature itself: `docs/TOPOLOGY-MAPPING.md` (design, pitfalls, test checklist).
 
@@ -44,7 +44,7 @@ is not a `<show>` op).
   - A background **poller** thread pool (device polling, SSH or XML API), an **ICMP checker** thread, an optional
     **discovery** timer thread and a UDP **syslog** listener (port 514, `TOPO_SYSLOG_*`)
 - SSH server is OpenSSH (`sshd`, with `openssh-sftp-server`), not Dropbear (switched 2026-10-14, same as
-  confetti-butler: Dropbear has no SFTP and drops large packets). `/etc/ssh/sshd_config.d/10-confetti.conf` keeps
+  the former confetti-butler: Dropbear has no SFTP and drops large packets). `/etc/ssh/sshd_config.d/10-confetti.conf` keeps
   root password login on and sets `MaxStartups 100:30:200`; only an ed25519 host key is generated.
   `build-topo.sh` `switch_ssh_server()` (called last, above the `--update` exit) moves a VM that still has
   Dropbear over: converts its ed25519 host key, stops Dropbear, starts sshd, and only then removes Dropbear and
@@ -88,7 +88,7 @@ real IOS-XE 17.3 CSR1000v and a 15.4 router; see constraint 3 for command-name g
 
 `app/platforms.py` maps a device's `platform` to its transport, commands and parsers: `cisco_ios` / `cisco_xe`
 (SSH), `paloalto_panos` (XML API) and `snmp` (net-snmp `snmpget` / `snmpwalk`, v1 and v2c, `version` and `interfaces`
-only, no CLI; `collectors/snmp.py`, from butler). An unknown platform falls back to the IOS entry. Junos is planned, not
+only, no CLI; `collectors/snmp.py`). An unknown platform falls back to the IOS entry. Junos is planned, not
 started.
 
 **PAN-OS** (`collectors/panos.py`, `parsers/panos.py`, skill `panos-xml-api`): the poller picks the collector from the
@@ -115,7 +115,9 @@ The page keeps the map still and readable: physics places only nodes with no sav
 Places are stored in `node_positions` (`PUT`/`DELETE /api/topology/positions`, the same map for every viewer;
 `GET /api/topology` returns `x`/`y` per node and a `positions` dict). An unknown node (or "N unknown" node) whose links all go to one known device is kept close to it and out of the way: `tuckUnknown` in topology.html puts one that is more than `UNKNOWN_NEAR` (400 px) away, or that touches a link or another node, or whose own AS area would meet the area of another AS (an unknown BGP peer has the AS it reports), on a ring around that device at the angle and distance with the most free room, after the layout settles and on load, and saves the new places. Devices and links never move for it: the real map has precedence over unknown nodes (a drag that is near and clear stays). Unknown nodes whose links all go to one
 known device are drawn as one "N unknown" node (`group:dev:<id>`, made up by the page, so only `positions`
-knows it); double-click expands it. An LLDP link shows its port names only on hover or when selected.
+knows it); double-click expands it. An LLDP link shows its port names only on hover or when selected, and so does a
+default-route or subnet link; a second link of the same kind between the same two nodes bends further out. Below the
+Devices list, an Unknown list names each unknown node and the device(s) that see it (browser only, nothing stored).
 BGP/OSPF labels always show. A BGP session is typed by the AS at its two ends (`adjacencies.local_as` is the router's own
 AS, from `show bgp summary`): `bgp_type` `ibgp` = thin yellow line, `ebgp` = thick purple line, and the **AS areas** toggle
 draws a box labelled with the AS behind its nodes (`nodes[].asn`). `/topology?device=<id>` selects and centres on that device once (the Recent changes page links there).
@@ -151,7 +153,7 @@ The **Layout** dropdown (Free / Hierarchical, `confetti-topo-layout-mode`, per b
 (`treePositions`), from the Focus device if one is set, else from the shown device with the most links (`autoRoot`); places are
 never saved (`treeOn`).
 The **Labels** dropdown (Default / Hover only / Off, `confetti-topo-label-mode`, per browser) sets when link labels show (`edgeLabel`).
-The **Fit** button is `fitMap`. Selecting a device fades every node and link that is not it or one link away (`dimMap`, `selNear`,
+The toolbar is three groups, Show (layers, unknown nodes) / Look / Actions (Fit, Tidy AS areas, Re-arrange, History, an Export menu); a switched-on toggle is filled. The **Fit** button is `fitMap`; it leaves room for the Devices list and an open legend. An open node or link card takes the legend's place at full height (`fitNodePanel`). "Tidy AS areas" puts each node with no AS in the free slot nearest the mean x of the nodes it links to. On this full-height page the footer's "Is it DNS..?" / "Make it rain!" are in the map's right-click menu instead. Selecting a device fades every node and link that is not it or one link away (`dimMap`, `selNear`,
 `edgeOpacity`; combined with the search fade, nothing saved).
 
 ### Routing table
@@ -187,9 +189,9 @@ hostname) and stores one row per VLAN in `vlans` (`GET /api/vlans?device_id=N`, 
 has VLAN 1, so an answer with no rows deletes nothing; a real list replaces the old one. No events. Fixture
 `dev/samples/ios_vlan_brief.txt` (real format, Catalyst 3560).
 
-### Merged from confetti-butler
+### Features that came from the former confetti-butler
 
-These came over from butler on 2026-11-21 as the same code, `BUTLER_*` renamed to `TOPO_*`.
+These came over on 2026-11-21 as the same code, `BUTLER_*` renamed to `TOPO_*`.
 
 - **Config templates and the pull endpoint** (`templates` page, `/api/templates*`, `rendering.py`): Jinja2 in a sandbox with
   `StrictUndefined` (constraint 27), rendered against a device's polled facts plus its own `template_vars`. `GET /configs/<key>.cfg`
@@ -217,7 +219,7 @@ These came over from butler on 2026-11-21 as the same code, `BUTLER_*` renamed t
 - **SNMP** (`collectors/snmp.py`): see Architecture. Device and Settings credentials carry `snmp_community` and `snmp_version`
   (same order as the SSH ones, never returned by a GET, constraint 31).
 - **vCenter import** (`POST /api/discover/vcenter`, `collectors/vcenter.py`): inventory only, through `identity.ingest`. Never tested
-  against a real vCenter (as in butler); it has no page, only the API.
+  against a real vCenter; it has no page, only the API.
 
 Menu order (one list in `base.html`, `all_pages`): Dashboard, Topology, Devices, Conflicts, Recent changes, Syslog, Alerts, IPAM, Templates,
 Settings (last). On the **Classic** layout Alerts, IPAM and Templates are a second row labelled Tools (`.nav-row-tools`, shown only while no
@@ -234,14 +236,13 @@ A snapshot is the `/api/topology` answer, so it holds nothing the page does not 
 ### Syslog
 
 `app/syslog_server.py` (a daemon thread, `TOPO_SYSLOG_ENABLED` default true, UDP `TOPO_SYSLOG_PORT` 514) stores what devices say in `syslog`,
-through `syslog_core.py` (constraint 24, the same parser and insert as confetti-butler and confetti-traffic). It is a port of butler's
-receiver: no `allow_reuse_address`, `busy_timeout` before `journal_mode`, `MAX_RAW` 4096, a row cap (`TOPO_SYSLOG_MAX_ROWS`) and an age limit
+through `syslog_core.py` (constraint 24, the same parser and insert as confetti-traffic). The receiver's rules: no `allow_reuse_address`, `busy_timeout` before `journal_mode`, `MAX_RAW` 4096, a row cap (`TOPO_SYSLOG_MAX_ROWS`) and an age limit
 (`TOPO_SYSLOG_RETENTION_DAYS`, 14, pruned in the poller tick). `/syslog` is the page (filters, right-click menu, a "via" column that names
 the server a row was pulled from), `GET /api/syslog` and `/api/syslog/sources` read it, the device page has a Syslog box, `/metrics` has
 `topo_syslog_*`, `/api/health` has `syslog_listening`. A device is matched to a row at query time by its `mgmt_ip` or hostname alias, never
 stored. Alerting on syslog is in the Alerting section below.
 
-**Pulling from the other servers** (`app/syslog_pull.py`, `pull_once` in `syslog_core.py`, constraint 26; the same two files as in confetti-butler and
+**Pulling from the other servers** (`app/syslog_pull.py`, `pull_once` in `syslog_core.py`, constraint 26; the same two files as in
 confetti-traffic): a device logs to one Confetti server only. The Settings page has a switch per other server (`GET|PUT /api/settings/syslog-pull`, off by
 default, needs its URL) and `TOPO_SYSLOG_PULL_INTERVAL_S` (15) sets the round. A pulled message is stored with `origin` = that server and goes through the same
 dedup and the poll trigger as a received one. `/api/syslog?after_id=N&origin=local` is what a puller reads from here (`X-Syslog-Max-Id` header).
@@ -384,23 +385,23 @@ topo/
     ipam.py            — overlap and duplicate-address findings
     alerts.py          — alert rules, webhook/mail sender thread (constraint 30)
     tools_routes.py   — the Flask Blueprint `tools` with the IPAM, templates, /configs, backups, drift, alerts, vCenter import
-    syslog_core.py     — syslog parser + the one insert path; the SAME file in confetti-butler and confetti-traffic (constraint 24)
-    syslog_server.py   — UDP syslog listener (port of butler's), stores through syslog_core
+    syslog_core.py     — syslog parser + the one insert path; the SAME file in confetti-traffic (constraint 24)
+    syslog_server.py   — UDP syslog listener, stores through syslog_core
     syslog_trigger.py  — a topology message asks for an early poll of its device (constraint 25)
-    syslog_pull.py     — pulls syslog from the other Confetti servers on a timer; the SAME file in confetti-butler and confetti-traffic (constraint 26)
+    syslog_pull.py     — pulls syslog from the other Confetti servers on a timer; the SAME file in confetti-traffic (constraint 26)
     auth.py            — optional access token (TOPO_AUTH_TOKEN): /login, cookie or bearer; off by default
     collectors/        — ssh.py, panos.py (XML API), snmp.py, vcenter.py, sweep.py, confetti.py, seedfile.py
     parsers/           — ios.py (regex only), panos.py (XML)
   templates/           — base.html (head, header/nav, theme + layout pickers, footer, Retro taskbar)
-                         + dashboard (widgets: system, services, activity, devices, events, sessions down, open conflicts, unknown LLDP neighbors, map changes), devices, device, changes (Recent changes: filter bar, summary tiles, sortable events table with type/change/before/after from `events.describe()`, banded per device, details pane, right-click menu), topology, syslog, conflicts, settings, ipam, alerts, templates_editor (CodeMirror in static/vendor/codemirror), each `{% extends "base.html" %}`
-  static/theme.css     — the ONE place colours live (Dark, Light, Monokai, High Contrast,
+                         + dashboard (widgets: system, services, activity, devices, events, sessions down, open conflicts, unknown LLDP neighbors, map changes; the Devices widget has click-to-sort headings and a Columns chooser, kept in `confetti-topo-dashboard-devices`), devices, device, changes (Recent changes: filter bar, summary tiles, sortable events table with type/change/before/after from `events.describe()`, banded per device, details pane, right-click menu), topology, syslog, conflicts, settings, ipam, alerts, templates_editor (CodeMirror in static/vendor/codemirror), each `{% extends "base.html" %}`
+  static/theme.css     — the ONE place colours live (Dark, Light, Monokai,
                          Terminal green, Confetti Night, Rainbow). Pages must not define their own :root colours
   static/layout.css    — Classic, Modern, Retro 95, MS-DOS (MS-DOS has two colour variants, DOS Blue and Neon Green: `data-variant="green"` on `:root`, a header dropdown shown only in MS-DOS, saved in `confetti-topo-dos-variant`; it also has a keyboard layer:
                          base.html's .dos-menubar / .dos-fkeys / .dos-help, a row cursor, and one keydown IIFE at
-                         the end of theme.js that does nothing in any other layout; same block as confetti-butler). Loaded AFTER theme.css
-  static/confetti-links.js — the header shortcut buttons to the other Confetti projects (URLs from the Settings page, `GET /api/settings/links`); opens in a new tab; the SAME file as in confetti-butler and confetti-traffic, copy it by hand and keep the three identical
-  static/dashgrid.js   — the dashboard's movable/resizable widgets (`data-box` is the attribute name, kept): drag a `.section[data-box]` by its header (pointer events on `document`, not pointer capture: moving the node in the DOM drops the capture), drag the corner grip to resize (width snaps to grid columns, height free); a widget dropped on the middle band of another (outlined `dg-join`) shares that row with it and the widgets already on it, the columns split between them (`joinRow`, the first is pinned to column 1 via `state.row`); while dragging, a `.dg-ghost` clone follows the pointer and the original stays in the grid as a grid-pattern drop place (`.dg-drag`); a drop in a row's empty space (`emptySpace`: right of its last widget or left of its first) puts the widget beside that row's widgets; "Reset layout" button; saved per browser in `confetti-topo-dashboard-layout`. Injects its own CSS; the SAME file as in confetti-butler and confetti-traffic, copy it by hand and keep the three identical
-  static/ctxmenu.js    — right-click menus, loaded once by base.html (menu CSS at the end of layout.css); the SAME file as in confetti-butler and confetti-traffic, copy it by hand and keep the three identical. A row carries data-ctx="<type>" and the page calls ctxMenu.register(type, fn(el, ev)); one document-level listener finds the row. Fill data-* attributes with ctxMenu.attr(), never esc(). A destructive item is `danger: true`, goes last and must ask confirm() (R29 fails a page that has one without). Used by every page: rows and a `page` menu for empty space (`document.documentElement.setAttribute('data-ctx', 'page')`; header/nav/footer keep the browser menu) on the dashboard, devices, device (one `row` menu per table body), conflicts, settings and changes pages, and the topology map (ctxMenu.open from vis's `oncontext`). Rows are looked up by id when the menu opens, because the tables are rebuilt on every refresh; a destructive item reuses the page's own confirming function. R29 checks it
+                         the end of theme.js that does nothing in any other layout; same block as in confetti-traffic). Loaded AFTER theme.css
+  static/confetti-links.js — the header shortcut buttons to the other Confetti projects (URLs from the Settings page, `GET /api/settings/links`); opens in a new tab; the SAME file as in confetti-traffic, copy it by hand and keep the two identical
+  static/dashgrid.js   — the dashboard's movable/resizable widgets (`data-box` is the attribute name, kept): drag a `.section[data-box]` by its header (pointer events on `document`, not pointer capture: moving the node in the DOM drops the capture), drag the corner grip to resize (width snaps to grid columns, height free); a widget dropped on the middle band of another (outlined `dg-join`) shares that row with it and the widgets already on it, the columns split between them (`joinRow`, the first is pinned to column 1 via `state.row`); while dragging, a `.dg-ghost` clone follows the pointer and the original stays in the grid as a grid-pattern drop place (`.dg-drag`); a drop in a row's empty space (`emptySpace`: right of its last widget or left of its first) puts the widget beside that row's widgets; "Reset layout" button and, when the page passes `autoSort: true`, an "Auto sort layout" button (`autoSort()`: drops saved sizes, puts the non-full-width widgets in rows of similar height, widens a last short row to fill it, gives each widget at least the columns its content needs (`needColumns`, no sideways scroll), stacks widgets beside the tallest one when that leaves less empty space (it spans their grid rows: `state.rows`, `stackPlan`), lets up to three short `.wide` widgets share a row and stretches every widget to its row height (`state.fill`); best effort); saved per browser in `confetti-topo-dashboard-layout`. Injects its own CSS; the SAME file as in confetti-traffic, copy it by hand and keep the two identical
+  static/ctxmenu.js    — right-click menus, loaded once by base.html (menu CSS at the end of layout.css); the SAME file as in confetti-traffic, copy it by hand and keep the two identical. A row carries data-ctx="<type>" and the page calls ctxMenu.register(type, fn(el, ev)); one document-level listener finds the row. Fill data-* attributes with ctxMenu.attr(), never esc(). A destructive item is `danger: true`, goes last and must ask confirm() (R29 fails a page that has one without). Used by every page: rows and a `page` menu for empty space (`document.documentElement.setAttribute('data-ctx', 'page')`; header/nav/footer keep the browser menu) on the dashboard, devices, device (one `row` menu per table body), conflicts, settings and changes pages, and the topology map (ctxMenu.open from vis's `oncontext`). Rows are looked up by id when the menu opens, because the tables are rebuilt on every refresh; a destructive item reuses the page's own confirming function. R29 checks it
   static/theme.js      — THEMES + LAYOUTS lists and the two header dropdowns (confetti-topo-theme,
                          confetti-topo-layout in localStorage), themeColor() for canvas colours,
                          confettiBlast(), Shuffle, the header health dot
@@ -413,16 +414,16 @@ container/ — Dockerfile + compose
 dev/regress.py — the regression gate (see below); dev/samples/ = parser fixtures;
 dev/requirements-dev.txt — ruff (dev machine only); ruff.toml — F rules only (repo root)
 docs/ — TOPOLOGY-MAPPING.md, HANDOFF.md, ROADMAP.md, img/
-.claude/ — agents: dashboard-ui-checker, lab-validator, leak-scanner, readme-image-capturer;
-           skills: 4 reference skills (cisco-ios-patterns, netmiko-ssh-automation, network-bgp-diagnostics,
-           panos-xml-api) and 6
-           confetti-topo-* (api, dev-run, add-platform, lab-validation, release, ui). regression-gate,
+.claude/ — agents: check-red-prover, dashboard-ui-checker, lab-validator, leak-scanner, readme-image-capturer;
+           skills: 6 reference skills (cisco-ios-patterns, netmiko-ssh-automation, network-bgp-diagnostics,
+           network-config-validation, network-interface-health, panos-xml-api) and 7
+           confetti-topo-* (api, dev-run, add-platform, add-task, lab-validation, release, ui). regression-gate,
            docs-drift-checker, confetti-interop-checker and the alpine-appliance and constraint-regression
            skills are user-level (~/.claude), not in this repo
 ```
 
-The look (themes, layouts, Shuffle, confettiBlast) is copied by hand from confetti-traffic's hub UI and
-confetti-butler. Keep the three in step; `confetti-interop-checker` reports drift.
+The look (themes, layouts, Shuffle, confettiBlast) is copied by hand from confetti-traffic's hub UI.
+Keep the two in step; `confetti-interop-checker` reports drift.
 
 ## Design Decisions
 - **Mirror the sibling stack exactly**: Flask + SQLite (WAL) + waitress, vanilla JS with no build step, Alpine
@@ -435,7 +436,7 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
   service is the current mitigation).
 - **The API is unauthenticated unless `TOPO_AUTH_TOKEN` is set** (`app/auth.py`, constraint 18), same trust model as
   the siblings; do not expose it either way. A sweep CIDR or a
-  confetti-traffic or confetti-butler URL given to the API makes the server connect there.
+  confetti-traffic URL given to the API makes the server connect there.
 - **Keep code simplistic to avoid over-engineering.** A network engineer reading this at 2am should be able
   to follow it without decoding an abstraction.
 
@@ -519,10 +520,10 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
 20. **Topology history is written only when the map changed, pruned by age, read-only over the API, and holds no secrets.** A snapshot
     is the `/api/topology` data and nothing else (no credentials, no device output). An unchanged map adds no row, and
     `TOPO_SNAPSHOT_INTERVAL_S=0` stores nothing. A history failure must never stop the poller tick. Checked by R35.
-21. **The URLs of the other Confetti projects are only link targets: http(s) with a host, validated on write, fetched only by the syslog pull.** The Settings page
-    keeps the Butler and Traffic URLs (`settings` keys `url_butler` / `url_traffic`, `GET|PUT /api/settings/links`); a value that is not
+21. **The URL of the other Confetti project is only a link target: http(s) with a host, validated on write, fetched only by the syslog pull.** The Settings page
+    keeps the Traffic URL (`settings` key `url_traffic`, `GET|PUT /api/settings/links`); a value that is not
     http:// or https:// with a host, or has a user:password, whitespace or markup characters, is a 400 and changes nothing (all or nothing); an empty
-    value clears. `static/confetti-links.js` (the same file as in confetti-butler and confetti-traffic) turns them into small header buttons that
+    value clears. `static/confetti-links.js` (the same file as in confetti-traffic) turns it into a small header button that
     open in a new tab with `noopener`, re-checks http(s) and never builds HTML from the URL. The server connects to one only for the syslog pull (constraint 26), opt-in per server, and never otherwise. Checked by R36.
 22. **BGP flap detection works only from what a poll already read, counts only changes to or from Established or a timer reset of an
     Established peer, and is silent on a first poll.** A peer cycling Idle/Active/Connect never flaps. Flapping = `TOPO_FLAP_COUNT`
@@ -532,8 +533,8 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
     resolves only to the unique owner of that address, never to the device itself, else it is a ghost; a RIB row only (not FIB).
     A Connected subnet skips any subnet holding a device's `mgmt_ip`, /32s and subnets with one device; three or more devices
     meet at a `subnet:` node. Never an alias (constraints 1, 12). No new device command. Checked by R38.
-24. **Syslog is parsed and stored by one shared file, `app/syslog_core.py`, the same in confetti-butler, confetti-traffic and confetti-topo.**
-    Copy it by hand and keep the three byte-identical, with `dev/samples/syslog_cases.json` (a line in, the fields out; also identical).
+24. **Syslog is parsed and stored by one shared file, `app/syslog_core.py`, the same in confetti-traffic and confetti-topo.**
+    Copy it by hand and keep the two byte-identical, with `dev/samples/syslog_cases.json` (a line in, the fields out; also identical).
     `parse()` never raises and never drops a line (RFC 3164 and Cisco, plus RFC 5424). `insert()` is the only way a row is stored, and it
     never commits. It skips a message when its `(origin, origin_id)` is already stored, or when a copy was pulled from another server within `dedup_s` (`syslog.origin`, `origin_id`,
     `msg_hash`); two copies this server received itself are both kept (a link that flaps twice is two messages). Pulling from another
@@ -549,8 +550,8 @@ confetti-butler. Keep the three in step; `confetti-interop-checker` reports drif
     (`syslog_cursor_<name>`; a different URL or an id that goes backwards resets it). The request is `GET <url>/api/syslog?after_id=N&origin=local` only, http(s) only, no
     redirect followed, a server that does not answer with `X-Syslog-Max-Id` is refused, every field is length-limited text and `msg_hash` is recomputed here. `origin=local`
     is what stops a message travelling around a loop. Rows go through `syslog_core.insert` (constraint 24). A failed request stores nothing and keeps the cursor; one server
-    failing never stops the other. The token for a server that has one is write-only: sent in an `Authorization` header, never in a URL, never returned by a GET (butler and
-    traffic have none, so topo sends none). Checked by R42.
+    failing never stops the other. The token for a server that has one is write-only: sent in an `Authorization` header, never in a URL, never returned by a GET (traffic
+    has none, so topo sends none). Checked by R42.
 
 27. **Config templates render in a sandbox with `StrictUndefined`.** `rendering._ENV` is a `SandboxedEnvironment`; an unset variable
     raises `RenderError` instead of printing nothing, and an attribute escape (`__class__`, `__init__.__globals__`) is refused. A template is
@@ -589,7 +590,7 @@ HTTP; `R21`..`R26` cover the ICMP state machine, `/metrics` format, LLDP crawl, 
 container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R27` checks the OpenSSH
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
-the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti projects' URLs; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll; `R39` is the ruff `F` lint over `topo/` and `dev/` (not a constraint check); `R40` (constraint 24) the shared syslog parser and insert rule, `R40-sync` that `syslog_core.py`, `syslog_pull.py` and `syslog_cases.json` are byte-identical in the three repos (`NOT RUN` if a sibling is not next to this repo); `R41` (constraint 25) the syslog poll trigger; `R42` (constraint 26) the syslog pull; `R43`..`R50` (constraints 27..33) the checks that came with the butler merge: template sandbox, the open `/configs/` pull, config backups,
+the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti project's URL; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll; `R39` is the ruff `F` lint over `topo/` and `dev/` (not a constraint check); `R40` (constraint 24) the shared syslog parser and insert rule, `R40-sync` that `syslog_core.py`, `syslog_pull.py` and `syslog_cases.json` are byte-identical in both repos (`NOT RUN` if confetti-traffic is not next to this repo); `R41` (constraint 25) the syslog poll trigger; `R42` (constraint 26) the syslog pull; `R43`..`R50` (constraints 27..33) the checks that came with the former butler's features: template sandbox, the open `/configs/` pull, config backups,
 alert matching (`R46`) and delivery (`R47`), SNMP, drift and interface error history; `R51` (constraint 34) the in-place upgrade of an old database; the next constraint (35) takes `R52`. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by

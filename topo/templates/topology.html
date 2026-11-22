@@ -4,8 +4,17 @@
 {% block head %}
 <link rel="stylesheet" href="/static/vendor/vis-network/vis-network.min.css">
 <style>
-.filters { padding: 10px 24px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--bg-card); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
-button.active { border-color: var(--cyan); color: var(--cyan); }
+.filters { padding: 8px 24px; display: flex; gap: 6px 18px; align-items: center; flex-wrap: wrap; background: var(--bg-card); border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+/* Toolbar groups: Show (what is on the map), Look (how it is drawn), Actions (do something). */
+.tb-group { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tb-group + .tb-group { border-left: 1px solid var(--border); padding-left: 18px; }
+.tb-label { font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
+.tb-group .hist-label { margin-left: 0; }
+/* A switched-on toggle is filled, not only ticked (Retro 95 and MS-DOS keep their own pressed look from layout.css). */
+button.active { border-color: var(--cyan); color: var(--text); background: var(--badge-bg); font-weight: 600; }
+/* A full-height page: the footer's two fun buttons are in the map's right-click menu instead. Log out stays. */
+.page-footer:not(:has(a[href="/logout"])) { display: none; }
+.page-footer .btn-small:not([href="/logout"]) { display: none; }
 .net-wrap { position: relative; flex: 1 1 auto; min-height: 0; }
 #net { position: absolute; inset: 0; background: var(--bg); }
 .legend-box { position: absolute; left: 12px; bottom: 12px; z-index: 5; max-width: 270px; font-size: 11px; color: var(--text-dim);
@@ -36,7 +45,11 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
 .dev-row .dot.up { background: var(--green); }
 .dev-row .dot.down { background: var(--red); }
 .dev-row .nm { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dev-row .meta { flex: 0 0 auto; color: var(--text-dim); font-size: 11px; font-weight: normal; }
+.dev-row .meta { flex: 0 1 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--text-dim); font-size: 11px; font-weight: normal; }
+.dev-row .dot.ghost { background: var(--bg-card); border: 1px dashed var(--text-dim); }
+.dev-sub { padding: 6px 10px 4px; font-size: 11px; font-weight: bold; color: var(--text-dim); border-bottom: 1px solid var(--border);
+    border-top: 1px solid var(--border); margin-top: 6px; }
 @media (max-width: 900px) { .dev-list { display: none; } }
 .left-stack { position: absolute; top: 12px; left: 12px; right: 264px; z-index: 6; display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 8px; pointer-events: none; }
 .left-stack > * { pointer-events: auto; }
@@ -71,31 +84,37 @@ button.active { border-color: var(--cyan); color: var(--cyan); }
 {% endblock %}
 {% block content %}
 <div class="filters">
-    <span class="hint">Show:</span>
+    <div class="tb-group" role="group" aria-label="Show">
+    <span class="tb-label">Show</span>
     <button class="active" data-layer="lldp" data-name="LLDP" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide the cables the devices report over LLDP">LLDP</button>
     <button class="active" data-layer="bgp" data-name="BGP" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide BGP sessions">BGP</button>
     <button class="active" data-layer="ospf" data-name="OSPF" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide OSPF adjacencies">OSPF</button>
     <button class="active" data-layer="default" data-name="Default" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide default routes: a line from each device to the device its 0.0.0.0/0 next hop belongs to">Default</button>
     <button class="active" data-layer="connected" data-name="Connected" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide devices that have an address in the same subnet (the management subnet is left out)">Connected</button>
-    <span class="hint">|</span>
     <button class="active" id="unknown-btn" aria-pressed="true" onclick="toggleUnknown(this)" title="Neighbors and peers that are not matched to a known device">Unknown nodes</button>
+    </div>
+    <div class="tb-group" role="group" aria-label="Look">
+    <span class="tb-label">Look</span>
     <button class="active" id="icons-btn" aria-pressed="true" onclick="toggleIcons(this)" title="Draw devices as icons with a vendor mark. Off: plain boxes for every device">Device icons</button>
     <button class="active" id="vendor-btn" aria-pressed="true" onclick="toggleVendor(this)" title="Show the vendor mark and name beside each device icon">Vendor icons</button>
     <button class="active" id="as-btn" aria-pressed="true" onclick="toggleAsAreas(this)" title="Draw a box around the routers of each BGP AS (needs BGP shown)">AS areas</button>
+    <button id="changed-btn" aria-pressed="false" onclick="toggleChanged(this)" title="Glow around devices that had a change event in the last 24 hours">Changed 24h</button>
     <label class="hist-label" title="How thick the connector lines are drawn. Only this browser remembers it">Lines
         <select id="width-sel" onchange="setLineWidth(this.value)"><option value="small">Small</option><option value="medium" selected>Medium</option><option value="large">Large</option></select></label>
-    <label class="hist-label" title="Link labels. Default: BGP, OSPF and default-route labels always show, LLDP and subnet labels on hover. Hover only: every label on hover or selection. Off: no labels. Only this browser remembers it">Labels
+    <label class="hist-label" title="Link labels. Default: BGP and OSPF labels always show, LLDP, subnet and default-route labels on hover. Hover only: every label on hover or selection. Off: no labels. Only this browser remembers it">Labels
         <select id="label-sel" onchange="setLabelMode(this.value)"><option value="default" selected>Default</option><option value="hover">Hover only</option><option value="off">Off</option></select></label>
     <label class="hist-label" title="Free: the saved places. Hierarchical: a tree from the best connected device, one row per hop. Only this browser remembers it; the places are not saved">Layout
         <select id="layout-sel" onchange="setLayoutMode(this.value)"><option value="free" selected>Free</option><option value="tree">Hierarchical</option></select></label>
-    <button id="changed-btn" aria-pressed="false" onclick="toggleChanged(this)" title="Glow around devices that had a change event in the last 24 hours">Changed 24h</button>
+    </div>
+    <div class="tb-group" role="group" aria-label="Actions">
+    <span class="tb-label">Actions</span>
+    <button id="fit-btn" onclick="if (network) { fitMap(); }" title="Zoom and move the view so the whole map fits">Fit</button>
     <button id="tidy-btn" onclick="tidyAsAreas()" title="Move the routers so each BGP AS sits in its own block (changes the saved places)">Tidy AS areas</button>
     <button id="rearrange-btn" onclick="rearrange()" title="Forget every saved place and lay the whole map out again from scratch (the same map for everyone)">Re-arrange</button>
     <label class="hist-label" title="Look at the map as it was when it last changed. Read-only; pick Live to go back">History
         <select id="hist-sel" onchange="pickHistory(this.value)"><option value="">Live</option></select></label>
-    <button id="fit-btn" onclick="if (network) { fitMap(); }" title="Zoom and move the view so the whole map fits">Fit</button>
-    <button id="png-btn" onclick="exportPng()" title="Download the map as a PNG picture">Export PNG</button>
-    <button id="json-btn" onclick="exportJson()" title="Download the map data (devices, neighbors, sessions) as a JSON file">Export JSON</button>
+    <button id="export-btn" aria-haspopup="menu" onclick="event.stopPropagation(); openExportMenu(this)" title="Download the map as a PNG picture or its data as JSON">Export &#9662;</button>
+    </div>
 </div>
 <div class="hist-bar" id="hist-bar" role="status" style="display:none">
     <span>History view, read-only: the map as it was on <b id="hist-when"></b>. <span id="hist-diff"></span> Red glow: gone since.</span>
@@ -297,8 +316,8 @@ function oneVisNode(n, GROUP_COLOR) {
 
 function edgeKey(e) { return [e.from, e.to, e.layer, e.label].join('|'); }
 
-// An LLDP link shows its port names only while the pointer is on it or it is selected; BGP and OSPF links
-// always show theirs. A group's "N links" label is a summary, so it stays.
+// An LLDP, subnet or default-route link shows its label only while the pointer is on it or it is selected (many default
+// routes say the same "default via X"); BGP and OSPF links always show theirs. A group's "N links" label is a summary, so it stays.
 var hoveredEdge = null;
 var lldpLabels = {};   // edge id -> the full label of an LLDP link
 
@@ -312,7 +331,7 @@ function edgeLabel(e) {
     var text = e.label + (e.flapping && e.layer === 'bgp' ? ' FLAPPING' : '');
     if (labelMode === 'off') { return ''; }
     var group = e.to.indexOf('group:') === 0;
-    var hoverOnly = labelMode === 'hover' ? !group : ((e.layer === 'lldp' || e.layer === 'connected') && !group);
+    var hoverOnly = labelMode === 'hover' ? !group : ((e.layer === 'lldp' || e.layer === 'connected' || e.layer === 'default') && !group);
     if (!hoverOnly) { return text; }
     lldpLabels[id] = text;
     return (id === hoveredEdge || id === selectedLink) ? text : '';
@@ -352,7 +371,11 @@ function setLineWidth(value) {
 function toVisEdges(edges) {
     var LAYER_COLOR = { lldp: themeColor('--cyan'), bgp: themeColor('--yellow'), ospf: themeColor('--blue'),
                         default: themeColor('--green'), connected: themeColor('--orange') };
+    var BEND = { lldp: 0, bgp: 0.25, ospf: -0.25, default: 0.45, connected: -0.45 };
+    var twins = {};   // from|to|layer -> how many such links came before: each next one bends further out
     return edges.map(function (e) {
+        var twin = (twins[e.from + '|' + e.to + '|' + e.layer] = (twins[e.from + '|' + e.to + '|' + e.layer] || 0) + 1) - 1;
+        var bend = BEND[e.layer] || 0;
         var ebgp = e.bgp_type === 'ebgp';   // a session between two ASes: purple and thick; iBGP stays yellow and thin
         return {
             // Stable id, so a refresh updates this edge instead of replacing it.
@@ -374,8 +397,9 @@ function toVisEdges(edges) {
             arrows: { to: { enabled: e.layer === 'default' } },   // a default route points at its next hop
             dashes: e.up === false ? true : (e.flapping ? [2, 5] : false),
             width: (e.up === false ? 2 : (e.flapping || ebgp ? 3 : 1)) * lineScale(),
-            // Lines between the same two devices would sit on top of each other: bend BGP one way, OSPF the other.
-            smooth: { type: 'curvedCW', roundness: { lldp: 0, bgp: 0.25, ospf: -0.25, default: 0.45, connected: -0.45 }[e.layer] || 0 },
+            // Lines between the same two devices would sit on top of each other: bend BGP one way, OSPF the other, and a
+            // second link of the same kind between the same two (two cables, a default route per VRF) further out.
+            smooth: { type: 'curvedCW', roundness: bend + twin * (bend < 0 ? -0.25 : 0.25) },
             font: { color: themeColor('--text-dim'), size: 10, strokeWidth: 0, background: themeColor('--bg') },
         };
     });
@@ -523,16 +547,17 @@ function settled() {
     centerPending();
 }
 
-// Fit the whole map in the part of the page the panels leave free: the legend sits over the left of the map (shift the
-// picture right by half its width) and the Devices list takes the right edge (shrink the picture and shift it left).
+// Fit the whole map in the part of the page the panels leave free: an open legend covers the left of the map and the
+// Devices list the right edge. Shrink the picture to the width between them and centre it there. A closed legend is
+// only its title in the bottom corner, so it is left out.
 function fitMap() {
     network.fit();
     var legend = document.querySelector('.legend-box');
     var list = document.getElementById('dev-list');
-    var legendW = legend && legend.offsetWidth ? legend.offsetWidth : 0;
-    var listW = list && list.offsetWidth ? list.offsetWidth + 24 : 0;   // 12px edge gap on each side
+    var legendW = legend && legend.open && legend.offsetWidth ? legend.offsetWidth + 24 : 0;   // 12px edge gap on each side
+    var listW = list && list.offsetWidth ? list.offsetWidth + 24 : 0;
     var wrapW = document.getElementById('net').offsetWidth || 1;
-    network.moveTo({ position: network.getViewPosition(), scale: network.getScale() * Math.max(0.3, (wrapW - listW) / wrapW),
+    network.moveTo({ position: network.getViewPosition(), scale: network.getScale() * Math.max(0.3, (wrapW - legendW - listW) / wrapW),
                      offset: { x: (legendW - listW) / 2, y: 0 } });
 }
 
@@ -572,6 +597,16 @@ function exportJson() {
     a.click();
     a.remove();
     setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+}
+
+// The toolbar's Export button: the two downloads in a small menu under it. The button stops its click from reaching the
+// document, where ctxmenu.js closes any open menu on a click.
+function openExportMenu(btn) {
+    var r = btn.getBoundingClientRect();
+    ctxMenu.open(r.left, r.bottom + 2, { title: 'Export', items: [
+        { label: 'Map as PNG picture', action: exportPng },
+        { label: 'Map data as JSON', action: exportJson },
+    ] });
 }
 
 // /topology?device=<id> (from the Recent changes page): select that device and centre on it, once.
@@ -1115,7 +1150,8 @@ function toggleAsAreas(btn) {
 }
 
 // "Tidy AS areas": put the routers of each AS in a block of their own so the boxes do not overlap, then save the
-// places. Blocks are packed left to right in rows; nodes with no AS go in a row below them.
+// places. Blocks are packed left to right in rows; nodes with no AS go in rows below them, each as close as it can get under
+// the nodes it links to (the mean x of its linked nodes), so its lines run down rather than across the whole map.
 function tidyAsAreas() {
     if (!network || !nodeSet) { return; }
     if (treeOn) { toast('stop the focus first: this would change the saved places'); return; }
@@ -1139,7 +1175,33 @@ function tidyAsAreas() {
         x += w + GAP; rowH = Math.max(rowH, h);
     });
     var ry = y + rowH + GAP;
-    rest.forEach(function (id, i) { network.moveNode(id, x0 + (i % 8) * CW, y0 + ry + Math.floor(i / 8) * CH); });
+    // Where each node without an AS wants to be: the mean x of the AS nodes it links to; failing that, of the other
+    // no-AS nodes it links to (second pass). A node linked to nothing placed goes last.
+    var placed = network.getPositions(nodeSet.getIds()), near = {}, want = {};
+    (edgeSet ? edgeSet.get() : []).forEach(function (e) {
+        (near[e.from] = near[e.from] || []).push(e.to);
+        (near[e.to] = near[e.to] || []).push(e.from);
+    });
+    function meanX(id, from) {
+        var xs = (near[id] || []).filter(function (o) { return from(o) !== undefined; }).map(from);
+        return xs.length ? xs.reduce(function (a, b) { return a + b; }, 0) / xs.length : undefined;
+    }
+    rest.forEach(function (id) { want[id] = meanX(id, function (o) { return nodeAs[o] !== undefined ? placed[o].x : undefined; }); });
+    rest.forEach(function (id) { if (want[id] === undefined) { want[id] = meanX(id, function (o) { return want[o]; }); } });
+    rest.sort(function (a, b) {
+        return (want[a] === undefined) - (want[b] === undefined) || (want[a] || 0) - (want[b] || 0);
+    });
+    // Each takes the free slot nearest its wish in the first row that has one (slots are CW apart, MAXW wide at least).
+    var slots = Math.max(8, Math.ceil(MAXW / CW) + 1), taken = {};
+    rest.forEach(function (id) {
+        var col = want[id] === undefined ? slots - 1 : Math.max(0, Math.min(slots - 1, Math.round((want[id] - x0) / CW)));
+        for (var row = 0; ; row++) {
+            for (var d = 0; d < slots; d++) {
+                var c = [col + d, col - d].filter(function (v) { return v >= 0 && v < slots && !taken[row + ':' + v]; })[0];
+                if (c !== undefined) { taken[row + ':' + c] = true; network.moveNode(id, x0 + c * CW, y0 + ry + row * CH); return; }
+            }
+        }
+    });
     savePositions(nodeSet.getIds());
     fitMap();
     network.redraw();
@@ -1300,10 +1362,11 @@ function portSpan(e) {
     return sp;
 }
 
-// The right-hand list: all known devices (not unknown neighbors), by name. A click selects the device on the map.
+// The right-hand list: all known devices (not unknown neighbors, not the Connected layer's subnet dots), by name.
+// A click selects the device on the map.
 function renderDeviceList() {
     var box = document.getElementById('dev-rows');
-    var devs = (rawData ? rawData.nodes : []).filter(function (n) { return !n.ghost; });
+    var devs = (rawData ? rawData.nodes : []).filter(function (n) { return !n.ghost && n.device_type !== 'subnet'; });
     devs.sort(function (a, b) { return a.label.toLowerCase() < b.label.toLowerCase() ? -1 : 1; });
     var total = devs.length, q = devSearchText();
     if (q) { devs = devs.filter(function (n) { return devMatches(n, q); }); }
@@ -1333,8 +1396,58 @@ function renderDeviceList() {
         row.onkeydown = function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pickFromList(n.id); } };
         box.appendChild(row);
     });
+    renderUnknownList(box, q);
     markDeviceList();
     dimMap();
+}
+
+// Below the devices: the unknown neighbors and peers, each with the known device(s) that see it. Built from the map data
+// in the browser, nothing stored. A click selects it, or its "N unknown" group when it is grouped.
+function renderUnknownList(box, q) {
+    if (!rawData) { return; }
+    var names = {}, seenBy = {};
+    rawData.nodes.forEach(function (n) { names[n.id] = n.label; });
+    rawData.edges.forEach(function (e) {
+        [[e.from, e.to], [e.to, e.from]].forEach(function (p) {
+            if (p[0].indexOf('ghost:') === 0 && p[1].indexOf('dev:') === 0) { (seenBy[p[0]] = seenBy[p[0]] || {})[p[1]] = true; }
+        });
+    });
+    var all = rawData.nodes.filter(function (n) { return n.ghost; });
+    var list = q ? all.filter(function (n) { return (n.label || '').toLowerCase().indexOf(q) >= 0; }) : all;
+    list.sort(function (a, b) { return a.label.toLowerCase() < b.label.toLowerCase() ? -1 : 1; });
+    if (!all.length) { return; }
+    var head = document.createElement('div');
+    head.className = 'dev-sub';
+    head.textContent = 'Unknown (' + (q ? list.length + ' of ' : '') + all.length + ')';
+    head.title = 'Neighbors and peers that were seen but not matched to a known device';
+    box.appendChild(head);
+    list.forEach(function (n) {
+        var owners = Object.keys(seenBy[n.id] || {});
+        var row = document.createElement('div');
+        row.className = 'dev-row';
+        row.tabIndex = 0;
+        row.setAttribute('role', 'button');
+        row.setAttribute('data-id', n.id);
+        row.title = n.label + (owners.length ? '\nseen by ' + owners.map(function (o) { return names[o] || o; }).join(', ') : '');
+        var dot = document.createElement('span');
+        dot.className = 'dot ghost';
+        var nm = document.createElement('span');
+        nm.className = 'nm';
+        nm.textContent = n.label;
+        var meta = document.createElement('span');
+        meta.className = 'meta';
+        meta.textContent = owners.length === 1 ? (names[owners[0]] || '') : (owners.length ? owners.length + ' devices' : '');
+        row.appendChild(dot);
+        row.appendChild(nm);
+        row.appendChild(meta);
+        var pick = function () {
+            var group = owners.length === 1 ? 'group:' + owners[0] : null;
+            pickFromList(nodeSet && !nodeSet.get(n.id) && group && nodeSet.get(group) ? group : n.id);
+        };
+        row.onclick = pick;
+        row.onkeydown = function (ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(); } };
+        box.appendChild(row);
+    });
 }
 
 // The search box: a device matches on part of its name, management IP or "AS 65001" / "65001".
@@ -1498,13 +1611,16 @@ function showNodePanel(id) {
     fitNodePanel();
 }
 
-// Keep the card above the legend: it scrolls inside the space that is left.
+// While a node or link card is open it takes the legend's place: the legend is hidden and the card may use the full height
+// of the map (it scrolls inside when longer). Closing the card brings the legend back.
 function fitNodePanel() {
     var legend = document.querySelector('.legend-box');
     var marker = document.getElementById('filter-marker');
+    var cardOpen = ['node-panel', 'link-panel'].some(function (name) { return document.getElementById(name).style.display === 'block'; });
+    legend.style.display = cardOpen ? 'none' : '';
     ['node-panel', 'link-panel'].forEach(function (name) {
         var panel = document.getElementById(name);
-        var room = panel.parentNode.parentNode.clientHeight - 24 - (legend ? legend.offsetHeight + 12 : 0);
+        var room = panel.parentNode.parentNode.clientHeight - 24 - (cardOpen ? 0 : legend.offsetHeight + 12);
         // On a narrow map the FILTERED box wraps under the card: leave room for it too.
         if (marker.style.display !== 'none' && panel.style.display !== 'none' && marker.offsetTop > panel.offsetTop + 4) {
             room -= marker.offsetHeight + 8;
@@ -1518,6 +1634,7 @@ function closeNodePanel() {
     markDeviceList();
     dimMap();
     document.getElementById('node-panel').style.display = 'none';
+    fitNodePanel();   // the legend comes back
 }
 
 // The card's x button: close it and drop the node's selection on the map.
@@ -1607,6 +1724,7 @@ function showLinkPanel(edgeId) {
 function hideLinkPanel() {
     selectedLink = null;
     document.getElementById('link-panel').style.display = 'none';
+    fitNodePanel();
 }
 
 function closeLinkPanel() {
@@ -1653,6 +1771,9 @@ function openContextMenu(id, x, y) {
             { label: 'Export JSON', action: exportJson },
             { label: 'Tidy AS areas', action: tidyAsAreas, disabled: treeOn },
             { label: 'Re-arrange', action: rearrange, disabled: treeOn },
+            // The page footer's two fun buttons are hidden on this full-height page; they live here instead.
+            { label: 'Is it DNS..?', action: function () { window.open('https://isitdns.com/', '_blank', 'noopener,noreferrer'); } },
+            { label: 'Make it rain!', action: function () { confettiBlast(null); } },
         ] };
         if (masterNode) { spec.items.push({ label: 'Stop focus', action: clearMaster }); }
     } else {

@@ -49,6 +49,6 @@ mock devices to "answering ping".
 4. Look: `GET /api/devices/<id>`, `/api/lldp-neighbors?device_id=<id>`, `/api/adjacencies?device_id=<id>`,
    then the `/topology` page.
 
-Real lab addresses and hostnames are in the auto-memory file `reference_lab_routers.md` (kept in the
-confetti-butler project's memory folder); never commit them. Credentials come from the user in chat, every
+Real lab addresses and hostnames are in the auto-memory file `reference_lab_routers.md` (kept in this
+project's memory folder); never commit them. Credentials come from the user in chat, every
 session. A router with LLDP off and no BGP/OSPF succeeds with empty results: that is expected, not a bug.

@@ -18,6 +18,13 @@ table.compact td.wrap { white-space: normal; overflow-wrap: anywhere; }
 .act-key { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
 .act-key b { display: inline-block; width: 9px; height: 9px; margin: 0 3px 0 10px; vertical-align: baseline; }
 .act-key b:first-child { margin-left: 0; }
+/* Devices widget: the column chooser. Fixed so the widget's overflow does not clip it. */
+.col-menu { position: fixed; z-index: 500; min-width: 170px; max-height: 70vh; overflow: auto; padding: 6px 8px;
+    background: var(--bg-card); border: 1px solid var(--border); box-shadow: 0 6px 18px rgba(0,0,0,.35); font-size: 12px; }
+.col-menu[hidden] { display: none; }
+.col-menu label { display: flex; align-items: center; gap: 6px; padding: 2px 0; cursor: pointer; white-space: nowrap; }
+.col-menu label.fixed { opacity: .6; cursor: default; }
+.col-menu .col-reset { margin-top: 6px; width: 100%; }
 </style>
 {% endblock %}
 {% block kpis %}
@@ -53,10 +60,13 @@ table.compact td.wrap { white-space: normal; overflow-wrap: anywhere; }
         </div>
     </div>
     <div class="section wide" data-box="devices">
-        <div class="section-header"><span>Devices <span id="dev-count"></span></span></div>
+        <div class="section-header"><span>Devices <span id="dev-count"></span></span>
+            <button type="button" class="btn-small" id="dev-cols-btn" title="Choose the columns" aria-haspopup="true" aria-expanded="false">Columns</button>
+        </div>
+        <div class="col-menu" id="dev-cols-menu" hidden></div>
         <div class="section-body">
             <table class="striped compact">
-                <thead><tr><th>Device</th><th>IP</th><th>Ping</th><th>Poll</th><th>Last good poll</th></tr></thead>
+                <thead><tr id="dev-head"></tr></thead>
                 <tbody id="dev-rows"></tbody>
             </table>
             <div class="empty" id="dev-empty" style="display:none">no devices yet</div>
@@ -118,7 +128,7 @@ table.compact td.wrap { white-space: normal; overflow-wrap: anywhere; }
 {% block scripts %}
 <script src="/static/dashgrid.js"></script>
 <script>
-DashGrid.init({ container: '.container', prefix: 'confetti-topo' });
+DashGrid.init({ container: '.container', prefix: 'confetti-topo', autoSort: true });
 function kv(k, v, cls) {
     return '<div class="kv"><span class="k">' + k + '</span><span class="v' +
         (cls ? ' ' + cls : '') + '">' + v + '</span></div>';
@@ -217,29 +227,186 @@ function timeAgo(iso) {
     return Math.floor(s / 86400) + 'd ago';
 }
 
-// Every device on one screen, the ones that need a look first (not answering ping, then failing polls).
-var devById = {}, evById = {};
-function renderDevices(list) {
-    devById = {};
-    function rank(d) { return d.reachable === 0 ? 0 : (d.fail_count > 0 ? 1 : 2); }
-    var sorted = list.slice().sort(function (a, b) {
-        return rank(a) - rank(b) || (a.hostname || '').toLowerCase().localeCompare((b.hostname || '').toLowerCase());
+// Every device on one screen. By default the ones that need a look come first (not answering ping, then failing polls);
+// click a column heading to sort by it (click again: reverse, a third time: back to the default order). The Columns
+// button picks which columns show. Both choices are kept in this browser (localStorage).
+var devById = {}, evById = {}, devList = [];
+var DEV_KEY = 'confetti-topo-dashboard-devices';
+
+function ipKey(ip) {
+    var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip || '');
+    return m ? m.slice(1).map(function (o) { return ('000' + o).slice(-3); }).join('.') : (ip || '');
+}
+function pingRank(d) { return d.reachable === 0 ? 0 : (d.reachable === 1 ? 2 : 1); }
+function pollRank(d) {
+    if (d.role === 'node' || !d.enabled) { return 3; }
+    return d.fail_count > 0 ? 0 : (d.last_poll_ok ? 2 : 1);
+}
+function textCell(field) { return function (d) { return esc(d[field]); }; }
+function textVal(field) { return function (d) { return String(d[field] || '').toLowerCase(); }; }
+
+var DEV_COLUMNS = [
+    { key: 'hostname', label: 'Device', fixed: true, val: textVal('hostname'),
+      cell: function (d) { return '<a href="/devices/' + d.id + '">' + esc(d.hostname) + '</a>'; } },
+    { key: 'mgmt_ip', label: 'IP', val: function (d) { return ipKey(d.mgmt_ip); }, cell: textCell('mgmt_ip') },
+    { key: 'vendor', label: 'Vendor', val: textVal('vendor'), cell: textCell('vendor') },
+    { key: 'model', label: 'Model', val: textVal('model'), cell: textCell('model') },
+    { key: 'os_version', label: 'OS version', val: textVal('os_version'), cell: textCell('os_version') },
+    { key: 'ping', label: 'Ping', val: pingRank,
+      cell: function (d) {
+          return d.reachable === null || d.reachable === undefined ? '<span class="pill idle">?</span>'
+              : (d.reachable ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>');
+      } },
+    { key: 'poll', label: 'Poll', val: pollRank,
+      cell: function (d) {
+          return d.role === 'node' || !d.enabled ? '<span class="pill idle">not polled</span>'
+              : (d.fail_count > 0 ? '<span class="pill bad" title="' + d.fail_count + ' failed in a row">failing</span>'
+                 : (d.last_poll_ok ? '<span class="pill ok">ok</span>' : '<span class="pill idle">waiting</span>'));
+      } },
+    { key: 'last_poll_ok', label: 'Last good poll', val: function (d) { return d.role === 'node' ? '' : (d.last_poll_ok || ''); },
+      cell: function (d) { return d.role === 'node' ? '' : esc(timeAgo(d.last_poll_ok)); } },
+    { key: 'role', label: 'Role', val: textVal('role'), cell: textCell('role') },
+    { key: 'site', label: 'Site', val: textVal('site'), cell: textCell('site') },
+    { key: 'platform', label: 'Platform', val: textVal('platform'), cell: textCell('platform') },
+    { key: 'serial', label: 'Serial', val: textVal('serial'), cell: textCell('serial') }
+];
+var DEV_DEFAULT = ['hostname', 'mgmt_ip', 'vendor', 'model', 'os_version', 'ping', 'poll', 'last_poll_ok'];
+
+function devColumn(key) {
+    return DEV_COLUMNS.filter(function (c) { return c.key === key; })[0] || null;
+}
+
+var devState = (function () {
+    var st = { cols: DEV_DEFAULT.slice(), sort: null };
+    try {
+        var s = JSON.parse(localStorage.getItem(DEV_KEY));
+        if (s && Array.isArray(s.cols)) {
+            st.cols = DEV_COLUMNS.filter(function (c) { return c.fixed || s.cols.indexOf(c.key) >= 0; })
+                .map(function (c) { return c.key; });
+        }
+        if (s && s.sort && devColumn(s.sort.key) && (s.sort.dir === 1 || s.sort.dir === -1)) {
+            st.sort = { key: s.sort.key, dir: s.sort.dir };
+        }
+        if (st.sort && st.cols.indexOf(st.sort.key) < 0) { st.sort = null; }
+    } catch (e) { /* not remembered */ }
+    return st;
+})();
+
+function saveDevState() {
+    try { localStorage.setItem(DEV_KEY, JSON.stringify(devState)); } catch (e) { /* not remembered */ }
+}
+
+function visibleDevCols() {
+    return DEV_COLUMNS.filter(function (c) { return devState.cols.indexOf(c.key) >= 0; });
+}
+
+function sortedDevices() {
+    var list = devList.slice();
+    function byName(a, b) { return (a.hostname || '').toLowerCase().localeCompare((b.hostname || '').toLowerCase()); }
+    var col = devState.sort ? devColumn(devState.sort.key) : null;
+    if (!col) {
+        var rank = function (d) { return d.reachable === 0 ? 0 : (d.fail_count > 0 ? 1 : 2); };
+        return list.sort(function (a, b) { return rank(a) - rank(b) || byName(a, b); });
+    }
+    var dir = devState.sort.dir;
+    return list.sort(function (a, b) {
+        var x = col.val(a), y = col.val(b);
+        var ex = x === '' || x === null || x === undefined, ey = y === '' || y === null || y === undefined;
+        if (ex || ey) { return ex && ey ? byName(a, b) : (ex ? 1 : -1); }   // empty cells last, either way
+        var c = typeof x === 'number' && typeof y === 'number' ? x - y
+            : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: 'base' });
+        return c * dir || byName(a, b);
     });
+}
+
+function renderDevices(list) {
+    if (list) { devList = list; }
+    devById = {};
+    var cols = visibleDevCols();
+    var head = '';
+    cols.forEach(function (c) {
+        var sorted = devState.sort && devState.sort.key === c.key;
+        head += '<th data-sortable-col data-key="' + ctxMenu.attr(c.key) + '" tabindex="0" title="Click to sort"' +
+            (sorted ? ' aria-sort="' + (devState.sort.dir === 1 ? 'ascending' : 'descending') + '"' : '') + '>' + esc(c.label) + '</th>';
+    });
+    document.getElementById('dev-head').innerHTML = head;
     var rows = '';
-    sorted.forEach(function (d) {
-        var ping = d.reachable === null || d.reachable === undefined ? '<span class="pill idle">?</span>'
-            : (d.reachable ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>');
-        var poll = d.role === 'node' || !d.enabled ? '<span class="pill idle">not polled</span>'
-            : (d.fail_count > 0 ? '<span class="pill bad" title="' + d.fail_count + ' failed in a row">failing</span>'
-               : (d.last_poll_ok ? '<span class="pill ok">ok</span>' : '<span class="pill idle">waiting</span>'));
+    sortedDevices().forEach(function (d) {
         devById[d.id] = d;
-        rows += '<tr data-ctx="device" data-id="' + ctxMenu.attr(d.id) + '"><td><a href="/devices/' + d.id + '">' + esc(d.hostname) + '</a></td><td>' + esc(d.mgmt_ip) + '</td><td>' +
-            ping + '</td><td>' + poll + '</td><td>' + (d.role === 'node' ? '' : esc(timeAgo(d.last_poll_ok))) + '</td></tr>';
+        rows += '<tr data-ctx="device" data-id="' + ctxMenu.attr(d.id) + '">' +
+            cols.map(function (c) { return '<td>' + c.cell(d) + '</td>'; }).join('') + '</tr>';
     });
     document.getElementById('dev-rows').innerHTML = rows;
-    document.getElementById('dev-count').textContent = list.length ? '(' + list.length + ')' : '';
-    document.getElementById('dev-empty').style.display = list.length ? 'none' : 'block';
+    document.getElementById('dev-count').textContent = devList.length ? '(' + devList.length + ')' : '';
+    document.getElementById('dev-empty').style.display = devList.length ? 'none' : 'block';
 }
+
+function pickDevSort(key) {
+    var s = devState.sort;
+    if (!s || s.key !== key) { devState.sort = { key: key, dir: 1 }; }
+    else if (s.dir === 1) { devState.sort = { key: key, dir: -1 }; }
+    else { devState.sort = null; }
+    saveDevState();
+    renderDevices();
+}
+
+(function () {
+    var head = document.getElementById('dev-head');
+    head.addEventListener('click', function (ev) {
+        var th = ev.target.closest ? ev.target.closest('th[data-key]') : null;
+        if (th) { pickDevSort(th.getAttribute('data-key')); }
+    });
+    head.addEventListener('keydown', function (ev) {
+        var th = ev.target.closest ? ev.target.closest('th[data-key]') : null;
+        if (th && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); pickDevSort(th.getAttribute('data-key')); }
+    });
+
+    var btn = document.getElementById('dev-cols-btn'), menu = document.getElementById('dev-cols-menu');
+    function closeMenu() { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
+    function fillMenu() {
+        var html = '';
+        DEV_COLUMNS.forEach(function (c) {
+            var on = devState.cols.indexOf(c.key) >= 0;
+            html += '<label class="' + (c.fixed ? 'fixed' : '') + '"><input type="checkbox" data-key="' + ctxMenu.attr(c.key) + '"' +
+                (on ? ' checked' : '') + (c.fixed ? ' disabled' : '') + '> ' + esc(c.label) + '</label>';
+        });
+        html += '<button type="button" class="col-reset btn-small" data-act="reset">Default columns</button>';
+        menu.innerHTML = html;
+    }
+    btn.addEventListener('click', function () {
+        if (!menu.hidden) { closeMenu(); return; }
+        fillMenu();
+        menu.hidden = false;
+        var r = btn.getBoundingClientRect();
+        menu.style.top = (r.bottom + 4) + 'px';
+        menu.style.left = Math.max(8, r.right - menu.offsetWidth) + 'px';
+        btn.setAttribute('aria-expanded', 'true');
+    });
+    menu.addEventListener('change', function (ev) {
+        var key = ev.target.getAttribute('data-key');
+        if (!key) { return; }
+        devState.cols = DEV_COLUMNS.filter(function (c) {
+            return c.fixed || (c.key === key ? ev.target.checked : devState.cols.indexOf(c.key) >= 0);
+        }).map(function (c) { return c.key; });
+        if (devState.sort && devState.cols.indexOf(devState.sort.key) < 0) { devState.sort = null; }   // sorted by a column that is gone
+        saveDevState();
+        renderDevices();
+    });
+    menu.addEventListener('click', function (ev) {
+        if (ev.target.getAttribute('data-act') !== 'reset') { return; }
+        devState.cols = DEV_DEFAULT.slice();
+        devState.sort = null;
+        saveDevState();
+        fillMenu();
+        renderDevices();
+    });
+    document.addEventListener('pointerdown', function (ev) {
+        if (!menu.hidden && !menu.contains(ev.target) && ev.target !== btn) { closeMenu(); }
+    });
+    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') { closeMenu(); } });
+    window.addEventListener('resize', closeMenu);
+    window.addEventListener('scroll', closeMenu, true);
+})();
 
 function loadKpis() {
     fetch('/api/devices').then(function (r) { return r.json(); }).then(function (list) {

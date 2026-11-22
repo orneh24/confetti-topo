@@ -1,5 +1,5 @@
 {
-  "_note": "THE SAME FILE in confetti-butler, confetti-traffic and confetti-topo (copy by hand). Expected values were worked out by hand from syslog_core.py's rules, with documentation addresses (192.0.2.0/24). The two RFC 5424 cases are written to the RFC, not captured from a device. No PAN-OS line is included: none has been captured yet.",
+  "_note": "THE SAME FILE in confetti-traffic and confetti-topo (copy by hand). Expected values were worked out by hand from syslog_core.py's rules, with documentation addresses (192.0.2.0/24). The two RFC 5424 cases are written to the RFC, not captured from a device. No PAN-OS line is included: none has been captured yet.",
   "cases": [
     {
       "name": "cisco with sequence number, origin-id and timestamp",

@@ -5,7 +5,7 @@
 // on timers, so one listener on the document finds the row, not one per row.
 // Safe items first; items with danger:true are drawn last, in red. An item with
 // confirm:'text' asks before it runs.
-// The same file is in confetti-butler, confetti-traffic and confetti-topo.
+// The same file is in confetti-traffic and confetti-topo.
 (function () {
     var handlers = {};
     var menu = null;

@@ -8,9 +8,9 @@ operations), reads LLDP neighbors, BGP sessions and OSPF adjacencies, and shows 
 confetti-topo never writes to a device.
 
 It also keeps the inventory around the map: IPAM, config templates a router can pull, running-config backups
-with drift checks, syslog and alerting. Those came from [confetti-butler](https://github.com/orneh24/confetti-butler),
+with drift checks, syslog and alerting. Those came from the former confetti-butler project,
 which was merged into this project; they are the IPAM, Templates and Alerts pages (a second menu row in the
-Classic layout). The look follows the hub UI of the sibling project
+Classic layout, labelled Tools). The look follows the hub UI of the sibling project
 [confetti-traffic](https://github.com/orneh24/confetti-traffic).
 
 ![Tour of confetti-topo: dashboard, devices, a device page, recent changes, topology, conflicts, then the colour themes, the layouts and the Confetti button](docs/img/confetti-topo-demo.gif)
@@ -24,7 +24,7 @@ Classic layout). The look follows the hub UI of the sibling project
   A cable or session that both routers report is drawn once. A neighbor that is not a known device shows
   as a dashed "ghost" node, so nothing is silently dropped. A BGP/OSPF session that is not Established /
   FULL is red and dashed, and a BGP session that keeps going down and up (flapping: 3 changes in an hour) is thick, yellow and dotted. A BGP session inside one AS (iBGP) is a thin yellow line and one between two ASes (eBGP)
-  a thick purple line, and an "AS areas" toggle draws a box around the routers of each AS ("Tidy AS areas" moves the routers so each AS has its own block; a new map starts that way). A list of all known devices on the right selects a device on the map when clicked; its search box (name, IP or AS) fades the other devices. An LLDP cable is red and dashed when a device reports its port down. "Changed 24h" glows around devices that had a change in the last day, "Export PNG" / "Export JSON" save the map, and the History dropdown shows the map as it was (snapshots kept `TOPO_SNAPSHOT_RETENTION_DAYS`, default 14). Unknown nodes that hang off one router are grouped into a single "N unknown"
+  a thick purple line, and an "AS areas" toggle draws a box around the routers of each AS ("Tidy AS areas" moves the routers so each AS has its own block; a new map starts that way). A list of all known devices on the right selects a device on the map when clicked; its search box (name, IP or AS) fades the other devices. An LLDP cable is red and dashed when a device reports its port down. "Changed 24h" glows around devices that had a change in the last day, the Export menu saves the map as PNG or JSON, and the History dropdown shows the map as it was (snapshots kept `TOPO_SNAPSHOT_RETENTION_DAYS`, default 14). Unknown nodes that hang off one router are grouped into a single "N unknown"
   node (double-click to open it). The layout stands still and is saved on the server, so everyone sees the
   same map (the Re-arrange button, or right-click the background and choose Re-arrange, starts over after a confirmation). "Focus on device" (right-click a device, or the button on its card) makes it the master and lays the map out as a tree from it, in this browser only. An LLDP link shows its ports
   on hover or when selected.
@@ -58,8 +58,8 @@ Classic layout). The look follows the hub UI of the sibling project
   dashboard, on each device page and on the Recent changes page (filters, sortable, Before and After states coloured green, yellow or red). Alerting on them is under Alerts.
 - **Device page.** Interfaces, LLDP neighbors, BGP/OSPF sessions and the routing table (filter, "export CSV"). On a switch also VLANs, trunks, the spanning-tree summary and the learned MAC addresses (filter; a MAC that belongs to a known device names it).
 - **Metrics.** `GET /metrics` serves Prometheus text.
-- **Other Confetti projects.** Type the Butler and Traffic URLs on the Settings page and a small button for each appears at the right of the top menu (opens in a new tab).
-- **Dashboard.** Widgets: System, Services, Activity, Devices, Events, Sessions down, Open conflicts, Unknown LLDP neighbors (with an add button) and Map changes (each row opens that snapshot on the map). Drag a widget by its title to move it (a copy follows the pointer and a grid outline shows where it will land; drop it on the middle of another widget to put them side by side, sharing the row, or into the empty space at the end of a row), drag its corner to resize it; the arrangement is kept in the browser, and "Reset layout" undoes it.
+- **Other Confetti projects.** Type the Traffic URL on the Settings page and a small button for it appears at the right of the top menu (opens in a new tab).
+- **Dashboard.** Widgets: System, Services, Activity, Devices, Events, Sessions down, Open conflicts, Unknown LLDP neighbors (with an add button) and Map changes (each row opens that snapshot on the map). Drag a widget by its title to move it (a copy follows the pointer and a grid outline shows where it will land; drop it on the middle of another widget to put them side by side, sharing the row, or into the empty space at the end of a row), drag its corner to resize it; the arrangement is kept in the browser, "Reset layout" undoes it and "Auto sort layout" rearranges the widgets to leave as little empty space as it can. The Devices widget shows IP, vendor, model, OS version, ping and poll state; click a heading to sort and use Columns to add or remove columns (also role, site, platform, serial).
 - **Look.** Seven colour themes (or Shuffle) and four layouts (MS-DOS in two colour variants), picked in the header.
 
 ![The whole dashboard: system, services, activity, devices, events, sessions down, open conflicts, unknown LLDP neighbors and map changes](docs/img/dashboard.png)
@@ -71,7 +71,7 @@ Classic layout). The look follows the hub UI of the sibling project
 The MS-DOS layout can be driven from the keyboard: F10 or Alt for the menu bar, Up/Down and Enter on table
 rows, F6 between panels, F1 for the list.
 
-Built for Cisco IOS / IOS-XE. The parsers come from confetti-butler, where they were checked against CSR1000v
+Built for Cisco IOS / IOS-XE. The parsers were checked against CSR1000v
 routers on IOS-XE 17.3 and 15.4; the merged confetti-topo has not been run on real routers yet (see
 [`docs/HANDOFF.md`](docs/HANDOFF.md)). The PAN-OS support was written from real output of a PA-VM on PAN-OS 11.1 and
 polled once against it; other PAN-OS versions, Panorama and several virtual routers are untested.
@@ -98,7 +98,7 @@ TOPO_DB_PATH=mock.db TOPO_PORT=8080 TOPO_PING_ENABLED=false python serve.py
 ## Deploying
 
 `topo/build-topo.sh` installs confetti-topo on a fresh Alpine Linux VM (OpenRC service, waitress, port 80), following the
-same pattern as confetti-traffic's hub and confetti-butler.
+same pattern as confetti-traffic's hub.
 
 **System requirements:** Alpine Linux 3.x, 256 MB RAM minimum, 512 MB recommended.
 
@@ -114,7 +114,7 @@ same pattern as confetti-traffic's hub and confetti-butler.
 ## Security notes
 
 - Credentials are stored in plain text in `topo.db`. Keep the file private; it is gitignored.
-- The web UI and API have no login unless `TOPO_AUTH_TOKEN` is set. Run it on a lab network only. A sweep range or a confetti-traffic or confetti-butler URL
+- The web UI and API have no login unless `TOPO_AUTH_TOKEN` is set. Run it on a lab network only. A sweep range or a confetti-traffic URL
   given to the API makes the server connect there.
 
 ## More

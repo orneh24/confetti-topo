@@ -7,7 +7,7 @@ origin: confetti-topo
 # Real-hardware validation
 
 The user prefers real routers over mocks. Real addresses are in the auto-memory file
-`reference_lab_routers.md` (in the confetti-butler project's memory folder); never commit them.
+`reference_lab_routers.md` (in this project's memory folder); never commit them.
 
 1. **Confirm** the topo VM (its own Alpine VM, port 80) and the routers are on. Credentials come from the
    user in chat only.

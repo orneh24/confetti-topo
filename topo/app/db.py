@@ -306,7 +306,7 @@ def init_db():
             updated_at TEXT NOT NULL
         );
 
-        -- Syslog from devices (same table and parser as confetti-butler and confetti-traffic;
+        -- Syslog from devices (same table and parser as confetti-traffic;
         -- see syslog_core.py). The origin, origin_id and msg_hash columns and their indexes
         -- are added by syslog_core.migrate() below.
         CREATE TABLE IF NOT EXISTS syslog (

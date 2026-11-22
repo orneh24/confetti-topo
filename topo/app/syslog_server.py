@@ -6,12 +6,12 @@ device that sent it (syslog_trigger.py); nothing else here touches the topology.
 
 Deliberately minimal: no relay, no TLS, no authentication. UDP syslog is lossy and anything on
 the segment can inject into it, so this is a troubleshooting aid and a poll trigger, never an
-audit trail. Ported from confetti-butler's syslog_server.py: every hazard it guards against
-(no socket address reuse, busy_timeout before journal_mode, a bounded row count, stderr and not
-stdout) is the same here.
+audit trail. Hazards it guards against:
+no socket address reuse, busy_timeout before journal_mode, a bounded row count, stderr and not
+stdout.
 
-Parsing and the row insert are syslog_core.py, the same file in confetti-butler,
-confetti-traffic and confetti-topo, so all three read a line the same way.
+Parsing and the row insert are syslog_core.py, the same file in
+confetti-traffic and confetti-topo, so both read a line the same way.
 """
 
 import socket

@@ -63,7 +63,7 @@ PING_FAILS_TO_DOWN = int(os.environ.get("TOPO_PING_FAILS_TO_DOWN", "2"))
 
 # ---------------------------------------------------------------------------
 # Syslog (syslog_server.py, syslog_trigger.py, syslog_pull.py). On by default, like
-# confetti-butler and confetti-traffic; a device that logs to this server gets polled early.
+# confetti-traffic; a device that logs to this server gets polled early.
 # ---------------------------------------------------------------------------
 SYSLOG_ENABLED = _flag("TOPO_SYSLOG_ENABLED", "true")
 SYSLOG_BIND = os.environ.get("TOPO_SYSLOG_BIND", "0.0.0.0")

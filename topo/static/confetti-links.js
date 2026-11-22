@@ -1,13 +1,13 @@
-// Header shortcuts to the other Confetti projects (confetti-topo, confetti-butler, confetti-traffic).
+// Header shortcuts to the other Confetti projects (confetti-topo, confetti-traffic).
 //
 // Each app keeps the URLs of the OTHER projects on its Settings page; GET /api/settings/links answers
-// {"butler": "...", "traffic": "..."} (only the other two, "" when not set). This file puts one small button per
+// {"traffic": "..."} (only the other project, "" when not set). This file puts one small button per
 // URL that is set into <span id="confetti-links"> in the header's right-hand .status block. It opens in a new tab.
 // The URL is only a link target in the browser: the server never fetches it. It is checked again here (http or
 // https only) and set as href, never written as HTML. If the fetch fails there are simply no buttons.
-// The SAME file is used by confetti-topo, confetti-butler and confetti-traffic: keep the three identical.
+// The SAME file is used by confetti-topo and confetti-traffic: keep the two identical.
 var ConfettiLinks = (function () {
-    var NAMES = [['traffic', 'Traffic'], ['butler', 'Butler'], ['topo', 'Topo']];
+    var NAMES = [['traffic', 'Traffic'], ['topo', 'Topo']];
 
     // Colours come from the theme variables; the layouts that restyle every button get their own look.
     var CSS =

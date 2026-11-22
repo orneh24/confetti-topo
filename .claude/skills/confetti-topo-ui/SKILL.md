@@ -7,7 +7,7 @@ origin: confetti-topo
 # Pages: authoring checklist
 
 `dashboard-ui-checker` looks at a finished change. This is what to get right while writing it. The same
-stack as confetti-traffic's hub and confetti-butler: Flask + Jinja2, vanilla JS, no build step, nothing from a
+stack as confetti-traffic's hub: Flask + Jinja2, vanilla JS, no build step, nothing from a
 CDN.
 
 ## Shared structure
@@ -21,7 +21,7 @@ CDN.
   colour variants, blue and Neon Green, `data-variant="green"`). It loads **after** `theme.css` on purpose. Use `.section > .section-header + .section-body`, not
   your own card CSS.
 - localStorage keys: `confetti-topo-theme`, `confetti-topo-layout`, `confetti-topo-dos-variant` (MS-DOS colour variant), `confetti-topo-theme-shuffle`, `confetti-topo-layers` (the topology's LLDP/BGP/OSPF
-  toggles) and `confetti-topo-hide-unknown` (the "Unknown nodes" toggle: hides ghost nodes and their edges in the browser only; a yellow FILTERED marker over the map shows while any layer is off or unknown nodes are hidden; its "Show all" resets all of these) and `confetti-topo-hidden-nodes` (nodes hidden from the click-a-node card; viewer-side only, like the unknown-nodes toggle), `confetti-topo-changed-24h` (the Changed 24h glow, off by default), `confetti-topo-device-icons` and `confetti-topo-vendor-icons` (the Device icons / Vendor icons toggles, on by default) and `confetti-topo-hidden-icons` (the node card's Hide icon checkbox) and `confetti-topo-master` (the node id set by right-click Focus on device: lays the map out as a tree from it; a view setting, no FILTERED marker, Show all leaves it alone; the tree places are never saved to `node_positions`, so `savePositions`, `tidyAsAreas` and `rearrange` do nothing while `treeOn`). The icon keys are look settings, not filters: no FILTERED marker, and Show all leaves them alone. Right-click menus use the shared `static/ctxmenu.js` (the same file as confetti-butler and confetti-traffic;
+  toggles) and `confetti-topo-hide-unknown` (the "Unknown nodes" toggle: hides ghost nodes and their edges in the browser only; a yellow FILTERED marker over the map shows while any layer is off or unknown nodes are hidden; its "Show all" resets all of these) and `confetti-topo-hidden-nodes` (nodes hidden from the click-a-node card; viewer-side only, like the unknown-nodes toggle), `confetti-topo-changed-24h` (the Changed 24h glow, off by default), `confetti-topo-device-icons` and `confetti-topo-vendor-icons` (the Device icons / Vendor icons toggles, on by default) and `confetti-topo-hidden-icons` (the node card's Hide icon checkbox) and `confetti-topo-dashboard-devices` (the dashboard Devices widget's columns and sort, `{cols, sort}`), `confetti-topo-master` (the node id set by right-click Focus on device: lays the map out as a tree from it; a view setting, no FILTERED marker, Show all leaves it alone; the tree places are never saved to `node_positions`, so `savePositions`, `tidyAsAreas` and `rearrange` do nothing while `treeOn`). The icon keys are look settings, not filters: no FILTERED marker, and Show all leaves them alone. Right-click menus use the shared `static/ctxmenu.js` (the same file as confetti-traffic;
   fill `data-*` attributes with `ctxMenu.attr()`, R29). On the map: vis-network's `oncontext` event plus
   `getNodeAt`, then `ctxMenu.open(x, y, spec)` with window coordinates; the browser's own menu is blocked on the map.
 - Flask caches templates; restart the server after an edit. A literal `{{` in inline JS needs
@@ -43,6 +43,6 @@ CDN.
 - Empty state: a plain message and `network.destroy()`.
 
 ## Keep the siblings in step
-The look is copied by hand from confetti-traffic's hub and confetti-butler. After a theme, picker or
+The look is copied by hand from confetti-traffic's hub. After a theme, picker or
 `confettiBlast()` change, run the `confetti-interop-checker` agent. Re-record `docs/img/` with
 `scripts/capture_readme.py` after any visible change.

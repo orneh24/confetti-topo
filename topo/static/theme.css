@@ -76,31 +76,6 @@
     --blue:      #66d9ef;
     --cyan:      #66d9ef;
 }
-/* High Contrast — pure black, full-strength colours, for legibility */
-:root[data-theme="contrast"] {
-    --bg:        #000000;
-    --bg-card:   #0a0a0a;
-    --bg-hover:  #1a1a1a;
-    --bg-muted:  #1a1a1a;
-    --bg-code:   #000000;
-    --stripe:    #242424;
-    --border:    #ffffff;
-    --border-soft: #555555;
-    --badge-bg:  #000000;
-    --badge-border: #ffffff;
-    --text:      #ffffff;
-    --text-dim:  #e0e0e0;
-    --green:     #00ff66;
-    --green-bg:  #003318;
-    --red:       #ff3b3b;
-    --red-bg:    #3a0000;
-    --yellow:    #ffdd00;
-    --purple:    #d27bff;
-    --yellow-bg: #332b00;
-    --gray:      #b0b0b0;
-    --blue:      #4db8ff;
-    --cyan:      #00ffff;
-}
 /* Terminal green — mostly one hue by design; red and amber stay distinct so failures still read */
 :root[data-theme="terminal"] {
     --bg:        #050805;

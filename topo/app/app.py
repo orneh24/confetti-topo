@@ -692,7 +692,7 @@ def api_put_lldp_matching():
 # The other Confetti projects: a header shortcut each (static/confetti-links.js). A link target in the browser; the
 # server connects to one only for the syslog pull (syslog_pull.py), and only if an operator switched that on for it.
 # This app keeps the other two, so there is no url_topo here.
-LINK_KEYS = {"butler": "url_butler", "traffic": "url_traffic"}
+LINK_KEYS = {"traffic": "url_traffic"}
 
 
 def clean_link(value):
@@ -733,7 +733,7 @@ def api_get_links():
 
 @app.route("/api/settings/links", methods=["PUT"])
 def api_put_links():
-    """Partial update: body {"butler": url, "traffic": url}; "" clears one. All or nothing: a bad value changes nothing."""
+    """Partial update: body {"traffic": url}; "" clears it. All or nothing: a bad value changes nothing."""
     data = request.get_json(force=True, silent=True)
     if not isinstance(data, dict):
         return jsonify({"error": "Body must be a JSON object"}), 400
@@ -764,7 +764,7 @@ def api_put_links():
 
 
 # Pull syslog from the other Confetti servers (syslog_pull.py, constraint 26). Off per server until switched on; a server
-# needs its URL set above first. A topo token is not needed: butler and traffic have no access token.
+# needs its URL set above first. A topo token is not needed: traffic has no access token.
 def syslog_pull_state(conn):
     servers = {}
     for name in LINK_KEYS:
@@ -787,11 +787,11 @@ def api_get_syslog_pull():
 
 @app.route("/api/settings/syslog-pull", methods=["PUT"])
 def api_put_syslog_pull():
-    """Body {"butler": {"pull": true}, "traffic": {"pull": false}}. All or nothing. Switching a server on needs its URL set
+    """Body {"traffic": {"pull": true}}. All or nothing. Switching a server on needs its URL set
     (Settings > other projects) and starts from its newest message; switching it off forgets the cursor."""
     data = request.get_json(force=True, silent=True)
     if not isinstance(data, dict) or not data:
-        return jsonify({"error": "Body must be a JSON object like {\"butler\": {\"pull\": true}}"}), 400
+        return jsonify({"error": "Body must be a JSON object like {\"traffic\": {\"pull\": true}}"}), 400
     conn = db.get_db()
     for name, body in data.items():
         if name not in LINK_KEYS:

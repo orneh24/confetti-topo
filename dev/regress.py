@@ -916,7 +916,7 @@ def _():
 
 @check("R29", "right-click menus: base.html loads ctxmenu.js, rows and handlers pair up, data-* values are quote-safe, inline scripts parse")
 def _():
-    # static/ctxmenu.js is the same file in confetti-butler, confetti-traffic and here. A log line
+    # static/ctxmenu.js is the same file in confetti-traffic and here. A log line
     # or hostname can hold a double quote and esc() does not escape it, so attributes on data-ctx
     # rows are filled with ctxMenu.attr(). The changes page once had its own inline menu; it and the
     # topology map now use the shared one.
@@ -1977,33 +1977,30 @@ def _():
     return p
 
 
-@check("R36", "other Confetti projects' URLs: http(s) only, all-or-nothing, empty clears, partial update, no secret, header shortcut file safe")
+@check("R36", "other Confetti project's URL: http(s) only, refused values change nothing, empty clears, no secret, header shortcut file safe")
 def _():
     p = []
     m, conn = fresh_db()
     client = m["appmod"].app.test_client()
     url = "/api/settings/links"
-    need(client.get(url).get_json() == {"butler": "", "traffic": ""}, "nothing set yet: %r" % client.get(url).get_json(), p)
-    r = client.put(url, json={"butler": " http://butler.example:8080/ "})
-    need(r.status_code == 200 and r.get_json() == {"butler": "http://butler.example:8080", "traffic": ""},
-         "a good URL is trimmed, has no trailing slash and leaves the other field: %s %r" % (r.status_code, r.get_json()), p)
-    r = client.put(url, json={"traffic": "https://hub.example"})
-    need(r.get_json() == {"butler": "http://butler.example:8080", "traffic": "https://hub.example"}, "a partial PUT must keep the other field: %r" % r.get_json(), p)
+    need(client.get(url).get_json() == {"traffic": ""}, "nothing set yet: %r" % client.get(url).get_json(), p)
+    r = client.put(url, json={"traffic": " https://hub.example:8080/ "})
+    need(r.status_code == 200 and r.get_json() == {"traffic": "https://hub.example:8080"},
+         "a good URL is trimmed and has no trailing slash: %s %r" % (r.status_code, r.get_json()), p)
     before = client.get(url).get_json()
     bad = ["javascript:alert(1)", "ftp://x.example", "http://", "x.example", "http://u:p@h.example", "http://a b.example",
            "http://h.example/\"x", "http://h.example:99999", "http://" + "a" * 300, 123, None, ["http://h.example"]]
     for v in bad:
-        r = client.put(url, json={"butler": v})
+        r = client.put(url, json={"traffic": v})
         need(r.status_code == 400 and client.get(url).get_json() == before,
              "%r must be refused (400) and change nothing: %s" % (v, r.status_code), p)
-    r = client.put(url, json={"butler": "http://other.example", "traffic": "javascript:x"})
-    need(r.status_code == 400 and client.get(url).get_json() == before, "one bad value must change neither field (all or nothing)", p)
-    for body in ({}, {"unknown": "http://h.example"}, [], "text"):
-        need(client.put(url, json=body).status_code == 400, "body %r must be refused" % (body,), p)
-    r = client.put(url, json={"butler": ""})
-    need(r.get_json() == {"butler": "", "traffic": "https://hub.example"}, "an empty value must clear that field only: %r" % r.get_json(), p)
-    need(conn.execute("SELECT COUNT(*) FROM settings WHERE key = 'url_butler'").fetchone()[0] == 0, "an empty value must delete the row", p)
-    need(conn.execute("SELECT COUNT(*) FROM settings WHERE key NOT IN ('url_butler', 'url_traffic')").fetchone()[0] == 0, "only url_* rows may be written", p)
+    for body in ({}, {"unknown": "http://h.example"}, {"butler": "http://h.example"}, [], "text"):
+        r = client.put(url, json=body)
+        need(r.status_code == 400 and client.get(url).get_json() == before, "body %r must be refused and change nothing" % (body,), p)
+    r = client.put(url, json={"traffic": ""})
+    need(r.get_json() == {"traffic": ""}, "an empty value must clear the field: %r" % r.get_json(), p)
+    need(conn.execute("SELECT COUNT(*) FROM settings WHERE key = 'url_traffic'").fetchone()[0] == 0, "an empty value must delete the row", p)
+    need(conn.execute("SELECT COUNT(*) FROM settings WHERE key != 'url_traffic'").fetchone()[0] == 0, "only url_* rows may be written", p)
     need(client.delete(url).status_code == 405 and client.post(url, json={}).status_code == 405, "only GET and PUT", p)
     page = client.get("/settings").get_data(as_text=True)
     need("Other Confetti projects" in page and 'id="links-form"' in page, "/settings has no Other Confetti projects section", p)
@@ -2152,8 +2149,8 @@ def _():
 SYSLOG_CORE = "topo/app/syslog_core.py"
 SYSLOG_CASES = "dev/samples/syslog_cases.json"
 SYSLOG_PULL = "topo/app/syslog_pull.py"
-# The other two repos: (repo directory, the directory in it that holds syslog_core.py)
-SYSLOG_SIBLINGS = (("../confetti-butler", "butler/app"), ("../confetti-traffic", "hub/app"))
+# The other repo: (repo directory, the directory in it that holds syslog_core.py)
+SYSLOG_SIBLINGS = (("../confetti-traffic", "hub/app"),)
 
 
 def _syslog_core():
@@ -2165,7 +2162,7 @@ def _syslog_core():
 
 @check("R40", "syslog_core: every fixture line parses as expected, a copy pulled from another server is stored once, two local repeats are both kept")
 def _():
-    # syslog_core.py is the SAME file in confetti-butler, confetti-traffic and here. It imports no
+    # syslog_core.py is the SAME file in confetti-traffic and here. It imports no
     # app code, so this check needs no app packages.
     p = []
     sc = _syslog_core()
@@ -2196,17 +2193,17 @@ def _():
     b = sc.insert(db, rec, "2026-11-18 10:00:02")
     need(a and b, "two identical messages this server received itself must both be kept (a real repeat)", p)
     pulled = dict(rec, received_at="2026-11-18T10:00:01Z")
-    need(sc.insert(db, pulled, t0, origin="butler", origin_id=7) is None,
+    need(sc.insert(db, pulled, t0, origin="traffic", origin_id=7) is None,
          "a copy pulled from another server within the window must not be stored again", p)
     later = dict(rec, received_at="2026-11-18T10:05:00Z")
-    need(sc.insert(db, later, t0, origin="butler", origin_id=8) is not None,
+    need(sc.insert(db, later, t0, origin="traffic", origin_id=8) is not None,
          "the same text five minutes later is a new message and must be stored", p)
-    need(sc.insert(db, later, t0, origin="butler", origin_id=8) is None,
+    need(sc.insert(db, later, t0, origin="traffic", origin_id=8) is None,
          "the same (origin, origin_id) twice must store once", p)
     other = sc.parse(rec["raw"], "192.0.2.2")
     need(sc.insert(db, dict(other, received_at="2026-11-18T10:05:01Z"), t0, origin="traffic", origin_id=1) is not None,
          "the same line from a different source IP is a different message", p)
-    first_pull = sc.insert(db, dict(rec, received_at="2026-11-18T11:00:00Z"), t0, origin="butler", origin_id=9)
+    first_pull = sc.insert(db, dict(rec, received_at="2026-11-18T11:00:00Z"), t0, origin="traffic", origin_id=9)
     need(first_pull is not None and sc.insert(db, rec, "2026-11-18 11:00:03") is None,
          "a local copy arriving just after a pulled copy must not be stored again", p)
     need(sc.insert(db, dict(rec, received_at="2026-11-18T11:00:02Z"), t0, origin="traffic", origin_id=3) is None,
@@ -2225,7 +2222,7 @@ def _lf_bytes(path):
         return f.read().replace(b"\r\n", b"\n")
 
 
-@check("R40-sync", "syslog_core.py, syslog_pull.py and syslog_cases.json are byte-identical in confetti-butler, confetti-traffic and confetti-topo")
+@check("R40-sync", "syslog_core.py, syslog_pull.py and syslog_cases.json are byte-identical in confetti-traffic and confetti-topo")
 def _():
     p = []
     for repo, appdir in SYSLOG_SIBLINGS:
@@ -2454,40 +2451,40 @@ def _():
     sc = _syslog_core()
     sp = importlib.import_module("app.syslog_pull")
     db = m["db"]
-    _syslog_pull_engine(sc, sp, conn, db.get_setting, db.set_setting, "butler", p)
+    _syslog_pull_engine(sc, sp, conn, db.get_setting, db.set_setting, "traffic", p)
     conn.close()
 
     m, conn = fresh_db()
     client = m["appmod"].app.test_client()
     url = "/api/settings/syslog-pull"
     state = client.get(url).get_json()
-    need(set(state["servers"]) == {"butler", "traffic"} and not any(v["pull"] for v in state["servers"].values()),
+    need(set(state["servers"]) == {"traffic"} and not any(v["pull"] for v in state["servers"].values()),
          "pulling must be off for every server by default: %r" % state, p)
-    r = client.put(url, json={"butler": {"pull": True}})
+    r = client.put(url, json={"traffic": {"pull": True}})
     need(r.status_code == 400 and conn.execute("SELECT COUNT(*) FROM settings").fetchone()[0] == 0,
          "switching a server on without its URL must be a 400 that changes nothing: %s" % r.status_code, p)
-    client.put("/api/settings/links", json={"butler": "http://butler.example:8080"})
-    r = client.put(url, json={"butler": {"pull": True}})
-    need(r.status_code == 200 and r.get_json()["servers"]["butler"]["pull"] is True, "switching on with a URL set failed: %s" % r.status_code, p)
-    for bad in ({"butler": True}, {"butler": {"pull": "yes"}}, {"nope": {"pull": True}}, {}, {"butler": {"pull": True, "x": 1}},
-                {"butler": {"pull": False}, "traffic": {"pull": True}}, [1], "x"):
+    client.put("/api/settings/links", json={"traffic": "http://hub.example:8080"})
+    r = client.put(url, json={"traffic": {"pull": True}})
+    need(r.status_code == 200 and r.get_json()["servers"]["traffic"]["pull"] is True, "switching on with a URL set failed: %s" % r.status_code, p)
+    for bad in ({"traffic": True}, {"traffic": {"pull": "yes"}}, {"nope": {"pull": True}}, {"butler": {"pull": True}}, {}, {"traffic": {"pull": True, "x": 1}},
+                {"traffic": {"pull": False}, "nope": {"pull": True}}, [1], "x"):
         r = client.put(url, json=bad)
         need(r.status_code == 400, "%r was accepted (%s)" % (bad, r.status_code), p)
-    need(client.get(url).get_json()["servers"]["butler"]["pull"] is True, "a rejected PUT changed something (all or nothing)", p)
-    db.set_setting(conn, "syslog_cursor_butler", "42")
+    need(client.get(url).get_json()["servers"]["traffic"]["pull"] is True, "a rejected PUT changed something (all or nothing)", p)
+    db.set_setting(conn, "syslog_cursor_traffic", "42")
     conn.commit()
-    client.put("/api/settings/links", json={"butler": "http://other.example:8080"})
-    need(db.get_setting(conn, "syslog_cursor_butler") is None, "a different URL is a different server: its cursor must be forgotten", p)
-    db.set_setting(conn, "syslog_cursor_butler", "42")
+    client.put("/api/settings/links", json={"traffic": "http://other.example:8080"})
+    need(db.get_setting(conn, "syslog_cursor_traffic") is None, "a different URL is a different server: its cursor must be forgotten", p)
+    db.set_setting(conn, "syslog_cursor_traffic", "42")
     conn.commit()
-    client.put(url, json={"butler": {"pull": False}})
-    need(db.get_setting(conn, "syslog_pull_butler") is None and db.get_setting(conn, "syslog_cursor_butler") is None,
+    client.put(url, json={"traffic": {"pull": False}})
+    need(db.get_setting(conn, "syslog_pull_traffic") is None and db.get_setting(conn, "syslog_cursor_traffic") is None,
          "switching off must delete the switch and the cursor", p)
 
     # only this server's own messages are served to a puller: a pulled row is never passed on
     sc.insert(conn, sc.parse("<189>Nov 18 10:00:00 R1 %LINK-3-UPDOWN: mine", "192.0.2.1"), db.sqlite_now())
     sc.insert(conn, dict(sc.parse("<189>Nov 18 10:00:00 R2 %LINK-3-UPDOWN: theirs", "192.0.2.2"), received_at=db.sqlite_now()),
-              db.sqlite_now(), origin="butler", origin_id=5)
+              db.sqlite_now(), origin="traffic", origin_id=5)
     conn.commit()
     r = client.get("/api/syslog?after_id=0&origin=local")
     rows = r.get_json()
@@ -2501,7 +2498,7 @@ def _():
     r = client.get("/api/syslog?minutes=5&q=mine")
     need(r.status_code == 200 and [x["host"] for x in r.get_json()] == ["R1"], "the q filter must work: %s" % r.status_code, p)
     page = client.get("/api/syslog?minutes=5").get_json()
-    need(len(page) == 2 and all("raw" not in x and "msg_hash" not in x for x in page) and {x["origin"] for x in page} == {"local", "butler"},
+    need(len(page) == 2 and all("raw" not in x and "msg_hash" not in x for x in page) and {x["origin"] for x in page} == {"local", "traffic"},
          "the page API must show both rows with their origin and without raw or msg_hash", p)
 
     src = read("topo/app/syslog_core.py")
@@ -2595,7 +2592,7 @@ def run_live():
         pulled = json.loads(get("/api/syslog?after_id=0&origin=local")[1])
         need(pulled and pulled[0].get("raw") and len(pulled[0].get("msg_hash", "")) == 40, "after_id must return raw and msg_hash", problems)
         need(rows and "raw" not in rows[0] and "msg_hash" not in rows[0], "the page API must not return raw or msg_hash", problems)
-        need(json.loads(get("/api/syslog?after_id=0&origin=butler")[1]) == [], "origin=butler returned local rows", problems)
+        need(json.loads(get("/api/syslog?after_id=0&origin=traffic")[1]) == [], "origin=traffic returned local rows", problems)
         need(b"topo_syslog_received_total 1" in get("/metrics")[1], "/metrics does not count the stored message", problems)
         results.append(("FAIL" if problems else "PASS", "R20", desc, problems))
     except Exception as e:

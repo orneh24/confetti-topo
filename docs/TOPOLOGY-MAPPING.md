@@ -1,6 +1,6 @@
 # Topology mapping: design and lessons
 
-Notes on how the topology map works (Flask + SQLite + vis.js). They were written in confetti-butler and
+Notes on how the topology map works (Flask + SQLite + vis.js). They were written in the former confetti-butler and
 moved here with the feature on 2026-10-14; they are meant to let another project rebuild the same thing
 without reading this repo. Code references are to confetti-topo, for orientation only. Where this repo
 went beyond the original notes (interface-IP peer resolution, one edge per session) the text says so.

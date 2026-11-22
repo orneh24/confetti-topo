@@ -7,7 +7,7 @@ origin: confetti-topo
 # Adding a platform
 
 Constraint 3 is the reason for this order: command names and output are never assumed, they are checked on a
-real device. Parsers written from documentation were removed from the butler lineage on 2026-10-10 for that
+real device. Parsers written from documentation were removed from this code base on 2026-10-10 for that
 reason.
 
 1. **Get real output first.** Ask the user for a lab device. Capture the raw output of each command (version,

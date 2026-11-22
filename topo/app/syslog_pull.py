@@ -1,10 +1,10 @@
 """Pull syslog from the other Confetti servers on a timer, so a device only has to log to one of them.
 
-THE SAME FILE in confetti-butler, confetti-traffic and confetti-topo (copy it by hand and keep the
-three byte-identical; a regress check compares them). It imports no app code: each app passes in
+THE SAME FILE in confetti-traffic and confetti-topo (copy it by hand and keep the
+two byte-identical; a regress check compares them). It imports no app code: each app passes in
 connect(), get(conn, key) and put(conn, key, value) for its own settings table.
 
-Settings keys, per other server <name> (butler, traffic or topo):
+Settings keys, per other server <name> (traffic or topo):
     url_<name>            its address: the same value the Settings page keeps for the header link
     syslog_pull_<name>    "1" = pull from it. Off unless an operator turns it on
     syslog_cursor_<name>  the last id of its that we stored (so each message is read once)

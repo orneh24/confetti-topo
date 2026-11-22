@@ -1,5 +1,13 @@
 # confetti-topo — handoff
 
+## Butler retired as a peer (2026-11-22)
+
+Removed the Butler URL (Settings, `url_butler`), its header button, the syslog pull from butler, the `butler` origin name in `syslog_core.PEERS`,
+and the "Butler" label (Classic's second row is now Tools). The shared files (`syslog_core.py`, `syslog_pull.py`, `syslog_cases.json`,
+`confetti-links.js`, `ctxmenu.js`, `dashgrid.js`) were changed the same way in `../confetti-traffic` (working tree there, not committed). The lab
+router notes moved into this project's memory, and `network-config-validation` and `network-interface-health` were copied from butler's skills.
+Old `settings` rows and syslog rows with origin `butler` stay in a deployed database and are harmless.
+
 ## Butler import removed (2026-11-22)
 
 Removed `POST /api/discover/butler`, `collectors/butler.py`, the Devices page import form, the scheduled source (`TOPO_DISCOVERY_BUTLER_URL`) and the

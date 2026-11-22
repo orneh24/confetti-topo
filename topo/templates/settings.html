@@ -47,7 +47,6 @@
             <form id="links-form" onsubmit="saveLinks(); return false;" autocomplete="off">
                 <div class="form-grid">
                     <label for="l-traffic" data-ctx="link" data-field="traffic">Confetti Traffic URL</label><input id="l-traffic" name="traffic" placeholder="http://confetti-hub.example">
-                    <label for="l-butler" data-ctx="link" data-field="butler">Confetti Butler URL</label><input id="l-butler" name="butler" placeholder="http://confetti-butler.example">
                 </div>
                 <div class="hint">A small button for each URL that is filled in appears at the right of the top menu on every page and opens that project in a new tab. Only http:// or https://. Leave a field empty to remove its button. The server connects to one of these addresses only for the syslog pull below, and only if you switch that on.</div>
                 <button type="submit" class="primary">Save</button>
@@ -144,7 +143,7 @@ function clearDefaults() {
     sendDefaults({ password: '', enable_secret: '', snmp_community: '' }, 'secrets cleared');
 }
 
-var SP_NAMES = { butler: 'Confetti Butler', traffic: 'Confetti Traffic' };
+var SP_NAMES = { traffic: 'Confetti Traffic' };
 
 function loadSyslogPull() {
     fetch('/api/settings/syslog-pull').then(function (r) { return r.json(); }).then(function (s) {
@@ -192,7 +191,6 @@ function loadLinks() {
     fetch('/api/settings/links').then(function (r) { return r.json(); }).then(function (l) {
         var f = document.getElementById('links-form');
         f.traffic.value = l.traffic || '';
-        f.butler.value = l.butler || '';
     });
 }
 
@@ -200,7 +198,7 @@ function saveLinks() {
     var f = document.getElementById('links-form');
     fetch('/api/settings/links', {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ traffic: f.traffic.value, butler: f.butler.value }),
+        body: JSON.stringify({ traffic: f.traffic.value }),
     }).then(function (r) {
         return r.json().then(function (data) { return { ok: r.ok, data: data }; });
     }).then(function (res) {

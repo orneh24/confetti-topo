@@ -1,6 +1,6 @@
-"""Syslog parsing and the one insert path, shared by confetti-butler, confetti-traffic and confetti-topo.
+"""Syslog parsing and the one insert path, shared by confetti-traffic and confetti-topo.
 
-THE SAME FILE in all three repos (copy it by hand and keep the three byte-identical; a regress
+THE SAME FILE in both repos (confetti-traffic and confetti-topo; copy it by hand and keep them byte-identical; a regress
 check compares them). It imports nothing from any app: no config, no db module. The caller
 passes in a sqlite3 connection and does its own commit.
 
@@ -234,7 +234,7 @@ def insert(db, rec, now, origin="local", origin_id=None, dedup_s=10):
 
 # ---------------------------------------------------------------- pulling from another server
 
-PEERS = ("butler", "traffic", "topo")      # the origin names; a pulled row's origin is one of these
+PEERS = ("traffic", "topo")      # the origin names; a pulled row's origin is one of these
 PULL_LIMIT = 500                           # rows per request (the server caps it at the same number)
 MAX_BODY = 8 * 1024 * 1024
 MAX_TEXT = 4200                            # a server truncates raw at 4096 plus a marker

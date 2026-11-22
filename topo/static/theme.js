@@ -8,7 +8,6 @@ var THEMES = [
     ['dark', 'Dark'],
     ['light', 'Light'],
     ['monokai', 'Monokai'],
-    ['contrast', 'High Contrast'],
     ['terminal', 'Terminal green'],
     ['confetti-night', 'Confetti Night'],
     ['rainbow', 'Rainbow'],
@@ -366,9 +365,8 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // MS-DOS keyboard layer: menu bar, function-key line, a cursor over table rows.
-// Active only while the MS-DOS layout is on; the markup is in base.html. Same
-// block in confetti-butler and confetti-topo (and the idea, not the matrix, from
-// confetti-traffic's dashboard).
+// Active only while the MS-DOS layout is on; the markup is in base.html. The
+// idea, not the matrix, is from confetti-traffic's dashboard.
 (function () {
     var menuAt = -1;        // index of the open menu, -1 = none
     var itemAt = -1;        // highlighted item in that menu
