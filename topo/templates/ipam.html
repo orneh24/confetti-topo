@@ -3,6 +3,14 @@
 {% block content %}
 <div class="container two">
     <div class="section wide">
+        <div class="section-body" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+            <input type="search" id="ipam-q" placeholder="Search: prefix, address, device, interface" aria-label="Search IPAM"
+                   style="min-width:300px" oninput="renderAll()">
+            <span class="hint" id="ipam-count"></span>
+            <span class="hint" style="margin-left:auto">Free = host addresses in the prefix that no polled interface uses (other hosts may still use them).</span>
+        </div>
+    </div>
+    <div class="section wide">
         <div class="section-header"><span>Findings</span><button onclick="analyze()">Re-analyze</button></div>
         <div class="section-body">
             <table><thead><tr><th>Kind</th><th>A</th><th>B</th><th>Detail</th><th>Checked</th></tr></thead>
@@ -13,14 +21,14 @@
     <div class="section">
         <div class="section-header"><span>Prefixes in use</span></div>
         <div class="section-body">
-            <table><thead><tr><th>Network</th><th>Interfaces</th><th>Devices</th></tr></thead>
+            <table data-sortable><thead><tr><th>Network</th><th>Interfaces</th><th>Devices</th><th>Used</th><th>Free</th></tr></thead>
                 <tbody id="prefix-rows"></tbody></table>
         </div>
     </div>
     <div class="section">
         <div class="section-header"><span>Addresses</span></div>
         <div class="section-body">
-            <table><thead><tr><th>IP</th><th>Device</th><th>Interface</th><th>Status</th></tr></thead>
+            <table data-sortable><thead><tr><th>IP</th><th>Device</th><th>Interface</th><th>Status</th></tr></thead>
                 <tbody id="address-rows"></tbody></table>
         </div>
     </div>
@@ -48,31 +56,67 @@ function loadFindings() {
     });
 }
 
+// The search box narrows both tables in the browser. An address also finds the prefixes that hold it.
+var prefixes = [], addresses = [];
+
+function ipNum(ip) {
+    var m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+    return m ? ((+m[1] << 24) >>> 0) + (+m[2] << 16) + (+m[3] << 8) + (+m[4]) : null;
+}
+function inNet(ip, net) {
+    var n = ipNum(ip), p = net.split('/'), base = ipNum(p[0]), len = +p[1];
+    if (n === null || base === null || isNaN(len)) { return false; }
+    var mask = len ? (0xFFFFFFFF << (32 - len)) >>> 0 : 0;
+    return ((n & mask) >>> 0) === ((base & mask) >>> 0);
+}
+function query() { return document.getElementById('ipam-q').value.trim().toLowerCase(); }
+
+function renderPrefixes() {
+    var q = query(), rows = '', shown = 0;
+    prefixes.forEach(function (p) {
+        if (q && p.network.toLowerCase().indexOf(q) < 0 && !inNet(q, p.network)) { return; }
+        shown++;
+        var free = p.free === null ? '' : p.free + ' of ' + p.size;
+        rows += '<tr data-ctx="prefix" data-net="' + ctxMenu.attr(p.network) + '"><td>' + esc(p.network) + '</td><td>' + p.interfaces +
+            '</td><td>' + p.devices + '</td><td>' + p.used + '</td><td data-sort="' + (p.free === null ? '' : p.free) + '">' + esc(free) + '</td></tr>';
+    });
+    document.getElementById('prefix-rows').innerHTML = rows || '<tr><td colspan="5" class="empty">' + (prefixes.length ? 'no prefix matches' : 'none yet') + '</td></tr>';
+    return shown;
+}
+
 function loadPrefixes() {
     fetch('/api/ipam/prefixes').then(function (r) { return r.json(); }).then(function (list) {
-        var rows = '';
-        for (var i = 0; i < list.length; i++) {
-            var p = list[i];
-            rows += '<tr data-ctx="prefix" data-net="' + ctxMenu.attr(p.network) + '"><td>' + esc(p.network) + '</td><td>' + p.interfaces + '</td><td>' + p.devices + '</td></tr>';
-        }
-        document.getElementById('prefix-rows').innerHTML = rows || '<tr><td colspan="3" class="empty">none yet</td></tr>';
+        prefixes = list;
+        renderAll();
     });
+}
+
+function renderAll() {
+    var a = renderPrefixes(), b = renderAddresses(), q = query();
+    document.getElementById('ipam-count').textContent = q ? a + ' prefix(es), ' + b + ' address(es)' : '';
 }
 
 function loadAddresses() {
     fetch('/api/ipam/addresses').then(function (r) { return r.json(); }).then(function (list) {
-        var rows = '';
-        for (var i = 0; i < list.length; i++) {
-            var a = list[i];
-            var cls = a.oper_status === 'up' ? 'ok' : 'bad';
-            rows += '<tr data-ctx="address" data-ip="' + ctxMenu.attr(a.ip) + '" data-len="' + ctxMenu.attr(a.prefix_len) + '" data-dev="' + ctxMenu.attr(a.device_id) +
-                '" data-if="' + ctxMenu.attr(a.interface) + '"><td>' + esc(a.ip) + '/' + a.prefix_len + '</td>' +
-                '<td><a href="/devices/' + a.device_id + '">' + esc(a.hostname) + '</a></td>' +
-                '<td>' + esc(a.interface) + '</td>' +
-                '<td><span class="pill ' + cls + '">' + esc(a.oper_status) + '</span></td></tr>';
-        }
-        document.getElementById('address-rows').innerHTML = rows || '<tr><td colspan="4" class="empty">none yet</td></tr>';
+        addresses = list;
+        renderAll();
     });
+}
+
+function renderAddresses() {
+    var q = query(), shown = 0, rows = '';
+    addresses.forEach(function (a) {
+        if (q && [a.ip + '/' + a.prefix_len, a.hostname, a.interface].join(' ').toLowerCase().indexOf(q) < 0) { return; }
+        shown++;
+        var cls = a.oper_status === 'up' ? 'ok' : 'bad';
+        rows += '<tr data-ctx="address" data-ip="' + ctxMenu.attr(a.ip) + '" data-len="' + ctxMenu.attr(a.prefix_len) + '" data-dev="' + ctxMenu.attr(a.device_id) +
+            '" data-if="' + ctxMenu.attr(a.interface) + '"><td>' + esc(a.ip) + '/' + a.prefix_len + '</td>' +
+            '<td><a href="/devices/' + a.device_id + '">' + esc(a.hostname) + '</a></td>' +
+            '<td>' + esc(a.interface) + '</td>' +
+            '<td><span class="pill ' + cls + '">' + esc(a.oper_status) + '</span></td></tr>';
+    });
+    document.getElementById('address-rows').innerHTML = rows || '<tr><td colspan="4" class="empty">' + (addresses.length ? 'no address matches' : 'none yet') + '</td></tr>';
+    return shown;
 }
 
 function loadAll() {

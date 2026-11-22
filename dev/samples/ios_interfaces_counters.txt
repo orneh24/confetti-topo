@@ -1,0 +1,42 @@
+GigabitEthernet1 is up, line protocol is up
+  Hardware is CSR vNIC, address is 0050.56aa.0001 (bia 0050.56aa.0001)
+  Internet address is 192.0.2.10/24
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Keepalive set (10 sec)
+  Full Duplex, 1000Mbps, link type is auto, media type is Virtual
+  output flow-control is unsupported, input flow-control is unsupported
+  ARP type: ARPA, ARP Timeout 04:00:00
+  Last input 00:00:00, output 00:00:00, output hang never
+  Last clearing of "show interface" counters never
+  Input queue: 0/375/0/0 (size/max/drops/flushes); Total output drops: 0
+  Queueing strategy: fifo
+  Output queue: 0/40 (size/max)
+  5 minute input rate 2000 bits/sec, 2 packets/sec
+  5 minute output rate 0 bits/sec, 0 packets/sec
+     2630532 packets input, 309403139 bytes, 0 no buffer
+     Received 0 broadcasts (0 IP multicasts)
+     0 runts, 0 giants, 0 throttles
+     0 input errors, 0 CRC, 0 frame, 0 overrun, 0 ignored
+     0 watchdog, 0 multicast, 0 pause input
+     1155449 packets output, 228680377 bytes, 0 underruns
+     Output 0 broadcasts (0 IP multicasts)
+     0 output errors, 0 collisions, 0 interface resets
+     0 unknown protocol drops
+     0 babbles, 0 late collision, 0 deferred
+     0 lost carrier, 0 no carrier, 0 pause output
+     0 output buffer failures, 0 output buffers swapped out
+GigabitEthernet2 is administratively down, line protocol is down
+  Hardware is CSR vNIC, address is 0050.56aa.0002 (bia 0050.56aa.0002)
+  MTU 1500 bytes, BW 1000000 Kbit/sec, DLY 10 usec,
+     reliability 255/255, txload 1/255, rxload 1/255
+  Encapsulation ARPA, loopback not set
+  Keepalive set (10 sec)
+  Full Duplex, 1000Mbps, link type is auto, media type is Virtual
+  Last clearing of "show interface" counters 1w2d
+  30 second input rate 58000 bits/sec, 4 packets/sec
+  30 second output rate 10000 bits/sec, 4 packets/sec
+     48008371 packets input, 3709515576 bytes, 0 no buffer
+     3 input errors, 2 CRC, 0 frame, 0 overrun, 0 ignored
+     382941 packets output, 61730385 bytes, 0 underruns

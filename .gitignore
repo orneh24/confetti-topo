@@ -1,6 +1,9 @@
 # Local database — holds plaintext device credentials (see CLAUDE.md, Design Decisions)
 topo.db
 topo.db-*
+# Database backups (Settings page, topo-db.sh): the whole database, credentials included
+backups/
+*.db
 # Runtime config, may hold credentials
 topo.env
 __pycache__/

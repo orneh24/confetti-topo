@@ -165,15 +165,17 @@ cp -f "${SCRIPT_DIR}/serve.py" "$DEST_DIR/"
 cp -f "${SCRIPT_DIR}/run.sh" "$DEST_DIR/"
 cp -f "${SCRIPT_DIR}/scripts/topo-setup.sh" "$DEST_DIR/"
 cp -f "${SCRIPT_DIR}/scripts/topo-update.sh" "$DEST_DIR/"
+cp -f "${SCRIPT_DIR}/scripts/topo-db.sh" "$DEST_DIR/"
 # Build id shown at login (services/login-setup.sh): a hash of the code, so two
 # VMs with the same code show the same id. It lives in the code dir, so a
 # rollback brings the old id back with the old code.
 BUILD_ID=$(cd "$SCRIPT_DIR" && find app templates static serve.py -type f -not -path '*__pycache__*' |
     LC_ALL=C sort | xargs sha256sum | sha256sum | cut -c1-8)
 printf 'build %s, installed %s UTC\n' "$BUILD_ID" "$(date -u '+%Y-%m-%d %H:%M')" > "$DEST_DIR/BUILD"
-chmod +x "$DEST_DIR/run.sh" "$DEST_DIR/serve.py" "$DEST_DIR/topo-setup.sh" "$DEST_DIR/topo-update.sh"
+chmod +x "$DEST_DIR/run.sh" "$DEST_DIR/serve.py" "$DEST_DIR/topo-setup.sh" "$DEST_DIR/topo-update.sh" "$DEST_DIR/topo-db.sh"
 ln -sf "$INSTALL_DIR/topo-setup.sh" /usr/local/bin/topo-setup.sh
 ln -sf "$INSTALL_DIR/topo-update.sh" /usr/local/bin/topo-update.sh
+ln -sf "$INSTALL_DIR/topo-db.sh" /usr/local/bin/topo-db.sh
 
 # -------------------------------------------------------------------
 # 5. Install Python dependencies not covered by apk

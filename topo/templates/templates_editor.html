@@ -58,6 +58,11 @@ pre.preview { font-size: 11px; white-space: pre-wrap; word-break: break-word; ba
             <h2>Templates</h2>
             <ul class="tlist" id="tlist"></ul>
             <button style="margin-top:8px;width:100%" onclick="newTemplate()">+ New</button>
+            <button style="margin-top:6px;width:100%" onclick="newFromExample()" title="A short IOS template that shows the variables a template can use">+ New from example</button>
+            <div class="hint" id="tlist-help" style="margin-top:10px;display:none">A template is IOS configuration with
+                Jinja2 variables, rendered against one device's polled facts. Start from the example, pick a device on the right
+                and press Render preview. A device pulls its rendered config with
+                <code>copy http://&lt;this server&gt;/configs/&lt;key&gt;.cfg running-config</code>; nothing is pushed.</div>
         </div>
     </div>
     <div class="col editor-wrap">
@@ -139,6 +144,7 @@ function loadList() {
                 t.name.replace(/'/g, "\\'") + '\')">' + esc(t.name) + '</li>';
         }
         document.getElementById('tlist').innerHTML = html || '<li class="empty">none yet</li>';
+        document.getElementById('tlist-help').style.display = list.length ? 'none' : 'block';
     });
 }
 
@@ -164,6 +170,35 @@ function newTemplate() {
     document.getElementById('save-msg').textContent = '';
     document.getElementById('versions').innerHTML = '';
     loadList();
+}
+
+// A small template that renders against any polled device: what device.*, interfaces and vars.* hold.
+var EXAMPLE_TEMPLATE = [
+    '! Example: rendered against the device picked on the right.',
+    '!   device.*     the device (hostname, mgmt_ip, model, os_version, site, ...)',
+    '!   interfaces   its interfaces (name, description, ip, prefix_len, oper_status, ...)',
+    '!   vars.*       your own values for that device (Load vars / Save vars)',
+    '! An unset variable stops the render with an error instead of leaving a blank line.',
+    'hostname {{ device.hostname }}',
+    '!',
+    '{% for i in interfaces if i.description %}',
+    'interface {{ i.name }}',
+    ' description {{ i.description }}',
+    '!',
+    '{% endfor %}',
+    '{% if vars.ntp_server is defined %}',
+    'ntp server {{ vars.ntp_server }}',
+    '{% endif %}',
+    'logging trap informational',
+    ''
+].join('\n');
+
+function newFromExample() {
+    newTemplate();
+    document.getElementById('t-name').value = 'example';
+    document.getElementById('t-note').value = 'started from the example';
+    cm.setValue(EXAMPLE_TEMPLATE);
+    document.getElementById('save-msg').textContent = 'not saved yet';
 }
 
 function renderWarnings(dangerous, security) {

@@ -36,3 +36,8 @@ sanitised with documentation addresses only (192.0.2.0/24, 198.51.100.0/24, 203.
 
 - `ios_mac_table.txt` has the **real format** of `show mac address-table` from a Catalyst 3560. The MAC addresses were replaced
   with made-up ones and the list was cut to 3 static and 14 dynamic rows.
+
+- `ios_interfaces_counters.txt` has the **real format** of `show interfaces` from an IOS-XE 17.3 CSR1000v (the load-interval
+  rate lines and the `packets input, ... bytes` / `packets output, ... bytes` counter lines the traffic graph uses). The
+  second interface's `30 second` rate lines (what `load-interval 30` gives) were **written from IOS's documented
+  format, not captured**. Addresses and MACs were replaced; the counter values are real.

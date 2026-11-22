@@ -1715,6 +1715,171 @@ def _():
     return p
 
 
+@check("R52", "interface traffic: real-format byte counters and rates parse, a counter reset gives no rate, rates reach the API")
+def _():
+    p = []
+    m, conn = fresh_db()
+    ios, ssh = m["ios"], m["ssh"]
+    rows = {r["name"]: r for r in ios.parse_interfaces(read(SAMPLES + "ios_interfaces_counters.txt"))}
+    g1, g2 = rows.get("GigabitEthernet1"), rows.get("GigabitEthernet2")
+    need(g1 is not None and (g1["in_bps"], g1["out_bps"], g1["in_bytes"], g1["out_bytes"]) == (2000, 0, 309403139, 228680377),
+         "GigabitEthernet1 counters: %r" % (((g1 or {}).get("in_bps"), (g1 or {}).get("in_bytes")),), p)
+    need(g2 is not None and (g2["in_bps"], g2["out_bps"]) == (58000, 10000), "the '30 second ... rate' lines did not parse", p)
+    # rates(): bits per second between samples; a counter that went down (reload, clear counters) gives None, never a negative.
+    smp = [{"at": "2026-01-01 00:00:00", "in_bytes": 1000, "out_bytes": 500},
+           {"at": "2026-01-01 00:00:10", "in_bytes": 2250, "out_bytes": 500},
+           {"at": "2026-01-01 00:00:20", "in_bytes": 100, "out_bytes": 1750}]
+    r = ssh.rates(smp)
+    need([(x[1], x[2]) for x in r] == [(1000, 0), (None, 1000)], "rates(): %r" % r, p)
+    # The apply step stores the device's own rate and a byte sample; an unchanged sample within the hour adds nothing.
+    did = add_device(conn, "192.0.2.1")
+    one = [dict(g1, name="Gi1")]
+    ssh.apply_result(conn, did, "interfaces", one)
+    ssh.apply_result(conn, did, "interfaces", one)
+    n = conn.execute("SELECT COUNT(*) FROM interface_stats WHERE in_bytes IS NOT NULL").fetchone()[0]
+    need(n == 1, "byte samples after two identical polls: %d, expected 1" % n, p)
+    conn.execute("DELETE FROM interface_stats")
+    for ago, b in (("-10 minutes", 1000000), ("-5 minutes", 1300000)):
+        conn.execute("INSERT INTO interface_stats (device_id, name, at, in_bytes, out_bytes) "
+                     "VALUES (?, 'Gi1', datetime('now', ?), ?, 0)", (did, ago, b))
+    conn.commit()
+    conn.close()
+    c = m["appmod"].app.test_client()
+    hist = c.get("/api/devices/%d/interface-stats?name=Gi1" % did).get_json()
+    need(len(hist) == 2 and hist[0]["in_bps"] is None and hist[1]["in_bps"] == 8000,
+         "interface-stats rates: %r" % [(h.get("in_bps"), h.get("out_bps")) for h in hist], p)
+    row = c.get("/api/devices/%d/interfaces" % did).get_json()[0]
+    need(row.get("in_bps") == 2000, "/interfaces in_bps = %r, expected 2000" % row.get("in_bps"), p)
+    return p
+
+
+@check("R53", "database backup and restore: POST only, stored names only, a bad file changes nothing, the current database is saved first, topo.env export has no secrets")
+def _():
+    p = []
+    m, conn = fresh_db()
+    from app import backup
+    add_device(conn, "192.0.2.1", hostname="before")
+    conn.close()
+    c = m["appmod"].app.test_client()
+    need(c.get("/api/backup/download").status_code == 405, "GET /api/backup/download must not serve the database", p)
+    r = c.post("/api/backup/download", json={})
+    need(r.status_code == 200 and r.data[:15] == b"SQLite format 3", "POST /api/backup/download did not return a database", p)
+    good = os.path.join(TMP, "r53-good.db")
+    with open(good, "wb") as f:
+        f.write(r.data)
+    r.close()
+    for bad_name in ("../t1.db", "/etc/passwd", "topo.db", "x"):
+        need(backup.path_of(bad_name) is None, "path_of accepted %r" % bad_name, p)
+        need(c.post("/api/backup/download", json={"name": bad_name}).status_code == 404, "download of %r was not refused" % bad_name, p)
+    files = c.get("/api/backup").get_json()["files"]
+    need(files and all(set(f) == {"name", "size", "modified"} and "/" not in f["name"] and "\\" not in f["name"] for f in files),
+         "/api/backup lists more than bare names: %r" % files[:1], p)
+    conn = m["db"].connect()
+    conn.execute("UPDATE devices SET hostname = 'after'")
+    conn.commit()
+    conn.close()
+    import io
+    notdb = c.post("/api/backup/restore", data={"file": (io.BytesIO(b"not a database at all" * 10), "x.db")},
+                   content_type="multipart/form-data")
+    need(notdb.status_code == 400, "a file that is not a database was not refused (%d)" % notdb.status_code, p)
+    other = os.path.join(TMP, "r53-other.db")
+    o = __import__("sqlite3").connect(other)
+    o.execute("CREATE TABLE something (x)")
+    o.commit()
+    o.close()
+    with open(other, "rb") as f:
+        wrong = c.post("/api/backup/restore", data={"file": (io.BytesIO(f.read()), "o.db")}, content_type="multipart/form-data")
+    need(wrong.status_code == 400, "a database without a devices table was not refused", p)
+    conn = m["db"].connect()
+    need(conn.execute("SELECT hostname FROM devices").fetchone()[0] == "after", "a refused restore changed the live data", p)
+    conn.close()
+    with open(good, "rb") as f:
+        ok = c.post("/api/backup/restore", data={"file": (io.BytesIO(f.read()), "g.db")}, content_type="multipart/form-data")
+    res = ok.get_json() or {}
+    need(ok.status_code == 200 and res.get("devices") == 1, "restore of a good backup failed: %r" % res, p)
+    conn = m["db"].connect()
+    need(conn.execute("SELECT hostname FROM devices").fetchone()[0] == "before", "the restore did not bring the backup's data back", p)
+    conn.close()
+    need(str(res.get("saved_as", "")).startswith("topo-pre-restore-") and backup.path_of(res.get("saved_as", "")),
+         "the database before the restore was not saved", p)
+    keep = {k: os.environ.get(k) for k in ("TOPO_AUTH_TOKEN", "TOPO_SMTP_PASSWORD", "TOPO_SSH_PASSWORD", "TOPO_PORT")}
+    os.environ.update(TOPO_AUTH_TOKEN="r53-token-value", TOPO_SMTP_PASSWORD="r53-smtp-value",
+                      TOPO_SSH_PASSWORD="r53-ssh-value", TOPO_PORT="8099")
+    try:
+        text = c.get("/api/backup/env").get_data(as_text=True)
+    finally:
+        for k, v in keep.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    need("r53-" not in text, "the topo.env export holds a secret value", p)
+    need("TOPO_PORT=8099" in text, "the topo.env export lost a plain setting", p)
+    sh = read("topo/scripts/topo-db.sh")
+    need("pre-restore" in sh and "quick_check" in sh and ".backup" in sh, "topo-db.sh must check the file and save the current database before a restore", p)
+    need("topo-db.sh" in read("topo/build-topo.sh"), "build-topo.sh does not install topo-db.sh", p)
+    need("backups/" in read(".gitignore"), ".gitignore must keep backups (they hold credentials) out of git", p)
+    return p
+
+
+@check("R54", "Find and Test login only read: no row, alias, event or poll state changes; Find never stores an alias")
+def _():
+    p = []
+    m, conn = fresh_db()
+    a = add_device(conn, "192.0.2.1", hostname="rtr-a")
+    b = add_device(conn, "192.0.2.2", hostname="rtr-b")
+    _put_iface(conn, a, "Gi2", "198.51.100.1")
+    conn.execute("UPDATE interfaces SET prefix_len = 24, network = '198.51.100.0/24', mac = '0011.2233.4455' WHERE device_id = ?", (a,))
+    conn.execute("INSERT INTO mac_table (device_id, vlan, mac, port, last_seen) VALUES (?, '10', '0011.2233.4455', 'Gi0/7', ?)",
+                 (b, m["db"].sqlite_now()))
+    conn.commit()
+
+    def snapshot():
+        tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")]
+        rows = {t: conn.execute("SELECT COUNT(*) FROM " + t).fetchone()[0] for t in tables}
+        rows["devices"] = [tuple(r) for r in conn.execute("SELECT id, poll_state, next_poll_at, fail_count, last_poll_ok FROM devices")]
+        return rows
+    before = snapshot()
+    c = m["appmod"].app.test_client()
+    from app import find
+    need(find.classify("00:11:22:33:44:55") == ("mac", "001122334455") and find.classify("0011.2233.4455")[0] == "mac",
+         "MAC formats are not read as a MAC", p)
+    need(find.classify("123456789012")[0] == "text", "12 digits must not be read as a MAC", p)
+    ip = c.get("/api/find?q=198.51.100.1").get_json()
+    keys = {s["key"]: s for s in ip.get("sections", [])}
+    need(ip.get("kind") == "ip" and "owner" in keys and keys["owner"]["rows"][0]["device_id"] == a,
+         "Find did not name the interface that holds the address: %r" % list(keys), p)
+    mac = c.get("/api/find?q=00-11-22-33-44-55").get_json()
+    mkeys = {s["key"]: s for s in mac.get("sections", [])}
+    need("learned" in mkeys and mkeys["learned"]["rows"][0]["port"] == "Gi0/7", "Find did not show the switch port that learned the MAC", p)
+    need(c.get("/api/find?q=").status_code == 400, "an empty query must be a 400", p)
+    c.get("/api/find?q=rtr")
+    c.get("/api/find?q=198.51.100.0/24")
+    # Test login: the collector is replaced by a fake that answers the version task; nothing may be stored.
+    ssh = m["ssh"]
+    real = ssh.run_tasks
+    asked = []
+
+    def fake(device, creds, tasks=None):
+        asked.append(tasks)
+        yield "version", True, "Cisco IOS XE Software", None, {"model": "CSR1000V", "os_version": "17.3", "serial": "X1"}
+        yield "interfaces", True, "", None, []
+    ssh.run_tasks = fake
+    try:
+        t = c.post("/api/devices/%d/credentials/test" % a).get_json()
+    finally:
+        ssh.run_tasks = real
+    need(t.get("ok") is True and t.get("found", {}).get("model") == "CSR1000V", "Test login answer: %r" % t, p)
+    need(asked == [("version",)], "Test login must ask only the version task, asked %r" % asked, p)
+    need(snapshot() == before, "Find or Test login changed the database", p)
+    conn.execute("UPDATE devices SET role = 'node' WHERE id = ?", (b,))
+    conn.commit()
+    need(c.post("/api/devices/%d/credentials/test" % b).status_code == 400, "a role=node device must not be logged in to", p)
+    need(c.get("/api/devices/%d/credentials/test" % a).status_code == 405, "Test login must be a POST", p)
+    conn.close()
+    return p
+
+
 # ============================================================ live tier
 
 @check("R32", "routes: real-output fixtures parse, an empty table deletes nothing, one summary event per changed poll, none on baseline")

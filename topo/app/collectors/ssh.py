@@ -9,7 +9,9 @@ next one — see poller.py, which runs the device pool through a
 ThreadPoolExecutor.
 """
 
+import calendar
 import hashlib
+import time
 
 from netmiko import ConnectHandler
 from netmiko.exceptions import NetmikoAuthenticationException, NetmikoTimeoutException
@@ -240,17 +242,20 @@ def _apply_interfaces(conn, device_id, parsed, now):
     for row in parsed:
         conn.execute(
             """INSERT INTO interfaces (device_id, name, description, ip, prefix_len, network,
-                   admin_status, oper_status, speed, duplex, input_errors, crc_errors, mtu, mac, last_seen)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   admin_status, oper_status, speed, duplex, input_errors, crc_errors, mtu, mac,
+                   in_bps, out_bps, last_seen)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(device_id, name) DO UPDATE SET
                    description=excluded.description, ip=excluded.ip, prefix_len=excluded.prefix_len,
                    network=excluded.network, admin_status=excluded.admin_status,
                    oper_status=excluded.oper_status, speed=excluded.speed, duplex=excluded.duplex,
                    input_errors=excluded.input_errors, crc_errors=excluded.crc_errors,
-                   mtu=excluded.mtu, mac=excluded.mac, last_seen=excluded.last_seen""",
+                   mtu=excluded.mtu, mac=excluded.mac, in_bps=excluded.in_bps, out_bps=excluded.out_bps,
+                   last_seen=excluded.last_seen""",
             (device_id, row["name"], row["description"], row["ip"], row["prefix_len"], row["network"],
              row["admin_status"], row["oper_status"], row["speed"], row["duplex"],
-             row.get("input_errors"), row.get("crc_errors"), row["mtu"], row.get("mac"), now),
+             row.get("input_errors"), row.get("crc_errors"), row["mtu"], row.get("mac"),
+             row.get("in_bps"), row.get("out_bps"), now),
         )
     _record_interface_stats(conn, device_id, parsed, now)
     # Drop interfaces this poll no longer reported (removed subinterface,
@@ -495,26 +500,56 @@ STATS_HEARTBEAT_S = 3600
 
 
 def _record_interface_stats(conn, device_id, parsed, now):
-    """Keep a sample of each interface's error counters when they change, plus
+    """Keep a sample of each interface's counters (errors, and bytes in and out) when they change, plus
     one an hour so a flat line still has points. A counter that went DOWN
-    (device reload) is stored like any other change; growth() ignores resets."""
+    (device reload) is stored like any other change; growth() and rates() ignore resets.
+    Bytes move on every busy interface, so a busy interface gets a sample on every poll: that is what
+    the traffic graph is drawn from."""
     last = {r["name"]: r for r in conn.execute(
-        """SELECT name, input_errors, crc_errors, at FROM interface_stats
+        """SELECT name, input_errors, crc_errors, in_bytes, out_bytes, at FROM interface_stats
            WHERE device_id = ? AND id IN
                  (SELECT MAX(id) FROM interface_stats WHERE device_id = ? GROUP BY name)""",
         (device_id, device_id))}
     for row in parsed:
-        ie, ce = row.get("input_errors"), row.get("crc_errors")
-        if ie is None and ce is None:
+        now_vals = (row.get("input_errors"), row.get("crc_errors"), row.get("in_bytes"), row.get("out_bytes"))
+        if all(v is None for v in now_vals):
             continue
         prev = last.get(row["name"])
-        if prev is not None and (prev["input_errors"], prev["crc_errors"]) == (ie, ce):
+        if prev is not None and (prev["input_errors"], prev["crc_errors"], prev["in_bytes"], prev["out_bytes"]) == now_vals:
             age = conn.execute("SELECT strftime('%s', ?) - strftime('%s', ?)", (now, prev["at"])).fetchone()[0]
             if age is None or age < STATS_HEARTBEAT_S:
                 continue
         conn.execute(
-            "INSERT INTO interface_stats (device_id, name, at, input_errors, crc_errors) VALUES (?, ?, ?, ?, ?)",
-            (device_id, row["name"], now, ie, ce))
+            "INSERT INTO interface_stats (device_id, name, at, input_errors, crc_errors, in_bytes, out_bytes) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (device_id, row["name"], now) + now_vals)
+
+
+def rates(samples):
+    """Bits per second between consecutive samples (oldest first): [(at, in_bps, out_bps)], one per sample after the
+    first. A byte counter that went down (reload, clear counters) gives no rate for that step (None), never a
+    negative or a huge one."""
+    out = []
+    prev = None
+    for s in samples:
+        t = _epoch(s["at"])
+        if prev is not None and t is not None and prev[0] is not None and t > prev[0]:
+            dt = t - prev[0]
+            vals = []
+            for i, field in enumerate(("in_bytes", "out_bytes")):
+                a, b = prev[1 + i], s[field]
+                vals.append(None if a is None or b is None or b < a else int((b - a) * 8 / dt))
+            out.append((s["at"], vals[0], vals[1]))
+        prev = (t, s["in_bytes"], s["out_bytes"])
+    return out
+
+
+def _epoch(ts):
+    """'YYYY-MM-DD HH:MM:SS' (db.sqlite_now, UTC) to seconds; None when it does not parse."""
+    try:
+        return calendar.timegm(time.strptime(ts, "%Y-%m-%d %H:%M:%S"))
+    except (TypeError, ValueError):
+        return None
 
 
 def growth(samples, field):

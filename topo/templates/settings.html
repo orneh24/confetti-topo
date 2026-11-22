@@ -66,6 +66,30 @@
             </form>
         </div>
     </div>
+    <div class="section" data-fold="backup" data-fold-default="closed">
+        <div class="section-header"><span>Backup and restore</span></div>
+        <div class="section-body">
+            <div class="hint">A backup is the whole database: devices, history, templates, settings and the device
+                credentials in plaintext. Keep the file private. On the VM, <code>topo-db.sh</code> does the same from the shell.</div>
+            <div class="bulk">
+                <button type="button" class="primary" onclick="downloadBackup('')">Download a backup made now</button>
+                <a class="btn-small" href="/api/backup/env" download>Download settings (topo.env, no secrets)</a>
+                <span class="msg" id="bk-msg"></span>
+            </div>
+            <table style="margin-top:10px">
+                <thead><tr><th>Stored backup</th><th>Size</th><th>Made</th><th></th></tr></thead>
+                <tbody id="bk-rows"></tbody>
+            </table>
+            <div class="hint" style="margin-top:12px">Restore replaces everything in the database with the chosen file.
+                The current database is saved first as <code>topo-pre-restore-&lt;time&gt;.db</code> (listed above), and an older
+                backup is upgraded to this version's tables. The server keeps running.</div>
+            <form class="bulk" id="restore-form" onsubmit="restoreBackup(); return false;">
+                <input type="file" id="restore-file" accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3">
+                <button type="submit">Restore from file</button>
+                <span class="msg" id="rs-msg"></span>
+            </form>
+        </div>
+    </div>
     <div class="section">
         <div class="section-header"><span>Device credentials</span></div>
         <div class="section-body">
@@ -74,7 +98,7 @@
                 <thead>
                     <tr>
                         <th><input type="checkbox" id="sel-all" onchange="selectAll(this.checked)" aria-label="Select all"></th>
-                        <th>Hostname</th><th>Mgmt IP</th><th>Own credentials</th><th>Changed</th>
+                        <th>Hostname</th><th>Mgmt IP</th><th>Own credentials</th><th>Changed</th><th>Login</th>
                     </tr>
                 </thead>
                 <tbody id="dev-rows"></tbody>
@@ -88,7 +112,8 @@
                 <button type="button" onclick="removeSelected()">Remove own credentials from selected</button>
                 <span class="msg" id="bulk-msg"></span>
             </form>
-            <div class="hint">Apply only changes the fields you fill in.</div>
+            <div class="hint">Apply only changes the fields you fill in. Test login signs in with what the device would use now
+                (its own, else the defaults) and runs only the version command; nothing is stored.</div>
         </div>
     </div>
 </div>
@@ -232,12 +257,78 @@ function loadDevices() {
                 '" data-name="' + ctxMenu.attr(d.hostname || '') + '"><td><input type="checkbox" value="' + d.device_id + '"' +
                 (checked[d.device_id] ? ' checked' : '') + ' aria-label="Select ' + esc(d.hostname) + '"></td>' +
                 '<td><a href="/devices/' + d.device_id + '">' + esc(d.hostname) + '</a></td>' +
-                '<td>' + esc(d.mgmt_ip) + '</td><td>' + own + '</td><td>' + esc(d.updated_at || '') + '</td></tr>';
+                '<td>' + esc(d.mgmt_ip) + '</td><td>' + own + '</td><td>' + esc(d.updated_at || '') + '</td>' +
+                '<td><button type="button" class="btn-small" onclick="testLogin(' + d.device_id + ', this, this.nextElementSibling)">Test login</button>' +
+                '<span class="msg"></span></td></tr>';
         });
         document.getElementById('dev-rows').innerHTML = html;
         document.getElementById('dev-empty').style.display = list.length ? 'none' : 'block';
         document.getElementById('sel-all').checked = false;
     });
+}
+
+// Test login: the server logs in with the stored credentials and runs the version command only (nothing stored).
+function testLogin(id, btn, out) {
+    btn.disabled = true;
+    out.className = 'msg';
+    out.textContent = 'logging in...';
+    fetch('/api/devices/' + id + '/credentials/test', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (t) {
+        var found = t.found ? Object.keys(t.found).map(function (k) { return t.found[k]; }).join(', ') : '';
+        out.textContent = t.ok ? 'login ok' + (t.username ? ' as ' + t.username : '') + ' (' + t.transport + ', ' + t.seconds + ' s)' + (found ? ': ' + found : '')
+                               : 'failed: ' + (t.error || 'no answer');
+        out.className = t.ok ? 'msg ok' : 'msg err';
+    }).catch(function () {
+        out.textContent = 'request failed';
+        out.className = 'msg err';
+    }).then(function () { btn.disabled = false; });
+}
+
+// ---- Backup and restore ----
+function loadBackups() {
+    fetch('/api/backup').then(function (r) { return r.json(); }).then(function (b) {
+        var rows = '';
+        (b.files || []).forEach(function (f) {
+            rows += '<tr data-ctx="backup" data-name="' + ctxMenu.attr(f.name) + '"><td>' + esc(f.name) + '</td><td>' + (f.size / 1048576).toFixed(1) + ' MB</td><td>' +
+                esc(new Date(f.modified).toLocaleString()) + '</td><td><button type="button" class="btn-small" onclick="downloadBackup(this.closest(\'tr\').getAttribute(\'data-name\'))">Download</button></td></tr>';
+        });
+        document.getElementById('bk-rows').innerHTML = rows || '<tr><td colspan="4" class="empty">none yet</td></tr>';
+    });
+}
+
+function downloadBackup(name) {
+    say('bk-msg', true, name ? 'downloading...' : 'making a backup...');
+    fetch('/api/backup/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name }) })
+        .then(function (r) {
+            if (!r.ok) { return r.json().then(function (d) { throw new Error(d.error || 'failed'); }); }
+            var cd = r.headers.get('Content-Disposition') || '', m = /filename="?([^";]+)"?/.exec(cd);
+            return r.blob().then(function (blob) { return { blob: blob, name: m ? m[1] : 'topo-backup.db' }; });
+        }).then(function (res) {
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(res.blob);
+            a.download = res.name;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function () { URL.revokeObjectURL(a.href); }, 1000);
+            say('bk-msg', true, 'saved ' + res.name);
+            loadBackups();
+        }).catch(function (e) { say('bk-msg', false, e.message); });
+}
+
+function restoreBackup() {
+    var file = document.getElementById('restore-file').files[0];
+    if (!file) { say('rs-msg', false, 'choose a backup file first'); return; }
+    if (!confirm('Replace the whole database with ' + file.name + '? The current one is saved first, but every change since that backup is gone from the live data.')) { return; }
+    var fd = new FormData();
+    fd.append('file', file);
+    say('rs-msg', true, 'uploading and restoring...');
+    fetch('/api/backup/restore', { method: 'POST', body: fd }).then(function (r) {
+        return r.json().then(function (d) { return { ok: r.ok, d: d }; });
+    }).then(function (res) {
+        if (!res.ok) { say('rs-msg', false, res.d.error || 'restore failed'); return; }
+        say('rs-msg', true, 'restored: ' + res.d.devices + ' device(s). The previous database is ' + res.d.saved_as + '. Reloading...');
+        setTimeout(function () { location.reload(); }, 2500);
+    }).catch(function () { say('rs-msg', false, 'request failed'); });
 }
 
 function selectAll(on) {
@@ -344,6 +435,14 @@ loadLinks();
 loadSyslogPull();
 loadLldp();
 loadDevices();
+loadBackups();
+ctxMenu.register('backup', function (tr) {
+    var name = tr.getAttribute('data-name');
+    return { title: name, items: [
+        { label: 'Download', action: function () { downloadBackup(name); } },
+        { label: 'Copy file name', action: function () { ctxMenu.copy(name); } },
+    ] };
+});
 </script>
 {% endraw %}
 {% endblock %}

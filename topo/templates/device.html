@@ -3,16 +3,28 @@
 {% block head %}
 <style>
 .container { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
-.form-grid { display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px; align-items: center; font-size: 12px; margin-bottom: 10px; }
-.form-grid label { color: var(--text-dim); }
-.form-grid input, .form-grid select { width: 100%; }
-.form-grid input[type=checkbox] { width: auto; justify-self: start; }
 .hint { margin-bottom: 8px; }
 .msg { font-size: 11px; margin-left: 8px; }
+/* The status strip: one chip per thing that can be wrong, each a link to the box that explains it. */
+.status-strip { display: flex; flex-wrap: wrap; gap: 8px; }
+.status-strip a.chip { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; border: 1px solid var(--border);
+    background: var(--bg-card); color: var(--text); text-decoration: none; font-size: 12px; }
+.status-strip a.chip:hover { background: var(--bg-hover); }
+.status-strip .chip .k { color: var(--text-dim); }
+/* Traffic graph (an interface's "graph" link): in and out rates between counter samples. */
+.tr-chart { width: 100%; height: 200px; display: block; }
+.tr-chart .grid { stroke: var(--border); stroke-width: 1; }
+.tr-chart .in { fill: none; stroke: var(--cyan); stroke-width: 2; }
+.tr-chart .out { fill: none; stroke: var(--yellow); stroke-width: 2; }
+.tr-chart text { fill: var(--text-dim); font-size: 11px; }
+.tr-key b { display: inline-block; width: 12px; height: 3px; vertical-align: middle; margin: 0 4px 0 10px; }
 </style>
 {% endblock %}
 {% block content %}
 <div class="container">
+    <div class="section wide" id="status-section">
+        <div class="section-body"><div class="status-strip" id="status-strip"><span class="hint">loading</span></div></div>
+    </div>
     <div class="section">
         <div class="section-header"><span>Device</span></div>
         <div class="section-body">
@@ -76,12 +88,14 @@
                 <div class="hint">A blank secret field keeps the stored value. Stored in plaintext in topo.db.</div>
                 <button type="submit" class="primary">Save</button>
                 <button type="button" onclick="clearSecrets()">Clear secrets</button>
+                <button type="button" id="test-login-btn" onclick="testLogin(deviceId, this, document.getElementById('cred-msg'))"
+                        title="Log in with the credentials in use now and run only the version command; nothing is stored">Test login</button>
                 <span class="msg" id="cred-msg"></span>
             </form>
         </div>
     </div>
     <div class="section wide">
-        <div class="section-header"><span>Events</span></div>
+        <div class="section-header" id="events"><span>Events</span></div>
         <div class="section-body">
             <table data-sortable>
                 <thead><tr><th>Time</th><th>Sev</th><th>Event</th><th>Detail</th></tr></thead>
@@ -111,7 +125,7 @@
         </div>
     </div>
     <div class="section wide">
-        <div class="section-header"><span>BGP / OSPF</span></div>
+        <div class="section-header" id="sessions"><span>BGP / OSPF</span></div>
         <div class="section-body">
             <table data-sortable>
                 <thead><tr><th>Proto</th><th>Peer</th><th>State</th><th>Remote AS</th><th>Prefixes</th><th>Uptime</th><th>Interface</th></tr></thead>
@@ -144,7 +158,7 @@
         </div>
     </div>
     <div class="section wide">
-        <div class="section-header"><span>Interfaces</span></div>
+        <div class="section-header" id="interfaces"><span>Interfaces</span></div>
         <div class="section-body">
             <div class="hint">
                 Show only:
@@ -155,10 +169,25 @@
             </div>
             <table data-sortable>
                 <thead><tr><th>Name</th><th>Admin</th><th>Oper</th><th>IP</th><th>Speed/Duplex</th>
-                    <th>MTU</th><th>Errors (24h)</th><th>Last seen</th></tr></thead>
+                    <th>MTU</th><th>Errors (24h)</th><th>Traffic in / out</th><th>Last seen</th></tr></thead>
                 <tbody id="interface-rows"></tbody>
             </table>
             <div class="empty" id="interface-empty" style="display:none">no interfaces polled yet</div>
+        </div>
+    </div>
+    <!-- Opened by an interface's "graph" link. -->
+    <div class="section wide" id="traffic" style="display:none">
+        <div class="section-header"><span>Traffic: <span id="tr-name"></span></span>
+            <span class="hdr-actions">
+                <select id="tr-hours" onchange="drawTraffic()" aria-label="Time span">
+                    <option value="6">6 h</option><option value="24" selected>24 h</option><option value="168">7 days</option>
+                </select>
+                <button type="button" class="btn-small" onclick="document.getElementById('traffic').style.display = 'none'">Close</button>
+            </span></div>
+        <div class="section-body">
+            <div id="tr-chart"></div>
+            <div class="hint tr-key"><b style="background:var(--cyan)"></b>in <b style="background:var(--yellow)"></b>out
+                &mdash; the average rate between two polls, from the interface's byte counters (IOS only). A counter reset leaves a gap.</div>
         </div>
     </div>
     <div class="section wide" id="routes">
@@ -265,6 +294,7 @@ function loadDevice() {
             sourceRows += '<tr><td>' + esc(s.source) + '</td><td>' + esc(s.ref) + '</td><td>' + esc(s.last_seen) + '</td></tr>';
         }
         document.getElementById('source-rows').innerHTML = sourceRows || '<tr><td colspan="3" class="empty">none</td></tr>';
+        loadStatus(d);
     }).catch(function () {
         document.getElementById('device-body').innerHTML = '<div class="empty">device not found</div>';
     });
@@ -381,6 +411,62 @@ function loadInterfaces() {
     });
 }
 
+function fmtBps(v) {
+    if (v === null || v === undefined) { return ''; }
+    var u = ['b/s', 'kb/s', 'Mb/s', 'Gb/s'], i = 0;
+    while (v >= 1000 && i < u.length - 1) { v /= 1000; i++; }
+    return (i ? v.toFixed(v < 10 ? 1 : 0) : Math.round(v)) + ' ' + u[i];
+}
+
+var trafficIf = null;
+function showTraffic(name) {
+    trafficIf = name;
+    document.getElementById('tr-name').textContent = name;
+    var sec = document.getElementById('traffic');
+    sec.style.display = '';
+    drawTraffic();
+    sec.scrollIntoView({ block: 'nearest' });
+}
+
+// A plain SVG line chart, coloured by the theme (CSS classes): in and out, zero at the bottom, the highest rate at the top.
+function drawTraffic() {
+    if (!trafficIf) { return; }
+    var hours = document.getElementById('tr-hours').value, box = document.getElementById('tr-chart');
+    fetch('/api/devices/' + deviceId + '/interface-stats?name=' + encodeURIComponent(trafficIf) + '&hours=' + hours)
+        .then(function (r) { return r.json(); }).then(function (rows) {
+            var pts = rows.filter(function (s) { return s.in_bps !== null || s.out_bps !== null; });
+            if (pts.length < 2) {
+                box.innerHTML = '<div class="empty">not enough samples yet: the graph needs two polls with byte counters (IOS devices)</div>';
+                return;
+            }
+            var W = 800, H = 200, L = 64, R = 10, T = 10, B = 22;
+            var t0 = Date.now() - hours * 3600 * 1000, t1 = Date.now();
+            var max = Math.max.apply(null, pts.map(function (s) { return Math.max(s.in_bps || 0, s.out_bps || 0); })) || 1;
+            function x(at) { return L + (new Date(at).getTime() - t0) / (t1 - t0) * (W - L - R); }
+            function y(v) { return T + (1 - v / max) * (H - T - B); }
+            function line(field) {
+                // A gap (no rate: first sample, a reset) starts a new piece of the line.
+                var d = '', pen = false;
+                rows.forEach(function (s) {
+                    if (s[field] === null || s[field] === undefined) { pen = false; return; }
+                    d += (pen ? 'L' : 'M') + x(s.at).toFixed(1) + ' ' + y(s[field]).toFixed(1) + ' ';
+                    pen = true;
+                });
+                return d;
+            }
+            var svg = '<svg class="tr-chart" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="Traffic in and out">';
+            [0, 0.5, 1].forEach(function (f) {
+                var yy = y(max * f);
+                svg += '<line class="grid" x1="' + L + '" x2="' + (W - R) + '" y1="' + yy + '" y2="' + yy + '"></line>' +
+                       '<text x="' + (L - 6) + '" y="' + (yy + 4) + '" text-anchor="end">' + esc(fmtBps(max * f)) + '</text>';
+            });
+            svg += '<text x="' + L + '" y="' + (H - 6) + '">' + esc(new Date(t0).toLocaleString()) + '</text>' +
+                   '<text x="' + (W - R) + '" y="' + (H - 6) + '" text-anchor="end">now</text>' +
+                   '<path class="in" d="' + line('in_bps') + '"></path><path class="out" d="' + line('out_bps') + '"></path></svg>';
+            box.innerHTML = svg;
+        });
+}
+
 function renderInterfaces() {
     // Ticked boxes add up: an interface is shown when it matches any ticked one. None ticked shows all.
     var on = {};
@@ -408,6 +494,9 @@ function renderInterfaces() {
                 '<td>' + esc(sd) + '</td>' +
                 '<td>' + esc(f.mtu || '') + '</td>' +
                 '<td>' + esc(errs) + '</td>' +
+                '<td data-sort="' + ((f.in_bps || 0) + (f.out_bps || 0)) + '">' +
+                    (f.in_bps === null || f.in_bps === undefined ? '' : esc(fmtBps(f.in_bps) + ' / ' + fmtBps(f.out_bps)) +
+                     ' <button type="button" class="linklike" data-if="' + ctxMenu.attr(f.name) + '" onclick="showTraffic(this.getAttribute(\'data-if\'))" title="Traffic over time">graph</button>') + '</td>' +
                 '<td>' + esc(f.last_seen) + '</td>' +
                 '</tr>';
         }
@@ -635,6 +724,65 @@ function loadLldp() {
         }
         document.getElementById('lldp-rows').innerHTML = rows;
         document.getElementById('lldp-empty').style.display = list.length ? 'none' : 'block';
+    });
+}
+
+// The strip at the top: ping, last poll, sessions down, template drift and interface errors in 24 h. Each chip links
+// to the box below that has the detail. Uses the same API answers as those boxes.
+function chip(href, label, text, cls, title) {
+    return '<a class="chip" href="' + href + '"' + (title ? ' title="' + ctxMenu.attr(title) + '"' : '') + '><span class="k">' +
+        esc(label) + '</span><span class="pill ' + cls + '">' + esc(text) + '</span></a>';
+}
+
+// Test login: the server logs in with the stored credentials and runs the version command only (nothing stored).
+function testLogin(id, btn, out) {
+    btn.disabled = true;
+    out.className = 'msg';
+    out.textContent = 'logging in...';
+    fetch('/api/devices/' + id + '/credentials/test', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (t) {
+        var found = t.found ? Object.keys(t.found).map(function (k) { return t.found[k]; }).join(', ') : '';
+        out.textContent = t.ok ? 'login ok' + (t.username ? ' as ' + t.username : '') + ' (' + t.transport + ', ' + t.seconds + ' s)' + (found ? ': ' + found : '')
+                               : 'failed: ' + (t.error || 'no answer');
+        out.className = t.ok ? 'msg ok' : 'msg err';
+    }).catch(function () {
+        out.textContent = 'request failed';
+        out.className = 'msg err';
+    }).then(function () { btn.disabled = false; });
+}
+
+function loadStatus(d) {
+    Promise.all([
+        fetch('/api/adjacencies?device_id=' + deviceId).then(function (r) { return r.json(); }),
+        fetch('/api/devices/' + deviceId + '/interfaces').then(function (r) { return r.json(); })
+    ]).then(function (res) {
+        var adj = res[0], ifs = res[1], html = '';
+        html += chip('#device-body', 'Ping', d.reachable === null || d.reachable === undefined ? 'not checked' : (d.reachable ? 'up' : 'down'),
+                     d.reachable === 0 ? 'bad' : (d.reachable ? 'ok' : 'idle'));
+        if (d.role === 'node' || !d.enabled) {
+            html += chip('#device-body', 'Poll', 'not polled', 'idle');
+        } else if (d.fail_count > 0) {
+            html += chip('#device-body', 'Poll', 'failing (' + d.fail_count + ')', 'bad', d.last_poll_ok ? 'last good poll ' + d.last_poll_ok : 'never polled ok');
+        } else {
+            html += chip('#device-body', 'Poll', d.last_poll_ok ? 'ok' : 'waiting', d.last_poll_ok ? 'ok' : 'idle', d.last_poll_ok || '');
+        }
+        var down = adj.filter(function (a) { return a.state !== (a.proto === 'bgp' ? 'Established' : 'FULL'); });
+        var flap = adj.filter(function (a) { return a.flapping; });
+        html += chip('#sessions', 'Sessions', adj.length ? (down.length ? down.length + ' of ' + adj.length + ' down' : adj.length + ' up') : 'none',
+                     down.length ? 'bad' : (adj.length ? 'ok' : 'idle'),
+                     down.map(function (a) { return a.proto + ' ' + a.peer_ip + ' ' + a.state; }).join(', '));
+        if (flap.length) { html += chip('#sessions', 'Flapping', flap.length, 'running'); }
+        if (d.drift_status) {
+            var dt = { compliant: ['matches', 'ok'], drifted: ['drifted', 'bad'], render_error: ['template error', 'running'] }[d.drift_status] || [d.drift_status, 'idle'];
+            html += chip('#drift-section', 'Template', dt[0], dt[1]);
+        }
+        var errIfs = ifs.filter(function (i) { return (i.input_errors_24h || 0) + (i.crc_errors_24h || 0) > 0; });
+        html += chip('#interfaces', 'Interface errors 24h', errIfs.length ? errIfs.length + ' interface(s)' : 'none', errIfs.length ? 'bad' : 'ok',
+                     errIfs.map(function (i) { return i.name; }).join(', '));
+        var ifDown = ifs.filter(function (i) { return i.admin_status === 'up' && i.oper_status !== 'up'; });
+        if (ifDown.length) {
+            html += chip('#interfaces', 'Ports down', ifDown.length, 'bad', ifDown.map(function (i) { return i.name; }).join(', '));
+        }
+        document.getElementById('status-strip').innerHTML = html;
     });
 }
 

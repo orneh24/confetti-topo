@@ -82,4 +82,6 @@
     }
     if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', init); }
     else { init(); }
+    // For a table a page adds after load (the Find page draws its tables from an API answer).
+    window.tableSort = { setup: setup };
 })();

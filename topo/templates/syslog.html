@@ -14,6 +14,8 @@ th { position: sticky; top: 0; background: var(--bg-card); }
 .sev-null { color: var(--gray); }
 .mono { white-space: pre-wrap; word-break: break-word; }
 .count { color: var(--text-dim); font-size: 11px; margin-left: auto; }
+.setup-help { margin: 10px 0 4px; font-size: 12px; }
+.setup-help pre { background: var(--bg-code); padding: 8px 10px; margin: 6px 0; white-space: pre-wrap; user-select: all; }
 </style>
 {% endblock %}
 {% block content %}
@@ -42,6 +44,19 @@ th { position: sticky; top: 0; background: var(--bg-card); }
                 <tbody id="rows"></tbody>
             </table>
             <div class="empty" id="empty" style="display:none">no messages in this window</div>
+            <!-- Shown with the empty message: what to type on a router so it logs here. Text to copy; nothing is sent to a device. -->
+            <div class="setup-help hint" id="setup-help" style="display:none">
+                {% if syslog_enabled %}
+                No messages? A device sends its log here once it is told to. On Cisco IOS / IOS-XE, in configuration mode:
+                <pre id="setup-lines">logging host <span class="srv-addr">SERVER</span>{% if syslog_port != 514 %} transport udp port {{ syslog_port }}{% endif %}
+logging trap informational
+service timestamps log datetime msec</pre>
+                <span class="srv-addr">SERVER</span> is the address this page was opened on; use the one the device reaches this server by.
+                This server listens on UDP {{ syslog_port }}. Messages already stored but older than the window above are hidden by the time filter.
+                {% else %}
+                The syslog listener is switched off on this server (TOPO_SYSLOG_ENABLED=false), so nothing new arrives here.
+                {% endif %}
+            </div>
         </div>
     </div>
 </div>
@@ -49,6 +64,7 @@ th { position: sticky; top: 0; background: var(--bg-card); }
 {% block scripts %}
 {% raw %}
 <script>
+Array.prototype.forEach.call(document.querySelectorAll('.srv-addr'), function (el) { el.textContent = location.hostname; });
 var SEV_NAMES = {0: 'emerg', 1: 'alert', 2: 'crit', 3: 'err', 4: 'warn', 5: 'notice', 6: 'info', 7: 'debug'};
 
 function esc(s) {
@@ -108,6 +124,7 @@ function load() {
         }
         document.getElementById('rows').innerHTML = rows;
         document.getElementById('empty').style.display = list.length ? 'none' : 'block';
+        document.getElementById('setup-help').style.display = list.length ? 'none' : 'block';
         document.getElementById('row-count').textContent = list.length + ' messages';
     });
 }

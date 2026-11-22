@@ -43,6 +43,9 @@ Ideas only. Nothing here is built until the user picks it.
 - **SNMP LLDP-MIB** for devices without SSH.
 
 ## Operations
+- **Link load on the map:** colour or thicken an LLDP link by its port's traffic rate (the rates are stored since 2026-11-22, `interfaces.in_bps`).
+- **Traffic on PAN-OS and SNMP:** byte counters from `<show><counter><interface>` and IF-MIB `ifHCInOctets`; IOS only today.
+- **Restore on the VM checked for real:** `topo-db.sh restore` and the Settings restore were tested on Windows dev copies only.
 - **Authentication, follow-up:** `TOPO_AUTH_TOKEN` gives one shared token (no users, no TLS). Per-user accounts and HTTPS would be next.
 - **Packer template** for vCenter, once one exists in butler that has actually run (not ported in the merge).
 - **vCenter import**: the API route is ported, it has no page and was never tested against a real vCenter.

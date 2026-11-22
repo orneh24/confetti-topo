@@ -206,10 +206,40 @@ These came over on 2026-11-21 as the same code, `BUTLER_*` renamed to `TOPO_*`.
   the latest backup, line by line under the same parent; secret lines are not compared (constraint 32). `config_drift` (warning) and
   `config_compliant` events on a change between the two, none on the first evaluation. Saving a template re-evaluates its devices.
 - **IPAM** (`ipam.py`, `/ipam`, `/api/ipam/*`): discovery-first, built from `interfaces`; `POST /api/ipam/analyze` rebuilds
-  `ipam_findings` (overlapping prefixes, duplicate addresses).
+  `ipam_findings` (overlapping prefixes, duplicate addresses). `/api/ipam/prefixes` adds `used`, `size` and `free` (`ipam.usable_hosts`);
+  the page has one search box over both tables (an address also matches the prefix that holds it).
 - **Interface error history** (`interface_stats`, `interfaces.input_errors` / `crc_errors`): a sample when the counters change plus one an
   hour, pruned after `TOPO_STATS_RETENTION_DAYS` (7); a counter that goes down (reload) adds nothing to the 24 h growth
   (`ssh.growth`, constraint 33). Rising CRC errors are an `interface_errors` warning event.
+- **Interface traffic** (added 2026-11-22, constraint 35): `show interfaces` also gives the device's own 5-minute (or `load-interval`) rate,
+  stored as `interfaces.in_bps` / `out_bps`, and the byte counters, sampled into `interface_stats.in_bytes` / `out_bytes` by the same
+  on-change + hourly rule. `ssh.rates()` turns two samples into bits per second; a counter that went down gives no rate (a gap), never a
+  negative. The device page shows the rate per interface and a "graph" link opens an SVG chart (`/api/devices/<id>/interface-stats`,
+  6 h / 24 h / 7 days). IOS only (PAN-OS and SNMP leave them empty). No new device command.
+
+### Added 2026-11-22
+
+- **Find** (`app/find.py`, `/find`, `GET /api/find?q=`, the header search box on every page): an IP (the interface that holds it, the
+  longest matching route per device and VRF), a prefix, a MAC (`interfaces.mac` owner and the switch ports that learned it,
+  access port vs trunk) or text (devices, interfaces, LLDP names). Read-only, query time only, never an alias (constraint 37).
+- **Backups page** (`/backups`, `tools_routes.backups_page`, `GET /api/backups`, `GET /api/backups/search?q=&regex=1&invert=1`): the latest
+  running-config backup per device, and a search over all of them on the masked text (up to 20 lines per device, with the parent line).
+  Not under `/configs/` on purpose (that prefix is unauthenticated, constraint 28).
+- **Database backup and restore** (`app/backup.py`, Settings "Backup and restore", `scripts/topo-db.sh`, constraint 36): `GET /api/backup`
+  lists stored files, `POST /api/backup/download` (`{name?}`; none = a new backup now) sends one, `GET /api/backup/env` the `TOPO_*`
+  settings with secret-looking keys blanked, `POST /api/backup/restore` (multipart `file`) restores. Files live in `<db folder>/backups`
+  (0700, files 0600). A restore checks the upload (`quick_check`, a `devices` table), saves the current database as
+  `topo-pre-restore-<time>.db`, copies the upload in with SQLite's backup API (no restart), runs `init_db` and resets `running` rows.
+  `topo-db.sh backup|list|env|restore [-y]` does the same on the VM (restore stops and starts the service).
+- **Test login** (`POST /api/devices/<id>/credentials/test`, a button on the device page and per row in Settings' Device credentials): logs
+  in with the resolved credentials and runs the `version` task only; returns ok/error, what it found, the transport and the time. Stores
+  nothing (constraint 37); refused for `role='node'`.
+- **Map notes** (`map_notes`, `GET|PUT /api/topology/notes`): free text (2000 characters) on a node or a link (`edge:<edgeKey>`), edited in
+  the node and link cards, included in the JSON export. An empty note deletes it.
+- **Device page status strip**: ping, poll, sessions, flapping, template drift, interface errors 24 h and ports down, each a link to its box.
+- **Page help**: an empty Syslog page shows the IOS `logging host` lines for this server; Templates has "+ New from example"; the Alerts
+  form has one help line per field. The Devices page puts the table first (sortable, Columns chooser) and folds "Add or discover devices"
+  and "Unknown LLDP neighbors".
 - **Alerting** (`alerts.py`, `/alerts`, `/api/alert-rules*`, thread started by `serve.py`, `TOPO_ALERTS_ENABLED`): a rule matches events
   (kind, minimum severity, device, regex) or syslog (worst severity, device, regex) and sends a webhook (`webhook:<url>`) or mail
   (`mail:<address>`, `TOPO_SMTP_*`). Per rule cooldown (what was held back is counted in the next message), one retry, an old event is
@@ -222,8 +252,9 @@ These came over on 2026-11-21 as the same code, `BUTLER_*` renamed to `TOPO_*`.
   against a real vCenter; it has no page, only the API.
 
 Menu order (one list in `base.html`, `all_pages`): Dashboard, Topology, Devices, Conflicts, Recent changes, Syslog, Alerts, IPAM, Templates,
-Settings (last). On the **Classic** layout Alerts, IPAM and Templates are a second row labelled Tools (`.nav-row-tools`, shown only while no
-`data-layout` is set); the other layouts list them with the rest. The MS-DOS Go menu hotkeys are the positions in this list.
+Backups, Settings (last). On the **Classic** layout Alerts, IPAM, Templates and Backups are a second row labelled Tools (`.nav-row-tools`, shown only while no
+`data-layout` is set); the other layouts list them with the rest. The MS-DOS Go menu hotkeys are 1-9 for the first nine, 0 for the last
+(Settings) and the label's first letter for the rest.
 
 ### Topology history
 
@@ -390,10 +421,12 @@ topo/
     syslog_trigger.py  — a topology message asks for an early poll of its device (constraint 25)
     syslog_pull.py     — pulls syslog from the other Confetti servers on a timer; the SAME file in confetti-traffic (constraint 26)
     auth.py            — optional access token (TOPO_AUTH_TOKEN): /login, cookie or bearer; off by default
+    find.py            — the header search: IP, prefix, MAC or text over stored tables (constraint 37)
+    backup.py          — database backup, download, restore and the topo.env export (constraint 36)
     collectors/        — ssh.py, panos.py (XML API), snmp.py, vcenter.py, sweep.py, confetti.py, seedfile.py
     parsers/           — ios.py (regex only), panos.py (XML)
   templates/           — base.html (head, header/nav, theme + layout pickers, footer, Retro taskbar)
-                         + dashboard (widgets: system, services, activity, devices, events, sessions down, open conflicts, unknown LLDP neighbors, map changes; the Devices widget has click-to-sort headings and a Columns chooser, kept in `confetti-topo-dashboard-devices`), devices, device, changes (Recent changes: filter bar, summary tiles, sortable events table with type/change/before/after from `events.describe()`, banded per device, details pane, right-click menu), topology, syslog, conflicts, settings, ipam, alerts, templates_editor (CodeMirror in static/vendor/codemirror), each `{% extends "base.html" %}`
+                         + dashboard (widgets: system, services, activity, devices, events, sessions down, open conflicts, unknown LLDP neighbors, map changes; the Devices widget has click-to-sort headings and a Columns chooser, kept in `confetti-topo-dashboard-devices`; every widget has a Collapse / Expand button (fold.js), and dashgrid.js re-runs Auto sort when one is folded or opened), devices, device, changes (Recent changes: filter bar, summary tiles, sortable events table with type/change/before/after from `events.describe()`, banded per device, details pane, right-click menu), topology, syslog, conflicts, settings, ipam, alerts, templates_editor (CodeMirror in static/vendor/codemirror), find, backups, each `{% extends "base.html" %}`
   static/theme.css     — the ONE place colours live (Dark, Light, Monokai,
                          Terminal green, Confetti Night, Rainbow). Pages must not define their own :root colours
   static/layout.css    — Classic, Modern, Retro 95, MS-DOS (MS-DOS has two colour variants, DOS Blue and Neon Green: `data-variant="green"` on `:root`, a header dropdown shown only in MS-DOS, saved in `confetti-topo-dos-variant`; it also has a keyboard layer:
@@ -402,13 +435,17 @@ topo/
   static/confetti-links.js — the header shortcut buttons to the other Confetti projects (URLs from the Settings page, `GET /api/settings/links`); opens in a new tab; the SAME file as in confetti-traffic, copy it by hand and keep the two identical
   static/dashgrid.js   — the dashboard's movable/resizable widgets (`data-box` is the attribute name, kept): drag a `.section[data-box]` by its header (pointer events on `document`, not pointer capture: moving the node in the DOM drops the capture), drag the corner grip to resize (width snaps to grid columns, height free); a widget dropped on the middle band of another (outlined `dg-join`) shares that row with it and the widgets already on it, the columns split between them (`joinRow`, the first is pinned to column 1 via `state.row`); while dragging, a `.dg-ghost` clone follows the pointer and the original stays in the grid as a grid-pattern drop place (`.dg-drag`); a drop in a row's empty space (`emptySpace`: right of its last widget or left of its first) puts the widget beside that row's widgets; "Reset layout" button and, when the page passes `autoSort: true`, an "Auto sort layout" button (`autoSort()`: drops saved sizes, puts the non-full-width widgets in rows of similar height, widens a last short row to fill it, gives each widget at least the columns its content needs (`needColumns`, no sideways scroll), stacks widgets beside the tallest one when that leaves less empty space (it spans their grid rows: `state.rows`, `stackPlan`), lets up to three short `.wide` widgets share a row and stretches every widget to its row height (`state.fill`); best effort); saved per browser in `confetti-topo-dashboard-layout`. Injects its own CSS; the SAME file as in confetti-traffic, copy it by hand and keep the two identical
   static/ctxmenu.js    — right-click menus, loaded once by base.html (menu CSS at the end of layout.css); the SAME file as in confetti-traffic, copy it by hand and keep the two identical. A row carries data-ctx="<type>" and the page calls ctxMenu.register(type, fn(el, ev)); one document-level listener finds the row. Fill data-* attributes with ctxMenu.attr(), never esc(). A destructive item is `danger: true`, goes last and must ask confirm() (R29 fails a page that has one without). Used by every page: rows and a `page` menu for empty space (`document.documentElement.setAttribute('data-ctx', 'page')`; header/nav/footer keep the browser menu) on the dashboard, devices, device (one `row` menu per table body), conflicts, settings and changes pages, and the topology map (ctxMenu.open from vis's `oncontext`). Rows are looked up by id when the menu opens, because the tables are rebuilt on every refresh; a destructive item reuses the page's own confirming function. R29 checks it
+  static/fold.js       — Collapse / Expand for `.section[data-fold]` (`data-fold-default="closed"`) and every dashboard widget; the
+                         choice per page and box in `confetti-topo-folded`; `fold.open(id)`. topo only (not shared)
+  static/colpick.js    — the Columns chooser (`colPick.attach(table, btn, key, hidden)`), used by the Devices page
+                         (`confetti-topo-devices-columns`); the dashboard's Devices widget has its own chooser
   static/theme.js      — THEMES + LAYOUTS lists and the two header dropdowns (confetti-topo-theme,
                          confetti-topo-layout in localStorage), themeColor() for canvas colours,
                          confettiBlast(), Shuffle, the header health dot
   static/vendor/       — vis-network/ (vendored pinned version, no CDN), codemirror/ (the template editor)
   seed/devices.yaml.sample
   services/ — confetti-topo.initd, login-setup.sh, topo-backup.sh
-  scripts/  — topo-setup.sh, topo-update.sh, seed_mock_lab.py (fake lab in a new scratch DB),
+  scripts/  — topo-setup.sh, topo-update.sh, topo-db.sh (database backup/list/env/restore on the VM), seed_mock_lab.py (fake lab in a new scratch DB),
               capture_readme.py (re-records docs/img/ from that mock lab; run after any UI change)
 container/ — Dockerfile + compose
 dev/regress.py — the regression gate (see below); dev/samples/ = parser fixtures;
@@ -579,6 +616,15 @@ Keep the two in step; `confetti-interop-checker` reports drift.
 34. **A deployed database upgrades in place.** `db.init_db` runs on every start over the existing file: `CREATE TABLE IF NOT EXISTS` never adds a
     column to an existing table, so every new column needs its own `PRAGMA table_info` + `ALTER TABLE ADD COLUMN` (with a default if `NOT NULL`).
     Nothing may drop or rewrite rows, and a second run changes nothing. Checked by R51 (the oldest `db.py` in git builds the old schema).
+35. **Traffic rates come from the device's own counters, and a counter reset gives a gap, not a number.** The rate column is what IOS reports;
+    the graph's rates are computed from two byte samples (`ssh.rates`), and a decrease (reload, `clear counters`) gives `None`. Byte samples follow
+    constraint 33's on-change + hourly rule. No new device command. Checked by R52 (fixture `ios_interfaces_counters.txt`).
+36. **A database backup is only handed out on a POST, only by a stored file name, and a restore saves the current database first.** The backup
+    holds the credentials (plaintext, like `topo.db`): the folder is 0700, `backups/` is git-ignored, `path_of` accepts a bare `topo-*-<time>.db`
+    name only. A restore refuses a file that fails `quick_check` or has no `devices` table and changes nothing then; otherwise it saves
+    `topo-pre-restore-<time>.db` before copying in. The `topo.env` export blanks every key with PASS, SECRET, TOKEN, COMMUNITY or KEY. Checked by R53.
+37. **Find and Test login only read.** Neither writes a row, an alias, an event or a poll state; Find resolves an owner at query time only
+    (constraint 12), Test login runs the `version` task alone and never on `role='node'`. Checked by R54.
 
 ## Regression gate
 
@@ -591,7 +637,8 @@ container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
 the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti project's URL; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll; `R39` is the ruff `F` lint over `topo/` and `dev/` (not a constraint check); `R40` (constraint 24) the shared syslog parser and insert rule, `R40-sync` that `syslog_core.py`, `syslog_pull.py` and `syslog_cases.json` are byte-identical in both repos (`NOT RUN` if confetti-traffic is not next to this repo); `R41` (constraint 25) the syslog poll trigger; `R42` (constraint 26) the syslog pull; `R43`..`R50` (constraints 27..33) the checks that came with the former butler's features: template sandbox, the open `/configs/` pull, config backups,
-alert matching (`R46`) and delivery (`R47`), SNMP, drift and interface error history; `R51` (constraint 34) the in-place upgrade of an old database; the next constraint (35) takes `R52`. Output is one line per check
+alert matching (`R46`) and delivery (`R47`), SNMP, drift and interface error history; `R51` (constraint 34) the in-place upgrade of an old database; `R52`..`R54` (constraints 35..37) traffic rates, database backup/restore,
+and Find / Test login storing nothing; the next constraint (38) takes `R55`. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

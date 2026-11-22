@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Find{% endblock %}
+{% block content %}
+<div class="container stack">
+    <div class="section">
+        <div class="section-body">
+            <form action="/find" method="get" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                <input type="search" name="q" id="find-q" value="{{ q }}" placeholder="IP, MAC, prefix (10.1.0.0/16), hostname, interface description"
+                       aria-label="Find" style="min-width:340px">
+                <button type="submit" class="primary">Find</button>
+                <span class="hint" id="find-kind"></span>
+            </form>
+            <div class="hint" style="margin-top:8px">Where is it? An IP shows the interface that holds it, who shares its subnet,
+                each device's route to it, the LLDP neighbor and the BGP/OSPF session that use it. A MAC shows the switch port that
+                learned it. Built from what the poller already read; nothing is asked of a device.</div>
+        </div>
+    </div>
+    <div id="results"></div>
+    <div class="empty" id="find-empty" style="display:none">nothing found</div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s === null || s === undefined ? '' : String(s);
+    return d.innerHTML;
+}
+
+var LABELS = { device: 'Device', interface: 'Interface', address: 'Address', status: 'Status', description: 'Description',
+    role: 'Role', subnet: 'Subnet', vrf: 'VRF', prefix: 'Prefix', protocol: 'Protocol', next_hop: 'Next hop',
+    local_port: 'Local port', neighbor: 'Neighbor', remote_port: 'Remote port', proto: 'Proto', state: 'State',
+    remote_as: 'Remote AS', vlan: 'VLAN', port: 'Port', where: 'Where', last_seen: 'Last seen', mgmt_ip: 'Mgmt IP',
+    site: 'Site', model: 'Model' };
+var KINDS = { ip: 'an IP address', prefix: 'a prefix', mac: 'a MAC address', text: 'text' };
+
+function cell(col, row) {
+    var v = row[col];
+    if (col === 'device' && row.device_id) { return '<a href="/devices/' + row.device_id + '">' + esc(v) + '</a>'; }
+    if (col === 'status' || col === 'state') {
+        var good = v === 'up' || v === 'Established' || v === 'FULL';
+        return v ? '<span class="pill ' + (good ? 'ok' : 'bad') + '">' + esc(v) + '</span>' : '';
+    }
+    if (col === 'last_seen' && v) { return esc(new Date(v).toLocaleString()); }
+    return esc(v);
+}
+
+function run(q) {
+    if (!q) { return; }
+    document.getElementById('find-kind').textContent = 'searching...';
+    fetch('/api/find?q=' + encodeURIComponent(q)).then(function (r) { return r.json(); }).then(function (res) {
+        document.getElementById('find-kind').textContent = res.error ? res.error : 'read as ' + (KINDS[res.kind] || res.kind);
+        var html = '';
+        (res.sections || []).forEach(function (s) {
+            html += '<div class="section" style="margin-bottom:12px"><div class="section-header"><span>' + esc(s.title) +
+                ' (' + (s.rows.length + s.more) + ')</span></div><div class="section-body">' +
+                (s.hint ? '<div class="hint" style="margin-bottom:6px">' + esc(s.hint) + '</div>' : '') +
+                '<table data-sortable class="striped compact"><thead><tr>' +
+                s.columns.map(function (c) { return '<th>' + esc(LABELS[c] || c) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+                s.rows.map(function (r) { return '<tr>' + s.columns.map(function (c) { return '<td>' + cell(c, r) + '</td>'; }).join('') + '</tr>'; }).join('') +
+                '</tbody></table>' + (s.more ? '<div class="hint">and ' + s.more + ' more</div>' : '') + '</div></div>';
+        });
+        var box = document.getElementById('results');
+        box.innerHTML = html;
+        Array.prototype.forEach.call(box.querySelectorAll('table[data-sortable]'), function (t) { tableSort.setup(t); });
+        document.getElementById('find-empty').style.display = html ? 'none' : 'block';
+    });
+}
+
+run(document.getElementById('find-q').value.trim());
+</script>
+{% endblock %}

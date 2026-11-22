@@ -10,9 +10,34 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 {% endblock %}
 {% block content %}
 <div class="container stack">
-    <div class="section">
-        <div class="section-header"><span>Add device</span></div>
+    <div class="section" data-fold="devices">
+        <div class="section-header"><span>Devices <span id="dev-count"></span></span>
+            <span class="hdr-actions"><button type="button" class="btn-small" id="dev-cols-btn" title="Choose the columns">Columns</button></span></div>
         <div class="section-body">
+            <div class="bulk-row">
+                <button type="button" id="poll-all-btn" class="primary" onclick="pollAll()">Poll all now</button>
+                <span class="msg" id="poll-msg"></span>
+                <input type="search" id="dev-filter" placeholder="Filter: name, IP, site, role, vendor" aria-label="Filter devices"
+                       oninput="renderDevices()" style="margin-left:auto;min-width:240px">
+                <span class="msg" id="dev-filter-count"></span>
+            </div>
+            <table data-sortable class="striped compact" id="dev-table">
+                <thead>
+                    <tr>
+                        <th>Hostname</th><th>Poll</th><th>Role</th><th>Mgmt IP</th><th>Site</th>
+                        <th>Key</th><th>Ping</th><th>Template</th><th>Last seen</th>
+                        <th>Vendor</th><th>Model</th><th>OS version</th><th>Platform</th><th>Serial</th><th></th>
+                    </tr>
+                </thead>
+                <tbody id="device-rows"></tbody>
+            </table>
+            <div class="empty" id="device-empty" style="display:none">No devices yet — add one under "Add or discover devices" below.</div>
+        </div>
+    </div>
+    <div class="section" data-fold="add" data-fold-default="closed" id="add-section">
+        <div class="section-header"><span>Add or discover devices</span></div>
+        <div class="section-body">
+            <div class="hint">Add one device by hand</div>
             <form class="inline" id="add-form">
                 <input type="text" name="hostname" placeholder="hostname">
                 <input type="text" name="mgmt_ip" placeholder="mgmt ip">
@@ -21,11 +46,7 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
                 <button type="submit">Add</button>
             </form>
             <div class="msg" id="add-msg"></div>
-        </div>
-    </div>
-    <div class="section">
-        <div class="section-header"><span>Discover</span></div>
-        <div class="section-body">
+            <div class="hint" style="margin-top:12px">Or discover several</div>
             <form class="inline" id="sweep-form" style="margin-bottom:8px">
                 <input type="text" name="cidr" placeholder="CIDR, e.g. 10.0.0.0/24" style="width:220px">
                 <button type="submit">Sweep (SSH port scan)</button>
@@ -41,30 +62,8 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
             <div class="msg" id="discover-msg"></div>
         </div>
     </div>
-    <div class="section">
-        <div class="section-header"><span>Devices</span></div>
-        <div class="section-body">
-            <div class="bulk-row">
-                <button type="button" id="poll-all-btn" class="primary" onclick="pollAll()">Poll all now</button>
-                <span class="msg" id="poll-msg"></span>
-                <input type="search" id="dev-filter" placeholder="Filter: name, IP, site, role, vendor" aria-label="Filter devices"
-                       oninput="renderDevices()" style="margin-left:auto;min-width:240px">
-                <span class="msg" id="dev-filter-count"></span>
-            </div>
-            <table data-sortable class="striped compact">
-                <thead>
-                    <tr>
-                        <th>Hostname</th><th>Poll</th><th>Role</th><th>Mgmt IP</th><th>Site</th>
-                        <th>Key</th><th>Ping</th><th>Template</th><th>Last seen</th><th></th>
-                    </tr>
-                </thead>
-                <tbody id="device-rows"></tbody>
-            </table>
-            <div class="empty" id="device-empty" style="display:none">No devices yet — add one above, or POST /api/discover/seedfile.</div>
-        </div>
-    </div>
-    <div class="section" id="lldp-unknown-section" style="display:none">
-        <div class="section-header"><span>Unknown LLDP neighbors</span></div>
+    <div class="section" data-fold="lldp-unknown" data-fold-default="closed" id="lldp-unknown-section" style="display:none">
+        <div class="section-header"><span>Unknown LLDP neighbors <span id="unk-count"></span></span></div>
         <div class="section-body">
             <div class="hint">Neighbors that advertise a management IP no device owns. Adding one creates an inventory entry with polling off; enable it on its page once credentials are set.</div>
             <table data-sortable class="striped">
@@ -76,7 +75,12 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="/static/colpick.js"></script>
 <script>
+// Columns chooser: Key and the five device facts after Last seen start hidden.
+colPick.attach(document.getElementById('dev-table'), document.getElementById('dev-cols-btn'), 'confetti-topo-devices-columns',
+               [5, 9, 10, 11, 12, 13]);
+
 function esc(s) {
     var d = document.createElement('div');
     d.textContent = s === null || s === undefined ? '' : String(s);
@@ -124,6 +128,7 @@ function loadUnknownNeighbors() {
         }
         document.getElementById('lldp-unknown-rows').innerHTML = rows;
         document.getElementById('lldp-unknown-section').style.display = list.length ? 'block' : 'none';
+        document.getElementById('unk-count').textContent = list.length ? '(' + list.length + ')' : '';
     });
 }
 
@@ -157,6 +162,7 @@ function renderDevices(fresh) {
     var q = document.getElementById('dev-filter').value.trim().toLowerCase();
     var list = q ? allDevices.filter(function (d) { return deviceMatches(d, q); }) : allDevices;
     document.getElementById('dev-filter-count').textContent = q ? list.length + ' of ' + allDevices.length : '';
+    document.getElementById('dev-count').textContent = allDevices.length ? '(' + allDevices.length + ')' : '';
     var rows = '';
     for (var i = 0; i < list.length; i++) {
         var d = list[i];
@@ -172,6 +178,8 @@ function renderDevices(fresh) {
             '<td>' + pingCell(d.reachable) + '</td>' +
             '<td>' + driftCell(d) + '</td>' +
             '<td data-sort="' + attr(d.last_seen || '') + '">' + timeAgo(d.last_seen) + '</td>' +
+            '<td>' + esc(d.vendor || '') + '</td><td>' + esc(d.model || '') + '</td><td>' + esc(d.os_version || '') + '</td>' +
+            '<td>' + esc(d.platform || '') + '</td><td>' + esc(d.serial || '') + '</td>' +
             '<td>' + (d.role === 'node' || !d.enabled ? '' :
                 '<button onclick="pollDevice(' + d.id + ', this)">Poll now</button> ') +
                 '<button onclick="removeDevice(' + d.id + ')">delete</button></td>' +
@@ -369,6 +377,10 @@ ctxMenu.register('page', function (el, ev) {
     if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
     return { title: 'Devices', items: [
         { label: 'Refresh', action: function () { loadDevices(); loadUnknownNeighbors(); } },
+        { label: 'Add or discover devices', action: function () {
+            fold.open('add');
+            document.getElementById('add-section').scrollIntoView({ block: 'start' });
+        } },
         { label: 'Poll all devices', action: pollAll },
         { label: 'Clear filter', action: function () { document.getElementById('dev-filter').value = ''; renderDevices(); },
           disabled: document.getElementById('dev-filter').value === '' },

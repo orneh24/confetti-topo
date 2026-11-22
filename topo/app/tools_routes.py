@@ -16,6 +16,7 @@ from . import db
 from . import drift
 from . import ipam
 from . import rendering
+from .collectors import ssh as ssh_collector
 from .collectors import vcenter as vcenter_collector
 
 bp = Blueprint("tools", __name__)
@@ -40,6 +41,12 @@ def alerts_page():
     return render_template("alerts.html")
 
 
+@bp.route("/backups")
+def backups_page():
+    # Not under /configs/: that prefix is the unauthenticated pull endpoint (constraint 28).
+    return render_template("backups.html")
+
+
 # ---------------------------------------------------------------------------
 # Drift, interface error history, running-config backups
 # ---------------------------------------------------------------------------
@@ -55,18 +62,89 @@ def api_device_drift(device_id):
 
 @bp.route("/api/devices/<int:device_id>/interface-stats", methods=["GET"])
 def api_interface_stats(device_id):
-    """Error-counter samples for one interface: ?name=GigabitEthernet1&hours=24."""
+    """Counter samples for one interface: ?name=GigabitEthernet1&hours=24. Each sample has the error counters and the
+    byte counters; in_bps / out_bps is the rate since the sample before (None for the first, and after a counter reset)."""
     name = request.args.get("name", "")
     try:
         hours = max(1, min(int(request.args.get("hours", "24")), 24 * config.STATS_RETENTION_DAYS))
     except ValueError:
         hours = 24
     rows = db.get_db().execute(
-        """SELECT at, input_errors, crc_errors FROM interface_stats
+        """SELECT at, input_errors, crc_errors, in_bytes, out_bytes FROM interface_stats
            WHERE device_id = ? AND name = ? AND at >= datetime('now', ? || ' hours') ORDER BY id""",
         (device_id, name, "-{:d}".format(hours))).fetchall()
-    return jsonify([{"at": db.iso(r["at"]), "input_errors": r["input_errors"],
-                     "crc_errors": r["crc_errors"]} for r in rows])
+    rate_at = {at: (i, o) for at, i, o in ssh_collector.rates(rows)}
+    return jsonify([{"at": db.iso(r["at"]), "input_errors": r["input_errors"], "crc_errors": r["crc_errors"],
+                     "in_bytes": r["in_bytes"], "out_bytes": r["out_bytes"],
+                     "in_bps": rate_at.get(r["at"], (None, None))[0], "out_bps": rate_at.get(r["at"], (None, None))[1]}
+                    for r in rows])
+
+
+# ---------------------------------------------------------------------------
+# Config backups across devices (the Backups page)
+# ---------------------------------------------------------------------------
+
+@bp.route("/api/backups", methods=["GET"])
+def api_backups():
+    """The latest running-config backup of every polled device: when, how big, how many versions, and its template
+    drift. A device with no backup yet is listed with captured_at null."""
+    conn = db.get_db()
+    rows = conn.execute(
+        """SELECT d.id AS device_id, d.hostname, d.platform, d.role, d.template_name, d.drift_status,
+                  v.id AS version_id, v.captured_at, length(v.body) AS size,
+                  (SELECT COUNT(*) FROM config_versions c WHERE c.device_id = d.id) AS versions
+           FROM devices d
+           LEFT JOIN config_versions v ON v.id = (SELECT MAX(id) FROM config_versions WHERE device_id = d.id)
+           WHERE d.role <> 'node'
+           ORDER BY d.hostname COLLATE NOCASE"""
+    ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["captured_at"] = db.iso(d["captured_at"]) if d["captured_at"] else None
+        out.append(d)
+    return jsonify(out)
+
+
+SEARCH_MAX_LINES = 20
+
+
+@bp.route("/api/backups/search", methods=["GET"])
+def api_backups_search():
+    """Search the latest backup of every device: ?q=text (or a regular expression with &regex=1), &invert=1 lists the
+    devices whose latest config has NO matching line. The text searched is the masked one (secrets are never
+    matched or returned). Each match carries its line number and its parent line (the "interface ..." above it)."""
+    q = (request.args.get("q") or "")[:200]
+    if not q.strip():
+        return jsonify({"error": "q is required"}), 400
+    if request.args.get("regex") == "1":
+        try:
+            pat = re.compile(q, re.I)
+        except re.error as exc:
+            return jsonify({"error": "not a valid regular expression: {}".format(exc)}), 400
+    else:
+        pat = re.compile(re.escape(q), re.I)
+    invert = request.args.get("invert") == "1"
+    conn = db.get_db()
+    rows = conn.execute(
+        """SELECT d.id AS device_id, d.hostname, v.captured_at, v.body
+           FROM devices d JOIN config_versions v ON v.id = (SELECT MAX(id) FROM config_versions WHERE device_id = d.id)
+           ORDER BY d.hostname COLLATE NOCASE"""
+    ).fetchall()
+    out = []
+    for r in rows:
+        hits, parent, count = [], "", 0
+        for n, line in enumerate(rendering.redact_secrets(r["body"]).splitlines(), 1):
+            if line and not line[0].isspace():
+                parent = line
+            if pat.search(line):
+                count += 1
+                if len(hits) < SEARCH_MAX_LINES:
+                    hits.append({"line": n, "text": line, "parent": parent if line[:1].isspace() else ""})
+        if bool(count) != invert:
+            out.append({"device_id": r["device_id"], "hostname": r["hostname"], "captured_at": db.iso(r["captured_at"]),
+                        "count": count, "lines": hits})
+    return jsonify({"query": q, "invert": invert, "devices": out, "searched": len(rows)})
 
 
 def _config_body(row, raw):
@@ -146,16 +224,24 @@ def api_ipam_addresses():
 
 @bp.route("/api/ipam/prefixes", methods=["GET"])
 def api_ipam_prefixes():
-    """Distinct networks in use, with how many interfaces/devices sit on each."""
+    """Distinct networks in use, with how many interfaces/devices sit on each, and how many host addresses are
+    left: size (usable hosts), used (distinct interface addresses seen in it), free = size - used."""
     conn = db.get_db()
     rows = conn.execute(
-        """SELECT i.network, COUNT(*) AS interfaces, COUNT(DISTINCT i.device_id) AS devices
+        """SELECT i.network, COUNT(*) AS interfaces, COUNT(DISTINCT i.device_id) AS devices,
+                  COUNT(DISTINCT i.ip) AS used
            FROM interfaces i
            WHERE i.network IS NOT NULL
            GROUP BY i.network
            ORDER BY i.network"""
     ).fetchall()
-    return jsonify([dict(r) for r in rows])
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["size"] = ipam.usable_hosts(d["network"])
+        d["free"] = None if d["size"] is None else max(0, d["size"] - d["used"])
+        out.append(d)
+    return jsonify(out)
 
 
 @bp.route("/api/ipam/findings", methods=["GET"])

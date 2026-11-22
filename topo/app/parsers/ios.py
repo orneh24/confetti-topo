@@ -61,6 +61,12 @@ _DUPLEX_SPEED_RE = re.compile(
     r"(?P<duplex>Full|Half|Auto)[- ]?[Dd]uplex,\s*(?P<speed>\d+\s*[MGmg]b(?:ps|/s))"
 )
 _ERRORS_RE = re.compile(r"(?P<in_errors>\d+) input errors,\s*(?P<crc>\d+) CRC")
+# Byte counters and the device's own load average, checked on real IOS-XE 17.3 and 15.x output:
+#   "  5 minute input rate 2000 bits/sec, 1 packets/sec"  ("30 second ..." with a shorter load-interval)
+#   "     1315394 packets input, 153224117 bytes, 0 no buffer"
+#   "     567415 packets output, 112270772 bytes, 0 underruns"
+_RATE_RE = re.compile(r"\d+ (?:minute|second)s? (?P<dir>input|output) rate (?P<bps>\d+) bits/sec")
+_BYTES_RE = re.compile(r"\d+ packets (?P<dir>input|output), (?P<bytes>\d+) bytes")
 
 
 def parse_interfaces(text):
@@ -68,7 +74,8 @@ def parse_interfaces(text):
 
     Each entry: name, admin_status (up/down), oper_status (up/down),
     description, ip, prefix_len, network, speed, duplex, mtu, input_errors,
-    crc_errors. A field this device's platform doesn't emit (no
+    crc_errors, in_bytes, out_bytes (counters since the last clear or reload) and in_bps, out_bps (the
+    device's own load-interval average). A field this device's platform doesn't emit (no
     'Description:' line, no L3 address on a trunk parent) stays None/""
     rather than raising — see parse_version's reasoning.
     """
@@ -93,6 +100,10 @@ def parse_interfaces(text):
             "input_errors": None,
             "crc_errors": None,
             "mac": None,
+            "in_bytes": None,
+            "out_bytes": None,
+            "in_bps": None,
+            "out_bps": None,
         }
 
         hw = _HW_MAC_RE.search(chunk)
@@ -122,6 +133,11 @@ def parse_interfaces(text):
         if err:
             entry["input_errors"] = int(err.group("in_errors"))
             entry["crc_errors"] = int(err.group("crc"))
+
+        for rate in _RATE_RE.finditer(chunk):
+            entry["in_bps" if rate.group("dir") == "input" else "out_bps"] = int(rate.group("bps"))
+        for cnt in _BYTES_RE.finditer(chunk):
+            entry["in_bytes" if cnt.group("dir") == "input" else "out_bytes"] = int(cnt.group("bytes"))
 
         out.append(entry)
     return out

@@ -128,6 +128,31 @@ body.full-height .page { flex: 1 1 auto; min-height: 0; display: flex; flex-dire
     gap: 8px;
 }
 .section-header a { font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+/* Collapse / Expand (static/fold.js): a folded box shows its title bar only. */
+.section.collapsed > :not(.section-header) { display: none !important; }
+.section.collapsed > .section-header { border-bottom: none; }
+.hdr-actions { display: flex; gap: 6px; align-items: center; margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
+/* Label + field forms (device Edit, Settings, Alerts). */
+.form-grid { display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px; align-items: center; font-size: 12px; margin-bottom: 10px; }
+.form-grid label { color: var(--text-dim); }
+.form-grid input, .form-grid select { width: 100%; }
+.form-grid input[type=checkbox] { width: auto; justify-self: start; }
+/* A form of fields with a line of help each, two to a row on a wide screen (Alerts). */
+.field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 24px; margin-bottom: 12px; font-size: 12px; }
+.field-grid .field label { display: block; color: var(--text-dim); margin-bottom: 3px; }
+.field-grid .field input, .field-grid .field select { width: 100%; }
+.field-grid .field .hint { margin-top: 3px; }
+@media (max-width: 800px) { .field-grid { grid-template-columns: minmax(0, 1fr); } }
+/* Column chooser (dashboard Devices widget, static/colpick.js). Fixed so the widget's overflow does not clip it. */
+.col-menu { position: fixed; z-index: 500; min-width: 170px; max-height: 70vh; overflow: auto; padding: 6px 8px;
+    background: var(--bg-card); border: 1px solid var(--border); box-shadow: 0 6px 18px rgba(0,0,0,.35); font-size: 12px; }
+.col-menu[hidden] { display: none; }
+.col-menu label { display: flex; align-items: center; gap: 6px; padding: 2px 0; cursor: pointer; white-space: nowrap; }
+.col-menu label.fixed { opacity: .6; cursor: default; }
+.col-menu .col-reset { margin-top: 6px; width: 100%; }
+/* The header's Find box (base.html, the /find page). */
+.hdr-search input { width: 190px; padding: 3px 6px; font-size: 12px; }
+@media (max-width: 800px) { .hdr-search input { width: 120px; } }
 .section-body { padding: 8px 10px; overflow: auto; }
 .page-footer { flex: 0 0 auto; text-align: center; padding: 8px 0 12px; }
 .page-footer .btn-small { margin: 0 3px; }

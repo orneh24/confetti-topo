@@ -18,29 +18,39 @@
         <div class="section-header"><span>Add a rule</span></div>
         <div class="section-body">
             <form id="rule-form" onsubmit="addRule(); return false;" autocomplete="off">
-                <div class="form-grid">
-                    <label for="r-name">name</label><input id="r-name" required>
-                    <label for="r-source">source</label>
-                    <select id="r-source" onchange="sourceChanged()">
-                        <option value="event">event (poller, ping, drift, ...)</option>
-                        <option value="syslog">syslog message</option>
-                    </select>
-                    <label for="r-kinds" class="ev">event kinds</label>
-                    <input id="r-kinds" class="ev" list="kind-list" placeholder="empty = all, or comma list">
-                    <label for="r-minsev" class="ev">minimum severity</label>
-                    <select id="r-minsev" class="ev"><option>info</option><option selected>warning</option><option>critical</option></select>
-                    <label for="r-syssev" class="sl">syslog severity</label>
-                    <select id="r-syssev" class="sl">
-                        <option value="">any</option><option value="2">critical or worse (2)</option>
-                        <option value="3" selected>error or worse (3)</option><option value="4">warning or worse (4)</option>
-                        <option value="6">info or worse (6)</option>
-                    </select>
-                    <label for="r-pattern">text matches (regex)</label><input id="r-pattern" placeholder="optional, e.g. BGP-5-ADJCHANGE">
-                    <label for="r-device">device contains</label><input id="r-device" placeholder="optional, part of the hostname">
-                    <label for="r-target-type">send to</label>
-                    <select id="r-target-type"><option value="webhook">webhook (URL)</option><option value="mail">e-mail (needs TOPO_SMTP_HOST)</option></select>
-                    <label for="r-target">URL or address</label><input id="r-target" required placeholder="https://ntfy.example/topic  or  name@example.com">
-                    <label for="r-cooldown">cooldown (s)</label><input id="r-cooldown" type="number" min="0" max="86400" value="300">
+                <div class="field-grid">
+                    <div class="field"><label for="r-name">Name</label><input id="r-name" required>
+                        <div class="hint">Shown in the list and in the message.</div></div>
+                    <div class="field"><label for="r-source">Source</label>
+                        <select id="r-source" onchange="sourceChanged()">
+                            <option value="event">event (poller, ping, drift, ...)</option>
+                            <option value="syslog">syslog message</option>
+                        </select>
+                        <div class="hint">Events are the changes on Recent changes; syslog is what devices send to this server.</div></div>
+                    <div class="field ev"><label for="r-kinds">Event kinds</label>
+                        <input id="r-kinds" list="kind-list" placeholder="empty = all, or comma list">
+                        <div class="hint">For example interface_down, config_drift. Empty matches every kind.</div></div>
+                    <div class="field ev"><label for="r-minsev">Minimum severity</label>
+                        <select id="r-minsev"><option>info</option><option selected>warning</option><option>critical</option></select>
+                        <div class="hint">Events at this severity or worse.</div></div>
+                    <div class="field sl"><label for="r-syssev">Syslog severity</label>
+                        <select id="r-syssev">
+                            <option value="">any</option><option value="2">critical or worse (2)</option>
+                            <option value="3" selected>error or worse (3)</option><option value="4">warning or worse (4)</option>
+                            <option value="6">info or worse (6)</option>
+                        </select>
+                        <div class="hint">Lower numbers are worse (0 = emergency).</div></div>
+                    <div class="field"><label for="r-pattern">Text matches (regex)</label><input id="r-pattern" placeholder="optional, e.g. BGP-5-ADJCHANGE">
+                        <div class="hint">A regular expression searched in the message. Empty matches all.</div></div>
+                    <div class="field"><label for="r-device">Device contains</label><input id="r-device" placeholder="optional, part of the hostname">
+                        <div class="hint">Only devices whose hostname contains this text.</div></div>
+                    <div class="field"><label for="r-target-type">Send to</label>
+                        <select id="r-target-type"><option value="webhook">webhook (URL)</option><option value="mail">e-mail (needs TOPO_SMTP_HOST)</option></select>
+                        <div class="hint">A webhook gets a JSON POST; e-mail goes through the SMTP server set in topo.env.</div></div>
+                    <div class="field"><label for="r-target">URL or address</label><input id="r-target" required placeholder="https://ntfy.example/topic  or  name@example.com">
+                        <div class="hint">Not shown again after saving: a webhook URL often holds a token.</div></div>
+                    <div class="field"><label for="r-cooldown">Cooldown (s)</label><input id="r-cooldown" type="number" min="0" max="86400" value="300">
+                        <div class="hint">At most one message per device in this time; the rest are counted in the next one.</div></div>
                 </div>
                 <datalist id="kind-list">
                     <option value="interface_down"><option value="interface_up"><option value="interface_errors">

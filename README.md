@@ -41,11 +41,16 @@ Classic layout, labelled Tools). The look follows the hub UI of the sibling proj
   router pulls it with `copy http://<server>/configs/<key>.cfg running-config` (the server never pushes). Every
   changed running-config is kept as a version (secrets masked in the UI and API) with a diff, and the Template drift
   box and the Devices list show whether the router still contains its template.
-- **IPAM.** Every interface address in one list, with overlapping prefixes and duplicate addresses flagged.
+- **IPAM.** Every interface address in one list, with overlapping prefixes and duplicate addresses flagged, used and free
+  addresses per prefix, and one search box.
+- **Find.** The search box in the header finds a device, an IP (which interface holds it, and the route each router would use), a
+  prefix, or a MAC (which device owns it, and the switch port that learned it).
+- **Config backup search.** The Backups page lists the latest running-config of every device and searches all of them at once
+  ("which routers have `ip ssh version 2`?", or the ones without it), secrets masked.
 - **Alerting.** Rules turn events (a BGP peer down, config drift, a device not answering ping) or syslog messages into a
   webhook or an e-mail, with a cooldown per rule.
 - **Polling.** Every few minutes it logs in once per router and reads version, interfaces (with error counters and their
-  24-hour growth), LLDP, BGP, OSPF, routes and the running-config
+  24-hour growth, and traffic in / out with a graph), LLDP, BGP, OSPF, routes and the running-config
   (switches also VLANs, trunks, spanning tree and the MAC table). A device can also be polled over SNMP v1/v2c
   (platform `snmp`: version and interfaces only). Anything a router stops reporting drops out. A failed poll (timeout, bad login) removes nothing.
   Platforms: Cisco IOS / IOS-XE (SSH) and Palo Alto PAN-OS (XML API, set the device's platform to
@@ -56,7 +61,8 @@ Classic layout, labelled Tools). The look follows the hub UI of the sibling proj
   on the graph.
 - **Events.** Neighbor, peer and interface changes, OS changes and devices going unreachable are listed on the
   dashboard, on each device page and on the Recent changes page (filters, sortable, Before and After states coloured green, yellow or red). Alerting on them is under Alerts.
-- **Device page.** Interfaces, LLDP neighbors, BGP/OSPF sessions and the routing table (filter, "export CSV"). On a switch also VLANs, trunks, the spanning-tree summary and the learned MAC addresses (filter; a MAC that belongs to a known device names it).
+- **Device page.** A status strip at the top (ping, poll, sessions, drift, errors, ports down), a Test login button, interfaces, LLDP neighbors, BGP/OSPF sessions and the routing table (filter, "export CSV"). On a switch also VLANs, trunks, the spanning-tree summary and the learned MAC addresses (filter; a MAC that belongs to a known device names it).
+- **Map notes.** A note on any node or link (circuit ID, provider, ticket), shown in its card and in the JSON export.
 - **Metrics.** `GET /metrics` serves Prometheus text.
 - **Other Confetti projects.** Type the Traffic URL on the Settings page and a small button for it appears at the right of the top menu (opens in a new tab).
 - **Dashboard.** Widgets: System, Services, Activity, Devices, Events, Sessions down, Open conflicts, Unknown LLDP neighbors (with an add button) and Map changes (each row opens that snapshot on the map). Drag a widget by its title to move it (a copy follows the pointer and a grid outline shows where it will land; drop it on the middle of another widget to put them side by side, sharing the row, or into the empty space at the end of a row), drag its corner to resize it; the arrangement is kept in the browser, "Reset layout" undoes it and "Auto sort layout" rearranges the widgets to leave as little empty space as it can. The Devices widget shows IP, vendor, model, OS version, ping and poll state; click a heading to sort and use Columns to add or remove columns (also role, site, platform, serial).
@@ -105,7 +111,9 @@ same pattern as confetti-traffic's hub.
 - **Update a running VM:** `topo-update.sh` (no arguments: downloads the latest build from GitHub; a `<topo-dir|tarball>` argument updates from that instead and asks first without `-y`) installs the new code and packages
   (`build-topo.sh --update`), checks it, backs up the database,
   swaps it in, and rolls back by itself if it does not come up. `--rollback` goes back one version.
-- **Backups:** nightly (7 kept) to `/var/lib/confetti-topo/backups`.
+- **Backups:** nightly (7 kept) to `/var/lib/confetti-topo/backups`. The Settings page (Backup and restore) downloads a backup and the
+  settings (without secrets) and restores an uploaded one; on the VM `topo-db.sh backup|list|env|restore` does the same, for example to move
+  to a new VM. A restore saves the current database first.
 - **Container:** `container/` has a Dockerfile and compose file for trying it without ESXi:
   `docker compose -f container/docker-compose.yml up --build`. For development,
   `container/docker-compose.dev.yml` mounts `topo/` live: `--profile mock` (fake lab, port 8080) or
@@ -113,7 +121,7 @@ same pattern as confetti-traffic's hub.
 
 ## Security notes
 
-- Credentials are stored in plain text in `topo.db`. Keep the file private; it is gitignored.
+- Credentials are stored in plain text in `topo.db`, and so in every backup of it. Keep the files private; both are gitignored.
 - The web UI and API have no login unless `TOPO_AUTH_TOKEN` is set. Run it on a lab network only. A sweep range or a confetti-traffic URL
   given to the API makes the server connect there.
 

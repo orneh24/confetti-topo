@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block title %}Backups{% endblock %}
+{% block head %}
+<style>
+.search-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.search-row input[type=search] { min-width: 320px; }
+.hits { margin: 0 0 10px; }
+.hits h3 { font-size: 12px; margin: 10px 0 4px; }
+.hits pre { background: var(--bg-code); padding: 6px 8px; margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-word; }
+.hits .ln { color: var(--text-dim); }
+.hits .par { color: var(--cyan); }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container stack">
+    <div class="section" data-fold="search">
+        <div class="section-header"><span>Search the latest configs</span></div>
+        <div class="section-body">
+            <form class="search-row" id="search-form" onsubmit="search(); return false;">
+                <input type="search" id="b-q" placeholder="e.g. ip ssh version 2" aria-label="Text to find in the latest configs">
+                <label><input type="checkbox" id="b-regex"> regular expression</label>
+                <label><input type="checkbox" id="b-invert"> devices WITHOUT a match</label>
+                <button type="submit" class="primary">Search</button>
+                <span class="msg" id="b-msg"></span>
+            </form>
+            <div class="hint">Searches the newest running-config backup of each device, with secrets masked (a secret is never matched).
+                A line inside a block shows the block's first line in colour.</div>
+            <div id="hits" class="hits"></div>
+        </div>
+    </div>
+    <div class="section" data-fold="latest">
+        <div class="section-header"><span>Latest backup per device <span id="b-count"></span></span></div>
+        <div class="section-body">
+            <div class="hint">Backups are taken by the poller (<code>show running-config</code>, IOS only) and stored only when the config changed.
+                Open a device for its history and diffs.</div>
+            <table data-sortable class="striped compact">
+                <thead><tr><th>Device</th><th>Platform</th><th>Latest backup</th><th>Age</th><th>Size</th><th>Versions</th><th>Template</th></tr></thead>
+                <tbody id="b-rows"></tbody>
+            </table>
+            <div class="empty" id="b-empty" style="display:none">no polled devices yet</div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s === null || s === undefined ? '' : String(s);
+    return d.innerHTML;
+}
+
+function age(iso) {
+    if (!iso) { return ''; }
+    var s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 3600) { return Math.max(0, Math.floor(s / 60)) + 'm'; }
+    if (s < 86400) { return Math.floor(s / 3600) + 'h'; }
+    return Math.floor(s / 86400) + 'd';
+}
+
+function driftPill(d) {
+    var t = d.template_name ? esc(d.template_name) + ' ' : '';
+    if (d.drift_status === 'compliant') { return t + '<span class="pill ok">matches</span>'; }
+    if (d.drift_status === 'drifted') { return t + '<span class="pill bad">drifted</span>'; }
+    if (d.drift_status === 'render_error') { return t + '<span class="pill running">template error</span>'; }
+    return t;
+}
+
+function load() {
+    fetch('/api/backups').then(function (r) { return r.json(); }).then(function (list) {
+        var rows = '';
+        list.forEach(function (d) {
+            rows += '<tr data-ctx="backup" data-id="' + ctxMenu.attr(d.device_id) + '" data-name="' + ctxMenu.attr(d.hostname) + '">' +
+                '<td><a href="/devices/' + d.device_id + '#config-section">' + esc(d.hostname) + '</a></td>' +
+                '<td>' + esc(d.platform) + '</td>' +
+                '<td data-sort="' + ctxMenu.attr(d.captured_at || '') + '">' + (d.captured_at ? esc(new Date(d.captured_at).toLocaleString()) : '<span class="pill idle">none yet</span>') + '</td>' +
+                '<td data-sort="' + ctxMenu.attr(d.captured_at || '') + '">' + age(d.captured_at) + '</td>' +
+                '<td data-sort="' + (d.size || 0) + '">' + (d.size ? (d.size / 1024).toFixed(1) + ' KB' : '') + '</td>' +
+                '<td>' + d.versions + '</td><td>' + driftPill(d) + '</td></tr>';
+        });
+        document.getElementById('b-rows').innerHTML = rows;
+        document.getElementById('b-count').textContent = list.length ? '(' + list.filter(function (d) { return d.captured_at; }).length + ' of ' + list.length + ')' : '';
+        document.getElementById('b-empty').style.display = list.length ? 'none' : 'block';
+    });
+}
+
+function search() {
+    var q = document.getElementById('b-q').value.trim(), msg = document.getElementById('b-msg');
+    if (!q) { return; }
+    msg.className = 'msg';
+    msg.textContent = 'searching...';
+    var url = '/api/backups/search?q=' + encodeURIComponent(q) + (document.getElementById('b-regex').checked ? '&regex=1' : '') +
+        (document.getElementById('b-invert').checked ? '&invert=1' : '');
+    fetch(url).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); }).then(function (res) {
+        var box = document.getElementById('hits');
+        if (!res.ok) { msg.className = 'msg err'; msg.textContent = res.d.error || 'search failed'; box.innerHTML = ''; return; }
+        var r = res.d;
+        msg.textContent = r.devices.length + ' of ' + r.searched + ' device(s) ' + (r.invert ? 'have no matching line' : 'match');
+        var html = '';
+        r.devices.forEach(function (d) {
+            html += '<h3><a href="/devices/' + d.device_id + '#config-section">' + esc(d.hostname) + '</a>' +
+                (r.invert ? '' : ' <span class="hint">' + d.count + ' line(s)' + (d.count > d.lines.length ? ', first ' + d.lines.length + ' shown' : '') + '</span>') + '</h3>';
+            if (d.lines.length) {
+                html += '<pre>' + d.lines.map(function (l) {
+                    return (l.parent ? '<span class="par">' + esc(l.parent) + '</span>\n' : '') + '<span class="ln">' + l.line + '</span>  ' + esc(l.text);
+                }).join('\n') + '</pre>';
+            }
+        });
+        box.innerHTML = html;
+    });
+}
+
+ctxMenu.register('backup', function (tr) {
+    var id = tr.getAttribute('data-id'), name = tr.getAttribute('data-name');
+    return { title: name, items: [
+        { label: 'Open config history', action: function () { location.href = '/devices/' + id + '#config-section'; } },
+        { label: 'Open device page', action: function () { location.href = '/devices/' + id; } },
+        { label: 'Copy hostname', action: function () { ctxMenu.copy(name); } },
+    ] };
+});
+
+document.documentElement.setAttribute('data-ctx', 'page');
+ctxMenu.register('page', function (el, ev) {
+    if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
+    return { title: 'Backups', items: [
+        { label: 'Refresh', action: load },
+        { label: 'Go to Templates', action: function () { location.href = '/templates'; } },
+        { label: 'Go to Devices', action: function () { location.href = '/devices'; } },
+    ] };
+});
+
+load();
+</script>
+{% endblock %}

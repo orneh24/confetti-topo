@@ -39,6 +39,18 @@ def analyze(conn):
     return len(findings)
 
 
+def usable_hosts(network):
+    """Host addresses in a network: a /31 has 2 and a /32 1 (no network or broadcast address), else size - 2.
+    None for a value that is not a network."""
+    try:
+        net = ipaddress.ip_network(network, strict=False)
+    except ValueError:
+        return None
+    if net.num_addresses <= 2:
+        return net.num_addresses
+    return net.num_addresses - 2
+
+
 def _label(row):
     return "{}:{}".format(row["hostname"], row["name"])
 

@@ -71,6 +71,8 @@ button.active { border-color: var(--cyan); color: var(--text); background: var(-
 .node-panel .hide-row + .hide-row { margin-top: 4px; padding-top: 0; border-top: 0; }
 .legend-box .icons { display: flex; flex-wrap: wrap; gap: 4px 10px; margin: 3px 0; }
 .legend-box .icons img { width: 18px; height: 18px; object-fit: contain; vertical-align: middle; margin-right: 3px; }
+.node-panel textarea.map-note { width: 100%; min-height: 54px; font: inherit; font-size: 12px; resize: vertical; }
+.node-panel .note-row { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
 .node-panel .hide-row { margin-top: 10px; padding-top: 6px; border-top: 1px solid var(--border); display: flex; gap: 6px; align-items: center; cursor: pointer; }
 /* Shown over the map only while a layer is switched off, so a half-empty graph is never mistaken for the whole network. */
 .filter-marker { flex: 0 1 auto; max-width: 260px; display: none; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px;
@@ -134,6 +136,8 @@ button.active { border-color: var(--cyan); color: var(--text); background: var(-
         <div id="np-info"></div>
         <h4>Links</h4>
         <div id="np-links"></div>
+        <h4>Note</h4>
+        <div id="np-note"></div>
         <label class="hide-row"><input type="checkbox" id="np-hide" onchange="hideNode(this.checked)"> Hide this node</label>
         <label class="hide-row"><input type="checkbox" id="np-hide-icon" onchange="hideIcon(this.checked)"> Hide icon</label>
     </div>
@@ -143,6 +147,8 @@ button.active { border-color: var(--cyan); color: var(--text); background: var(-
         <div class="sub" id="lp-sub"></div>
         <div id="lp-info"></div>
         <div id="lp-reports"></div>
+        <h4>Note</h4>
+        <div id="lp-note"></div>
     </div>
     <div class="filter-marker" id="filter-marker" role="status">
         <span id="filter-text"></span>
@@ -591,7 +597,8 @@ function exportJson() {
     if (!rawData) { toast('nothing to export'); return; }
     var d = new Date(), pad = function (n) { return (n < 10 ? '0' : '') + n; };
     var a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([JSON.stringify(rawData, null, 2)], { type: 'application/json' }));
+    var out = Object.assign({}, rawData, { notes: mapNotes });   // the operator's notes go along with the map
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' }));
     a.download = 'confetti-topo-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
     document.body.appendChild(a);
     a.click();
@@ -631,6 +638,7 @@ function rearrange() {
 
 var loadSeq = 0;
 var rawData = null;      // the last answer from the API, before the viewer's hiding
+var mapNotes = {};       // operator notes on nodes and links, {target: {note, updated_at}} (/api/topology/notes)
 var tidyOnSettle = false;   // set by load() when no node has a saved place
 var selectedNode = null;
 var selectedLink = null;
@@ -1604,6 +1612,7 @@ function showNodePanel(id) {
         }
     });
     if (!mine.length) { addRow(links, '', 'none shown'); }
+    noteEditor(document.getElementById('np-note'), id);
     document.getElementById('np-hide').checked = !!hiddenNodes[id];
     document.getElementById('np-hide-icon').checked = !!hiddenIcons[id];
     var panel = document.getElementById('node-panel');
@@ -1716,8 +1725,46 @@ function showLinkPanel(edgeId) {
         note.textContent = 'Only one end reports this link.';
         reports.appendChild(note);
     }
+    noteEditor(document.getElementById('lp-note'), 'edge:' + edgeId);
     document.getElementById('link-panel').style.display = 'block';
     fitNodePanel();
+}
+
+// A note on a node or link (circuit ID, provider, ticket): stored on the server, the same for every viewer. A link's note
+// is keyed by its from|to|layer|label, so it stays while the link is drawn the same way.
+function loadNotes() {
+    return fetch('/api/topology/notes').then(function (r) { return r.json(); }).then(function (n) { mapNotes = n || {}; })
+        .catch(function () { /* keep the last ones */ });
+}
+
+function noteEditor(box, target) {
+    box.textContent = '';
+    var ta = document.createElement('textarea');
+    ta.className = 'map-note';
+    ta.maxLength = 2000;
+    ta.placeholder = 'circuit ID, provider, ticket...';
+    ta.value = mapNotes[target] ? mapNotes[target].note : '';
+    var row = document.createElement('div');
+    row.className = 'note-row';
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-small';
+    btn.textContent = 'Save note';
+    var msg = document.createElement('span');
+    msg.className = 'sub';
+    msg.textContent = mapNotes[target] ? 'saved ' + new Date(mapNotes[target].updated_at).toLocaleString() : '';
+    btn.onclick = function () {
+        btn.disabled = true;
+        fetch('/api/topology/notes', { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target: target, note: ta.value }) }).then(function (r) { return r.json(); }).then(function (res) {
+            msg.textContent = res.error ? res.error : (res.status === 'removed' ? 'note removed' : 'saved');
+            return loadNotes();
+        }).catch(function () { msg.textContent = 'save failed'; }).then(function () { btn.disabled = false; });
+    };
+    row.appendChild(btn);
+    row.appendChild(msg);
+    box.appendChild(ta);
+    box.appendChild(row);
 }
 
 // Hide the link card only; the selection is left alone (a node was just selected).
@@ -1849,8 +1896,10 @@ updateFilterMarker();
 load();
 loadChanged();
 loadHistory();
+loadNotes();
 setInterval(loadHistory, 60000);
 setInterval(load, 20000);
+setInterval(loadNotes, 60000);
 setInterval(loadChanged, 20000);
 document.addEventListener('themechange', load);
 </script>

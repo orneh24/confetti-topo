@@ -306,6 +306,15 @@ def init_db():
             updated_at TEXT NOT NULL
         );
 
+        -- An operator's note on a map node or link (circuit ID, provider, ticket), shown on its card and in the JSON
+        -- export. target is the graph id of a node ('dev:5', 'ghost:peer:10.0.0.1') or 'edge:' + the page's edge key
+        -- (from|to|layer|label). Free text from the operator; never an identity.
+        CREATE TABLE IF NOT EXISTS map_notes (
+            target     TEXT PRIMARY KEY,
+            note       TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
         -- Syslog from devices (same table and parser as confetti-traffic;
         -- see syslog_core.py). The origin, origin_id and msg_hash columns and their indexes
         -- are added by syslog_core.migrate() below.
@@ -380,7 +389,9 @@ def init_db():
             name         TEXT NOT NULL,
             at           TEXT NOT NULL,
             input_errors INTEGER,
-            crc_errors   INTEGER
+            crc_errors   INTEGER,
+            in_bytes     INTEGER,
+            out_bytes    INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_ifstats ON interface_stats(device_id, name, id);
         CREATE INDEX IF NOT EXISTS idx_ifstats_at ON interface_stats(at);
@@ -434,6 +445,15 @@ def init_db():
         db.execute("ALTER TABLE interfaces ADD COLUMN input_errors INTEGER")
     if "crc_errors" not in [r[1] for r in db.execute("PRAGMA table_info(interfaces)")]:
         db.execute("ALTER TABLE interfaces ADD COLUMN crc_errors INTEGER")
+    # Traffic: the device's own load average on each interface, and byte counters per sample (rates between samples).
+    have = [r[1] for r in db.execute("PRAGMA table_info(interfaces)")]
+    for col in ("in_bps", "out_bps"):
+        if col not in have:
+            db.execute("ALTER TABLE interfaces ADD COLUMN {} INTEGER".format(col))
+    have = [r[1] for r in db.execute("PRAGMA table_info(interface_stats)")]
+    for col in ("in_bytes", "out_bytes"):
+        if col not in have:
+            db.execute("ALTER TABLE interface_stats ADD COLUMN {} INTEGER".format(col))
     db.execute("CREATE INDEX IF NOT EXISTS idx_if_network ON interfaces(network)")
     # events.alerted: existing rows are history, so mark them done and enabling alerting never replays them.
     if "alerted" not in [r[1] for r in db.execute("PRAGMA table_info(events)")]:

@@ -12,6 +12,8 @@
 // grid rows and the next widgets are stacked beside it in the other columns (state.rows); the rest are put in
 // rows of similar height (tallest first) and a row that is not full is widened to fill it; up to three short full-width widgets
 // share one row. Every widget is then stretched to its row's height (state.fill). You can still move and resize afterwards.
+// A page may fold a widget to its title bar by giving it the class "collapsed"; after an Auto sort the layout is sorted
+// again whenever a widget is folded or opened, so the others close up or make room.
 // Remembered in this browser only (localStorage), so a new browser sees the default layout. "Reset layout" clears it.
 //
 // A widget is a `.section` with a `data-box="<id>"` and a `.section-header`; the page's own code only touches the
@@ -39,7 +41,10 @@ var DashGrid = (function () {
         '  background: linear-gradient(135deg, transparent 0 45%, var(--text-dim) 45% 55%, transparent 55% 70%, var(--text-dim) 70% 80%, transparent 80%); opacity: .7; }' +
         '.dg-resize:hover { opacity: 1; }' +
         // After Auto sort a widget is stretched to the height of its grid row, so a short one leaves no gap under it.
-        '.dg-on.dg-fill > .section[data-box] { align-self: stretch; }';
+        '.dg-on.dg-fill > .section[data-box] { align-self: stretch; }' +
+        // A widget the page folded (class "collapsed": only its title bar shows) keeps its own small height and has no grip.
+        '.dg-on.dg-fill > .section[data-box].collapsed { align-self: start; }' +
+        '.dg-on .section.collapsed > .dg-resize { display: none; }';
 
     function key() { return cfg.prefix + '-dashboard-layout'; }
 
@@ -438,6 +443,20 @@ var DashGrid = (function () {
 
         load();
         applyAll();
+        // Folding or opening a widget (the page toggles "collapsed") re-runs Auto sort while its layout is in use.
+        if (window.MutationObserver) {
+            var folded = {};
+            boxes().forEach(function (el) { folded[el.getAttribute('data-box')] = el.classList.contains('collapsed'); });
+            new MutationObserver(function (list) {
+                var changed = false;
+                list.forEach(function (m) {
+                    if (m.target.parentNode !== box || !m.target.hasAttribute('data-box')) { return; }   // a widget, not something inside one
+                    var id = m.target.getAttribute('data-box'), now = m.target.classList.contains('collapsed');
+                    if (folded[id] !== now) { folded[id] = now; changed = true; }
+                });
+                if (changed && state.fill) { autoSort(); }
+            }).observe(box, { attributes: true, attributeFilter: ['class'], subtree: true });
+        }
         var timer = null;
         window.addEventListener('resize', function () {
             clearTimeout(timer);

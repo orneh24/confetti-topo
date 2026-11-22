@@ -10,17 +10,20 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from urllib.parse import urlparse
 
-from flask import Flask, jsonify, render_template, request, Response
+from flask import Flask, jsonify, render_template, request, Response, send_file
 
 from . import auth
+from . import backup
 from . import tools_routes
 from . import config
 from . import db
 from . import discovery
 from . import drift
 from . import events
+from . import find as find_mod
 from . import identity
 from . import lldp_crawl
 from . import metrics
@@ -29,7 +32,9 @@ from . import reach
 from . import syslog_pull
 from . import syslog_server
 from . import topology
+from . import platforms
 from .collectors import confetti
+from .collectors import panos as panos_collector
 from .collectors import ssh as ssh_collector
 from .collectors import seedfile
 from .collectors import sweep as sweep_collector
@@ -293,7 +298,8 @@ def device_page(device_id):
 
 @app.route("/syslog")
 def syslog_page():
-    return render_template("syslog.html")
+    # The empty page shows how to point a router here; the port is the one this server listens on.
+    return render_template("syslog.html", syslog_port=config.SYSLOG_PORT, syslog_enabled=config.SYSLOG_ENABLED)
 
 
 @app.route("/changes")
@@ -314,6 +320,20 @@ def settings_page():
 @app.route("/topology")
 def topology_page():
     return render_template("topology.html")
+
+
+@app.route("/find")
+def find_page():
+    return render_template("find.html", q=request.args.get("q", "")[:200])
+
+
+@app.route("/api/find", methods=["GET"])
+def api_find():
+    """Where is this IP / MAC / prefix / device? ?q=. Read-only, query time only (app/find.py)."""
+    q = (request.args.get("q") or "").strip()[:200]
+    if not q:
+        return jsonify({"error": "q is required"}), 400
+    return jsonify(find_mod.find(db.get_db(), q))
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +435,7 @@ def api_device_interfaces(device_id):
     conn = db.get_db()
     rows = conn.execute(
         """SELECT name, description, ip, prefix_len, network, vrf, admin_status, oper_status,
-                  speed, duplex, input_errors, crc_errors, mtu, last_seen
+                  speed, duplex, input_errors, crc_errors, mtu, in_bps, out_bps, last_seen
            FROM interfaces WHERE device_id = ? ORDER BY name""",
         (device_id,),
     ).fetchall()
@@ -779,6 +799,64 @@ def syslog_pull_state(conn):
     return {"servers": servers, "running": syslog_pull.is_running(), "interval_s": config.SYSLOG_PULL_INTERVAL_S}
 
 
+# ---------------------------------------------------------------------------
+# Database backup and restore (Settings page; app/backup.py, scripts/topo-db.sh)
+# ---------------------------------------------------------------------------
+
+RESTORE_MAX_BYTES = 1024 * 1024 * 1024
+
+
+@app.route("/api/backup", methods=["GET"])
+def api_backup_list():
+    """The stored backups (nightly, pre-update, pre-restore, web), newest first. Names and sizes only."""
+    return jsonify({"files": backup.listing()})
+
+
+@app.route("/api/backup/download", methods=["POST"])
+def api_backup_download():
+    """{name} downloads that stored backup; no name makes a fresh one first. A POST, never a GET: the file holds the
+    device credentials in plaintext, like topo.db."""
+    data = request.get_json(force=True, silent=True) or {}
+    if data.get("name"):
+        path = backup.path_of(data["name"])
+        if not path:
+            return jsonify({"error": "no such backup"}), 404
+    else:
+        path = backup.make()
+    return send_file(path, mimetype="application/vnd.sqlite3", as_attachment=True,
+                     download_name=os.path.basename(path), max_age=0)
+
+
+@app.route("/api/backup/env", methods=["GET"])
+def api_backup_env():
+    """The TOPO_* settings as topo.env lines, secrets left out."""
+    return Response(backup.env_text(), mimetype="text/plain",
+                    headers={"Content-Disposition": "attachment; filename=topo.env.export"})
+
+
+@app.route("/api/backup/restore", methods=["POST"])
+def api_backup_restore():
+    """Upload a database (multipart field "file") and make it the live one. The upload is checked first and the current
+    database is saved as topo-pre-restore-<time>.db; the server keeps running."""
+    if request.content_length and request.content_length > RESTORE_MAX_BYTES:
+        return jsonify({"error": "file too large"}), 413
+    f = request.files.get("file")
+    if not f:
+        return jsonify({"error": "send the database as the multipart field 'file'"}), 400
+    tmp = os.path.join(backup.backup_dir(), "upload-{}.tmp".format(os.getpid()))
+    try:
+        f.save(tmp)
+        result = backup.restore(tmp)
+    except backup.RestoreError as exc:
+        return jsonify({"error": str(exc)}), 400
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+    return jsonify(dict(result, status="restored"))
+
+
 @app.route("/api/settings/syslog-pull", methods=["GET"])
 def api_get_syslog_pull():
     """Per other server: its URL, whether pulling is on, the cursor and the last result. No secrets."""
@@ -877,6 +955,39 @@ def api_bulk_clear_credentials():
     conn.execute("DELETE FROM credentials WHERE device_id IN ({})".format(",".join("?" * len(ids))), ids)
     conn.commit()
     return jsonify({"status": "ok", "cleared": len(ids)})
+
+
+@app.route("/api/devices/<int:device_id>/credentials/test", methods=["POST"])
+def api_test_credentials(device_id):
+    """Log in to one device with its stored credentials (device, then Settings, then env; the poller's order) and run
+    the version task only: `show version`, the PAN-OS system info op, or the SNMP system group. Nothing is stored,
+    no event is written and the poll schedule is not touched. Answers ok, or the login or command error."""
+    conn = db.get_db()
+    row = conn.execute("SELECT * FROM devices WHERE id = ?", (device_id,)).fetchone()
+    if not row:
+        return jsonify({"error": "not found"}), 404
+    device = dict(row)
+    if device["role"] == "node":
+        return jsonify({"ok": False, "error": "role=node devices are never polled, so they have no login to test"}), 400
+    creds = ssh_collector.resolve_credentials(conn, device_id)
+    transport = platforms.get(device["platform"])["transport"]
+    collector = panos_collector if transport == "xml_api" else ssh_collector
+    started = time.monotonic()
+    gen = collector.run_tasks(device, creds, tasks=("version",)) if transport != "snmp" else ssh_collector.run_tasks(device, creds)
+    result = {"ok": False, "error": "no answer"}
+    try:
+        for task, ok, _output, error, parsed in gen:
+            if task != "version":
+                continue
+            result = {"ok": bool(ok), "error": error}
+            if ok and isinstance(parsed, dict):
+                result["found"] = {k: parsed.get(k) for k in ("model", "os_version", "serial") if parsed.get(k)}
+            break
+    finally:
+        gen.close()    # ends the session (the generator's finally disconnects)
+    result.update(transport=transport, host=device["mgmt_ip"], username=creds["username"] if transport != "snmp" else None,
+                  seconds=round(time.monotonic() - started, 1))
+    return jsonify(result)
 
 
 @app.route("/api/devices/<int:device_id>/poll", methods=["POST"])
@@ -1345,6 +1456,36 @@ def api_topology_positions_clear():
     conn.execute("DELETE FROM node_positions")
     conn.commit()
     return jsonify({"status": "cleared"})
+
+
+NOTE_MAX = 2000
+
+
+@app.route("/api/topology/notes", methods=["GET"])
+def api_topology_notes():
+    """Every map note: {target: {note, updated_at}}."""
+    return jsonify({r["target"]: {"note": r["note"], "updated_at": db.iso(r["updated_at"])}
+                    for r in db.get_db().execute("SELECT target, note, updated_at FROM map_notes")})
+
+
+@app.route("/api/topology/notes", methods=["PUT"])
+def api_topology_note_put():
+    """{target, note}: set the note of one node or link; an empty note removes it. Plain text, at most 2000 characters."""
+    data = request.get_json(force=True, silent=True) or {}
+    target, note = data.get("target"), data.get("note", "")
+    if not isinstance(target, str) or not target.strip() or len(target) > 400:
+        return jsonify({"error": "target must be a node id or edge:<key>"}), 400
+    if not isinstance(note, str) or len(note) > NOTE_MAX:
+        return jsonify({"error": "note must be text of at most {} characters".format(NOTE_MAX)}), 400
+    conn = db.get_db()
+    if note.strip():
+        conn.execute("INSERT INTO map_notes (target, note, updated_at) VALUES (?, ?, ?) "
+                     "ON CONFLICT(target) DO UPDATE SET note = excluded.note, updated_at = excluded.updated_at",
+                     (target, note.strip(), db.sqlite_now()))
+    else:
+        conn.execute("DELETE FROM map_notes WHERE target = ?", (target,))
+    conn.commit()
+    return jsonify({"status": "saved" if note.strip() else "removed"})
 
 
 @app.route("/api/adjacencies", methods=["GET"])
