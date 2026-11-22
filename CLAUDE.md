@@ -19,8 +19,8 @@ sibling repos stay related:
 - `../confetti-traffic` (network connectivity test harness) — confetti-topo can import its node fleet
   (`GET /endpoints`) as `role='node'` devices, and copies its hub UI look by hand.
 - `../confetti-butler` — kept as it was and no longer the source of anything. Its code was ported into
-  this repo, so a fix there is not a fix here. A deployed butler can still be a syslog-pull peer and an
-  inventory import source (`POST /api/discover/butler`). There is no import of an old butler database. The
+  this repo, so a fix there is not a fix here. A deployed butler can still be a syslog-pull peer. There is no import of its
+  devices or of an old butler database (the butler import was removed 2026-11-22). The
   shared syslog files stay byte-identical (constraint 24). The `confetti-interop-checker` agent looks for drift.
 
 Reference notes for the feature itself: `docs/TOPOLOGY-MAPPING.md` (design, pitfalls, test checklist).
@@ -267,9 +267,9 @@ fades non-matching devices on the map; link details carry `local_port_state`.
 
 ### Discovery on a timer, and the LLDP crawl
 
-- `app/discovery.py` runs the confetti-traffic and confetti-butler imports, subnet sweeps and the seed file every
+- `app/discovery.py` runs the confetti-traffic import, subnet sweeps and the seed file every
   `TOPO_DISCOVERY_INTERVAL_S` seconds (default 0 = never; nothing runs unless configured via
-  `TOPO_DISCOVERY_CONFETTI_URL` / `_BUTLER_URL` / `_SWEEP_CIDRS` / `_SEEDFILE`). Each source commits on its own, so one
+  `TOPO_DISCOVERY_CONFETTI_URL` / `_SWEEP_CIDRS` / `_SEEDFILE`). Each source commits on its own, so one
   failing source never discards another's work. A device that did not exist before gets a
   `device_discovered` event. `POST /api/discover/run` runs it once by hand. There is no vCenter source.
 - `app/lldp_crawl.py`: an LLDP neighbor advertising a management IP no device owns is listed by
@@ -356,7 +356,6 @@ There is no Packer template: topo is installed once per environment, so the buil
 | Subnet sweep | `POST /api/discover/sweep` | TCP connect to port 22 only (a firewall with SSH off must be added by hand or seed file) — coarse on purpose; the poller's own `version` task does real identification next cycle |
 | YAML seed file | `POST /api/discover/seedfile` | `seed/devices.yaml.sample` shows the shape |
 | confetti-traffic import | `POST /api/discover/confetti` | `GET <hub_url>/endpoints`, imported as `role='node'`, `vendor='alpine'`, `platform='linux'` — never SSH-polled. `site` is the endpoint's `group_name`, which is confetti-traffic's *effective* group: a group set on its dashboard overrides what the node registers, so an override changes `site` on the next import |
-| confetti-butler import | `POST /api/discover/butler` | `GET <butler_url>/api/devices`; inventory only (hostname, IP, serial, vendor, platform, model, role, site), no credentials. Merged through `identity.ingest` (source `butler`), so a router already known is not duplicated; butler's role is kept, so a `role='node'` device is still never polled |
 | LLDP crawl | `POST /api/lldp/adopt` | A neighbor with an unknown management IP, added inventory-only (polling off) |
 
 ## Project Structure
@@ -384,13 +383,13 @@ topo/
     drift.py           — template vs latest running-config backup (constraint 32)
     ipam.py            — overlap and duplicate-address findings
     alerts.py          — alert rules, webhook/mail sender thread (constraint 30)
-    butler_routes.py   — the Flask Blueprint with the routes that came from butler (IPAM, templates, /configs, backups, drift, alerts, vCenter)
+    tools_routes.py   — the Flask Blueprint `tools` with the IPAM, templates, /configs, backups, drift, alerts, vCenter import
     syslog_core.py     — syslog parser + the one insert path; the SAME file in confetti-butler and confetti-traffic (constraint 24)
     syslog_server.py   — UDP syslog listener (port of butler's), stores through syslog_core
     syslog_trigger.py  — a topology message asks for an early poll of its device (constraint 25)
     syslog_pull.py     — pulls syslog from the other Confetti servers on a timer; the SAME file in confetti-butler and confetti-traffic (constraint 26)
     auth.py            — optional access token (TOPO_AUTH_TOKEN): /login, cookie or bearer; off by default
-    collectors/        — ssh.py, panos.py (XML API), snmp.py, vcenter.py, sweep.py, confetti.py, butler.py, seedfile.py
+    collectors/        — ssh.py, panos.py (XML API), snmp.py, vcenter.py, sweep.py, confetti.py, seedfile.py
     parsers/           — ios.py (regex only), panos.py (XML)
   templates/           — base.html (head, header/nav, theme + layout pickers, footer, Retro taskbar)
                          + dashboard (widgets: system, services, activity, devices, events, sessions down, open conflicts, unknown LLDP neighbors, map changes), devices, device, changes (Recent changes: filter bar, summary tiles, sortable events table with type/change/before/after from `events.describe()`, banded per device, details pane, right-click menu), topology, syslog, conflicts, settings, ipam, alerts, templates_editor (CodeMirror in static/vendor/codemirror), each `{% extends "base.html" %}`

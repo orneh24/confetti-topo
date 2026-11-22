@@ -24,7 +24,7 @@ Every identifier ever observed lives in `device_aliases` permanently — a histo
 only ever promotes upward.
 
 Two entry points, not interchangeable:
-- `identity.ingest(conn, candidates, fields, source, ref)` — discovery paths (manual, sweep, seedfile, butler,
+- `identity.ingest(conn, candidates, fields, source, ref)` — discovery paths (manual, sweep, seedfile,
   confetti-traffic import, LLDP adopt). Resolves the device by alias-matching from scratch.
 - `identity.observe(conn, device_id, candidates, fields, source, ref)` — the poller only. The device_id is
   already known, so it skips alias-matching and only guards `serial`/`vmuuid` disagreeing with what is on
@@ -40,7 +40,7 @@ those two columns to NULL, so its neighbors become ghosts again.
 
 **Pages:** `/` `/devices` `/devices/<id>` `/topology` `/conflicts` `/settings` `/syslog` `/changes` `/ipam` `/templates` `/alerts`
 
-**Merged from butler (routes in `app/butler_routes.py`):**
+**IPAM, templates, config backups, alerts (routes in `app/tools_routes.py`):**
 - `GET /api/devices/<id>/drift|interface-stats|configs`, `/configs/<vid>`, `/configs/diff` (`?raw=1` unmasks); `GET|PUT /api/devices/<id>/vars`
 - `GET /api/ipam/addresses|prefixes|findings`, `POST /api/ipam/analyze`
 - `GET|POST /api/templates`, `GET|PUT|DELETE /api/templates/<name>`, `/versions`, `POST /preview`
@@ -67,8 +67,8 @@ those two columns to NULL, so its neighbors become ghosts again.
   `POST /api/credentials/clear {device_ids}`
 - `POST /api/devices/<id>/merge`; `GET /api/conflicts?resolved=0|1`; `POST /api/conflicts/<id>/dismiss`
 
-**Discovery:** `POST /api/discover/{sweep,seedfile,confetti,butler}` return `{device_ids, conflicts}`
-(`hub_url` / `butler_url` may be a bare IP; `http://` is added).
+**Discovery:** `POST /api/discover/{sweep,seedfile,confetti}` return `{device_ids, conflicts}`
+(`hub_url` may be a bare IP; `http://` is added).
 `POST /api/discover/run` runs the scheduled sources now (`TOPO_DISCOVERY_*`); `GET /api/discover/status`.
 `GET /api/lldp/unknown`; `POST /api/lldp/adopt {ip, hostname?}` adds one with polling OFF (`enabled=0`).
 

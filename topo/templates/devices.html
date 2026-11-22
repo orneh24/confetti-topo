@@ -34,10 +34,6 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
                 <input type="text" name="hub_url" placeholder="Confetti Traffic IP or URL" style="width:220px">
                 <button type="submit">Import Confetti Traffic nodes</button>
             </form>
-            <form class="inline" id="butler-form" style="margin-bottom:8px">
-                <input type="text" name="butler_url" placeholder="Confetti Butler IP or URL" style="width:220px">
-                <button type="submit">Import Confetti Butler devices</button>
-            </form>
             <form class="inline" id="seedfile-form">
                 <input type="text" name="path" placeholder="seed/devices.yaml" style="width:220px">
                 <button type="submit">Load seed file</button>
@@ -317,13 +313,6 @@ document.getElementById('confetti-form').addEventListener('submit', function (ev
     var hubUrl = ev.target.hub_url.value.trim();
     if (!hubUrl) { return; }
     runDiscover('/api/discover/confetti', { hub_url: hubUrl }, 'Confetti Traffic import');
-});
-
-document.getElementById('butler-form').addEventListener('submit', function (ev) {
-    ev.preventDefault();
-    var url = ev.target.butler_url.value.trim();
-    if (!url) { return; }
-    runDiscover('/api/discover/butler', { butler_url: url }, 'Confetti Butler import');
 });
 
 document.getElementById('seedfile-form').addEventListener('submit', function (ev) {

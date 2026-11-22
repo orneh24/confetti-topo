@@ -143,7 +143,7 @@ def _network(ip, prefix_len):
 
 
 # ---------------------------------------------------------------------------
-# show running-config (merged from confetti-butler)
+# show running-config
 # ---------------------------------------------------------------------------
 
 # Lines that change on their own between two identical configs. Left in, every

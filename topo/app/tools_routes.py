@@ -1,4 +1,4 @@
-"""Routes merged in from confetti-butler: IPAM, config templates and the pull endpoint, running-config
+"""IPAM, config templates and the pull endpoint, running-config
 backups, drift, interface error history, alert rules and the vCenter import.
 
 A Blueprint, so app.py keeps only the routes that were topo's own. Nothing here ever writes to a device:
@@ -18,7 +18,7 @@ from . import ipam
 from . import rendering
 from .collectors import vcenter as vcenter_collector
 
-bp = Blueprint("butler", __name__)
+bp = Blueprint("tools", __name__)
 
 
 # ---------------------------------------------------------------------------

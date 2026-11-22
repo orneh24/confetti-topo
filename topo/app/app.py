@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from flask import Flask, jsonify, render_template, request, Response
 
 from . import auth
-from . import butler_routes
+from . import tools_routes
 from . import config
 from . import db
 from . import discovery
@@ -29,7 +29,7 @@ from . import reach
 from . import syslog_pull
 from . import syslog_server
 from . import topology
-from .collectors import butler, confetti
+from .collectors import confetti
 from .collectors import ssh as ssh_collector
 from .collectors import seedfile
 from .collectors import sweep as sweep_collector
@@ -42,7 +42,7 @@ app = Flask(
 
 
 auth.register(app)
-app.register_blueprint(butler_routes.bp)   # IPAM, templates, config backups, alerts (from confetti-butler)
+app.register_blueprint(tools_routes.bp)   # IPAM, templates, config backups, drift, alerts, vCenter
 
 
 @app.context_processor
@@ -1096,24 +1096,6 @@ def api_discover_confetti():
         device_ids, conflicts = confetti.discover(conn, hub_url)
     except Exception as exc:
         return jsonify({"error": "confetti-traffic hub request failed: {}".format(exc)}), 502
-    conn.commit()
-    return jsonify({"status": "ok", "device_ids": device_ids, "conflicts": conflicts})
-
-
-@app.route("/api/discover/butler", methods=["POST"])
-def api_discover_butler():
-    """Body: {"butler_url": "http://10.0.0.101"}. Imports confetti-butler's device
-    inventory (no credentials) — see collectors/butler.py."""
-    data = request.get_json(force=True, silent=True) or {}
-    butler_url = data.get("butler_url")
-    if not butler_url:
-        return jsonify({"error": "butler_url is required"}), 400
-
-    conn = db.get_db()
-    try:
-        device_ids, conflicts = butler.discover(conn, butler_url)
-    except Exception as exc:
-        return jsonify({"error": "confetti-butler request failed: {}".format(exc)}), 502
     conn.commit()
     return jsonify({"status": "ok", "device_ids": device_ids, "conflicts": conflicts})
 

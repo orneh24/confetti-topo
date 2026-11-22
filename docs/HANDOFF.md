@@ -1,12 +1,18 @@
 # confetti-topo — handoff
 
+## Butler import removed (2026-11-22)
+
+Removed `POST /api/discover/butler`, `collectors/butler.py`, the Devices page import form, the scheduled source (`TOPO_DISCOVERY_BUTLER_URL`) and the
+import test in R24. Kept: the Butler URL on Settings, its header button and the syslog pull from butler. Existing `device_sources` rows with source
+`butler` stay as they are. Menu order and the `tools_routes.py` rename were done the same day.
+
 ## Merge of confetti-butler (2026-11-21)
 
 confetti-butler's functionality was ported into this project, which keeps its name, service, paths and `TOPO_*` variables. `../confetti-butler`
 was not touched, and no butler database import exists (decided with the user).
 
 - **Ported (same code, `BUTLER_*` → `TOPO_*`):** `rendering.py`, `drift.py`, `ipam.py`, `alerts.py`, `collectors/snmp.py`, `collectors/vcenter.py`;
-  the `config` task and error-counter history in `collectors/ssh.py`; `parse_running_config`; the `snmp` platform; the routes as `app/butler_routes.py`
+  the `config` task and error-counter history in `collectors/ssh.py`; `parse_running_config`; the `snmp` platform; the routes as `app/tools_routes.py`
   (a Blueprint); pages `ipam.html`, `templates_editor.html` (+ `static/vendor/codemirror`), `alerts.html`; the device-page boxes (template, SNMP credentials,
   drift, config history and diff, interface errors); the Template column on Devices; SNMP defaults on Settings; butler's extra `/metrics` lines
   (`topo_interface_*_errors`, `topo_alert_*`, `topo_ipam_findings`, `topo_syslog_rows`).

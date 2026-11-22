@@ -325,7 +325,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_syslog_host ON syslog(host);
         CREATE INDEX IF NOT EXISTS idx_syslog_source_ip ON syslog(source_ip);
 
-        -- Merged in from confetti-butler: IPAM findings, config templates, running-config
+        -- IPAM findings, config templates, running-config
         -- backups, interface error history and alert rules.
         -- Rebuilt wholesale by each POST /api/ipam/analyze run.
         CREATE TABLE IF NOT EXISTS ipam_findings (
@@ -421,7 +421,7 @@ def init_db():
     # Set by syslog_trigger when a device's syslog says the topology changed: poll it early.
     if "poll_requested_at" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
         db.execute("ALTER TABLE devices ADD COLUMN poll_requested_at TEXT NOT NULL DEFAULT ''")
-    # Columns that came with the merge of confetti-butler.
+    # Columns for templates, drift, SNMP, error history and alerting.
     if "template_name" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
         db.execute("ALTER TABLE devices ADD COLUMN template_name TEXT REFERENCES templates(name) ON DELETE SET NULL")
     if "drift_status" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:

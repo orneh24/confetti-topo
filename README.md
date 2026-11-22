@@ -34,7 +34,7 @@ Classic layout). The look follows the hub UI of the sibling project
   the Settings page (off by default) also match an LLDP neighbor's chassis ID to a device's management MAC
   (PAN-OS reports it) or its system name to a hostname, for neighbors that advertise no known management IP.
 - **Devices.** Add routers by hand, by a subnet sweep (SSH port scan), from a YAML seed file, or import the
-  test nodes from confetti-traffic or the device list from confetti-butler. The same router seen by two sources lands on one device. When the
+  test nodes from confetti-traffic. The same router seen by two sources lands on one device. When the
   identifiers disagree (the same IP now answers with a different serial), it raises a conflict instead of
   guessing.
 - **Templates, backups and drift.** A Jinja2 config template per device, rendered from what the router reports; the

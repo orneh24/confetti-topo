@@ -125,14 +125,14 @@ def app_modules():
     try:
         from app import config, db, identity, poller, events
         from app import app as app_pkg_app            # the Flask module
-        from app.collectors import ssh, sweep, confetti, butler, panos
+        from app.collectors import ssh, sweep, confetti, panos
         from app.parsers import ios
         from app.parsers import panos as panos_parser
     except ImportError as e:
         raise Skip("app not importable here (%s)" % e)
     _mods.update(config=config, db=db, identity=identity,
                  poller=poller, events=events,
-                 appmod=app_pkg_app, ssh=ssh, sweep=sweep, confetti=confetti, butler=butler, ios=ios,
+                 appmod=app_pkg_app, ssh=ssh, sweep=sweep, confetti=confetti, ios=ios,
                  panos=panos, panos_parser=panos_parser)
     return _mods
 
@@ -651,7 +651,7 @@ def _():
     need(ios_tasks == core + ("vlans", "trunks", "stp", "mac", "config"), "IOS tasks are %r" % (ios_tasks,), p)
     for name, plat in platforms.PLATFORMS.items():
         if plat["transport"] == "snmp":
-            # SNMP (from confetti-butler) asks version and interfaces only, through net-snmp's get and walk: no CLI.
+            # SNMP asks version and interfaces only, through net-snmp's get and walk: no CLI.
             need(tuple(plat["tasks"]) == ("version", "interfaces"), "%s tasks are %r" % (name, plat.get("tasks")), p)
             need("commands" not in plat, "%s: an SNMP platform has no CLI commands" % name, p)
             continue
@@ -810,28 +810,6 @@ def _():
          "the confetti device was lost when the seedfile source failed", p)
     c.close()
 
-    # confetti-butler import: merges by IP/serial, keeps role, a repeat run adds nothing.
-    m2, conn2 = fresh_db()
-    add_device(conn2, "192.0.2.10", "r-old")
-    class FakeResp:
-        def raise_for_status(self): pass
-        def json(self):
-            return [{"hostname": "r-new", "mgmt_ip": "192.0.2.10", "serial": "SN1", "role": "router", "site": "lab"},
-                    {"hostname": "n1", "mgmt_ip": "192.0.2.11", "role": "node", "vendor": "alpine", "platform": "linux"},
-                    {"hostname": "", "mgmt_ip": ""}]
-    real_get = m2["butler"].requests.get
-    m2["butler"].requests.get = lambda url, timeout=10: FakeResp()
-    try:
-        ids1, _c1 = m2["butler"].discover(conn2, "http://butler.invalid/")
-        ids2, _c2 = m2["butler"].discover(conn2, "http://butler.invalid")
-    finally:
-        m2["butler"].requests.get = real_get
-    n = conn2.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
-    need(len(ids1) == 2 and n == 2, "butler import: %d imported, %d devices (expected 2 and 2)" % (len(ids1), n), p)
-    need(ids1 == ids2, "butler import: a repeat run made different devices", p)
-    role = conn2.execute("SELECT role FROM devices WHERE hostname = 'n1'").fetchone()
-    need(role and role[0] == "node", "butler import lost role='node' (it would be SSH-polled)", p)
-    conn2.close()
     return p
 
 
@@ -920,7 +898,7 @@ def _():
     need(r.status_code == 200 and creds(a)["username"] == creds(b)["username"] == "bulk", "bulk apply did not reach both devices", p)
     client.post("/api/credentials/clear", json={"device_ids": [a, b]})
     need(creds(a)["username"] == "setuser" and creds(a)["password"] == "setpw", "clearing own credentials should fall back to Settings: %r" % creds(a), p)
-    # SNMP community and version (from confetti-butler) follow the same order and are never returned by a GET.
+    # SNMP community and version follow the same order and are never returned by a GET.
     snmp = ("snmp_community", "snmp_version")
     config.DEFAULT_SNMP_COMMUNITY, config.DEFAULT_SNMP_VERSION = "envcomm", "1"
     need(creds(a, snmp) == {"snmp_community": "envcomm", "snmp_version": "1"}, "env SNMP defaults not used: %r" % creds(a, snmp), p)
@@ -1240,7 +1218,7 @@ def _():
 
 
 
-# ---- merged in from confetti-butler: templates, config backups, drift, alerting, SNMP, error history ----
+# ---- templates, config backups, drift, alerting, SNMP, error history ----
 
 
 @check("R43", "template rendering: StrictUndefined and sandboxed")

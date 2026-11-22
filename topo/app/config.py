@@ -35,12 +35,12 @@ SNAPSHOT_RETENTION_DAYS = int(os.environ.get("TOPO_SNAPSHOT_RETENTION_DAYS", "14
 FLAP_COUNT = int(os.environ.get("TOPO_FLAP_COUNT", "3"))
 FLAP_WINDOW_S = int(os.environ.get("TOPO_FLAP_WINDOW_S", "3600"))
 
-# Running-config backups (merged from confetti-butler): keep this many per device (0 = all), and error-counter history days.
+# Running-config backups: keep this many per device (0 = all), and error-counter history days.
 CONFIG_VERSIONS_KEEP = int(os.environ.get("TOPO_CONFIG_VERSIONS_KEEP", "0"))
 STATS_RETENTION_DAYS = int(os.environ.get("TOPO_STATS_RETENTION_DAYS", "7"))
 
 # ---------------------------------------------------------------------------
-# Alerting (alerts.py, merged from confetti-butler): rules send a webhook or mail for events and syslog.
+# Alerting (alerts.py): rules send a webhook or mail for events and syslog.
 # ---------------------------------------------------------------------------
 ALERTS_ENABLED = _flag("TOPO_ALERTS_ENABLED", "true")
 ALERT_TICK_S = int(os.environ.get("TOPO_ALERT_TICK_S", "10"))
@@ -81,7 +81,6 @@ SYSLOG_PULL_INTERVAL_S = int(os.environ.get("TOPO_SYSLOG_PULL_INTERVAL_S", "15")
 # ---------------------------------------------------------------------------
 DISCOVERY_INTERVAL_S = int(os.environ.get("TOPO_DISCOVERY_INTERVAL_S", "0"))
 DISCOVERY_CONFETTI_URL = os.environ.get("TOPO_DISCOVERY_CONFETTI_URL", "").strip()
-DISCOVERY_BUTLER_URL = os.environ.get("TOPO_DISCOVERY_BUTLER_URL", "").strip()
 DISCOVERY_SWEEP_CIDRS = [c.strip() for c in os.environ.get("TOPO_DISCOVERY_SWEEP_CIDRS", "").split(",") if c.strip()]
 DISCOVERY_SEEDFILE = os.environ.get("TOPO_DISCOVERY_SEEDFILE", "").strip()
 # Add LLDP neighbors that advertise an unknown management IP as devices
