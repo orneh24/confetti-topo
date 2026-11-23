@@ -212,7 +212,7 @@ These came over on 2026-11-21 as the same code, `BUTLER_*` renamed to `TOPO_*`.
   `config_compliant` events on a change between the two, none on the first evaluation. Saving a template re-evaluates its devices.
 - **IPAM** (`ipam.py`, `/ipam`, `/api/ipam/*`): discovery-first, built from `interfaces`; `POST /api/ipam/analyze` rebuilds
   `ipam_findings` (overlapping prefixes, duplicate addresses). `/api/ipam/prefixes` adds `used`, `size` and `free` (`ipam.usable_hosts`);
-  the page has one search box over both tables (an address also matches the prefix that holds it).
+  the page has one search box over both tables (an address also matches the prefix that holds it). A **Devices** picker (`confetti-topo-ipam-devices`, tick any number of devices, All / None, a find box) limits both tables and the findings to the ticked devices; a prefix's Used and Free still count every device.
 - **Interface error history** (`interface_stats`, `interfaces.input_errors` / `crc_errors`): a sample when the counters change plus one an
   hour, pruned after `TOPO_STATS_RETENTION_DAYS` (7); a counter that goes down (reload) adds nothing to the 24 h growth
   (`ssh.growth`, constraint 33). Rising CRC errors are an `interface_errors` warning event.

@@ -6,6 +6,9 @@
         <div class="section-body" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
             <input type="search" id="ipam-q" placeholder="Search: prefix, address, device, interface" aria-label="Search IPAM"
                    style="min-width:300px" oninput="renderAll()">
+            <button type="button" class="btn-small" id="dev-pick-btn" aria-haspopup="true" aria-expanded="false"
+                    title="Choose which devices IPAM shows (tick any number of them)">Devices: all</button>
+            <div class="col-menu" id="dev-pick-menu" hidden></div>
             <span class="hint" id="ipam-count"></span>
             <span class="hint" style="margin-left:auto">Free = host addresses in the prefix that no polled interface uses (other hosts may still use them).</span>
         </div>
@@ -44,8 +47,106 @@ function esc(s) {
     return d.innerHTML;
 }
 
+// The device picker: tick the devices IPAM shows. picked is null for every device, else {device id: true}. Kept in this browser
+// only; a device that shows up later is not in a saved choice until it is ticked. A finding is shown when it names a ticked device.
+var DEV_SEL_KEY = 'confetti-topo-ipam-devices';
+var picked = null;
+try {
+    var savedSel = JSON.parse(localStorage.getItem(DEV_SEL_KEY));
+    if (Array.isArray(savedSel)) { picked = {}; savedSel.forEach(function (id) { picked[id] = true; }); }
+} catch (e) { picked = null; }
+
+function deviceOn(id) { return picked === null || !!picked[id]; }
+
+function pickableDevices() {   // devices that have an address, by name
+    var seen = {}, list = [];
+    addresses.forEach(function (a) { if (!seen[a.device_id]) { seen[a.device_id] = true; list.push({ id: a.device_id, name: a.hostname }); } });
+    return list.sort(function (a, b) { return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }); });
+}
+
+function setPicked(map) {   // every device ticked is the same as no choice
+    var all = pickableDevices();
+    picked = map && all.some(function (d) { return !map[d.id]; }) ? map : null;
+    try {
+        if (picked === null) { localStorage.removeItem(DEV_SEL_KEY); }
+        else { localStorage.setItem(DEV_SEL_KEY, JSON.stringify(Object.keys(picked).filter(function (k) { return picked[k]; }).map(Number))); }
+    } catch (e) { /* not remembered */ }
+    renderAll();
+}
+
+(function () {
+    var btn = document.getElementById('dev-pick-btn'), menu = document.getElementById('dev-pick-menu');
+    function close() { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); }
+    function fill(keepSearch) {
+        var q = keepSearch ? (menu.querySelector('input') || {}).value || '' : '';
+        var html = '<input type="search" placeholder="Find a device" aria-label="Find a device" value="' + ctxMenu.attr(q) + '" style="width:100%;margin-bottom:6px">' +
+            '<div style="display:flex;gap:6px;margin-bottom:6px"><button type="button" class="btn-small" data-act="all">All</button>' +
+            '<button type="button" class="btn-small" data-act="none">None</button></div>';
+        pickableDevices().forEach(function (d) {
+            if (q && d.name.toLowerCase().indexOf(q.toLowerCase()) < 0) { return; }
+            html += '<label><input type="checkbox" data-id="' + ctxMenu.attr(d.id) + '"' + (deviceOn(d.id) ? ' checked' : '') + '> ' + esc(d.name) + '</label>';
+        });
+        menu.innerHTML = html;
+        if (keepSearch) { var inp = menu.querySelector('input'); inp.focus(); inp.setSelectionRange(q.length, q.length); }
+    }
+    btn.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        if (!menu.hidden) { close(); return; }
+        fill(false);
+        menu.hidden = false;
+        var r = btn.getBoundingClientRect();
+        menu.style.top = (r.bottom + 4) + 'px';
+        menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - menu.offsetWidth - 8)) + 'px';
+        btn.setAttribute('aria-expanded', 'true');
+    });
+    menu.addEventListener('change', function (ev) {
+        var id = parseInt(ev.target.getAttribute('data-id'), 10);
+        if (isNaN(id)) { return; }
+        var map = {};
+        pickableDevices().forEach(function (d) { if (deviceOn(d.id)) { map[d.id] = true; } });
+        if (ev.target.checked) { map[id] = true; } else { delete map[id]; }
+        setPicked(map);
+    });
+    menu.addEventListener('input', function (ev) { if (ev.target.type === 'search') { fill(true); } });
+    menu.addEventListener('click', function (ev) {
+        var act = ev.target.getAttribute('data-act');
+        if (!act) { return; }
+        var map = {};
+        // "All" and "None" act on the devices the search box shows (all of them when it is empty).
+        var q = (menu.querySelector('input') || {}).value || '';
+        pickableDevices().forEach(function (d) {
+            var inSearch = !q || d.name.toLowerCase().indexOf(q.toLowerCase()) >= 0;
+            if (inSearch ? act === 'all' : deviceOn(d.id)) { map[d.id] = true; }
+        });
+        setPicked(map);
+        fill(true);
+    });
+    document.addEventListener('pointerdown', function (ev) { if (!menu.hidden && !menu.contains(ev.target) && ev.target !== btn) { close(); } });
+    document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') { close(); } });
+    window.addEventListener('resize', close);
+})();
+
+var findings = [];
+function hostnameIn(text, name) {
+    var esc2 = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp('(^|[^A-Za-z0-9_.-])' + esc2 + '($|[^A-Za-z0-9_-])').test(text);
+}
+function findingShown(f) {
+    if (picked === null) { return true; }
+    var text = [f.a, f.b || '', f.detail].join(' ');
+    return pickableDevices().some(function (d) { return deviceOn(d.id) && hostnameIn(text, d.name); });
+}
+
 function loadFindings() {
     fetch('/api/ipam/findings').then(function (r) { return r.json(); }).then(function (list) {
+        findings = list;
+        renderFindings();
+    });
+}
+
+function renderFindings() {
+    {
+        var list = findings.filter(findingShown);
         var rows = '';
         for (var i = 0; i < list.length; i++) {
             var f = list[i];
@@ -55,7 +156,9 @@ function loadFindings() {
         }
         document.getElementById('finding-rows').innerHTML = rows;
         document.getElementById('finding-empty').style.display = list.length ? 'none' : 'block';
-    });
+        document.getElementById('finding-empty').textContent = findings.length && !list.length ? 'no finding names a ticked device' :
+            'no findings — run an analysis, or nothing is wrong';
+    }
 }
 
 // The search box narrows both tables in the browser. An address also finds the prefixes that hold it.
@@ -75,12 +178,26 @@ function query() { return document.getElementById('ipam-q').value.trim().toLower
 
 function renderPrefixes() {
     var q = query(), rows = '', shown = 0;
+    // With devices picked, a prefix is listed when a picked device has an address in it, and Interfaces / Devices count the
+    // picked devices only. Used and Free still count every device (they say how full the prefix is).
+    var mine = null;
+    if (picked !== null) {
+        mine = {};
+        addresses.forEach(function (a) {
+            if (!deviceOn(a.device_id)) { return; }
+            var m = mine[a.network] = mine[a.network] || { interfaces: 0, devs: {} };
+            m.interfaces++;
+            m.devs[a.device_id] = true;
+        });
+    }
     prefixes.forEach(function (p) {
+        if (mine && !mine[p.network]) { return; }
         if (q && p.network.toLowerCase().indexOf(q) < 0 && !inNet(q, p.network)) { return; }
         shown++;
         var free = p.free === null ? '' : p.free + ' of ' + p.size;
-        rows += '<tr data-ctx="prefix" data-net="' + ctxMenu.attr(p.network) + '"><td>' + esc(p.network) + '</td><td>' + p.interfaces +
-            '</td><td>' + p.devices + '</td><td>' + p.used + '</td><td data-sort="' + (p.free === null ? '' : p.free) + '">' + esc(free) + '</td></tr>';
+        var nIf = mine ? mine[p.network].interfaces : p.interfaces, nDev = mine ? Object.keys(mine[p.network].devs).length : p.devices;
+        rows += '<tr data-ctx="prefix" data-net="' + ctxMenu.attr(p.network) + '"><td>' + esc(p.network) + '</td><td>' + nIf +
+            '</td><td>' + nDev + '</td><td>' + p.used + '</td><td data-sort="' + (p.free === null ? '' : p.free) + '">' + esc(free) + '</td></tr>';
     });
     document.getElementById('prefix-rows').innerHTML = rows || '<tr><td colspan="5" class="empty">' + (prefixes.length ? 'no prefix matches' : 'none yet') + '</td></tr>';
     return shown;
@@ -108,9 +225,12 @@ function toggleCap(name) {
 
 function renderAll() {
     var a = renderPrefixes(), b = renderAddresses(), q = query();
+    renderFindings();
     showCap('prefix');
     showCap('address');
-    document.getElementById('ipam-count').textContent = q ? a + ' prefix(es), ' + b + ' address(es)' : '';
+    var total = pickableDevices().length, n = pickableDevices().filter(function (d) { return deviceOn(d.id); }).length;
+    document.getElementById('dev-pick-btn').textContent = picked === null ? 'Devices: all' : 'Devices: ' + n + ' of ' + total;
+    document.getElementById('ipam-count').textContent = q || picked !== null ? a + ' prefix(es), ' + b + ' address(es)' + (picked !== null ? ' (Used and Free count every device)' : '') : '';
 }
 
 function loadAddresses() {
@@ -123,6 +243,7 @@ function loadAddresses() {
 function renderAddresses() {
     var q = query(), shown = 0, rows = '';
     addresses.forEach(function (a) {
+        if (!deviceOn(a.device_id)) { return; }
         if (q && [a.ip + '/' + a.prefix_len, a.hostname, a.interface].join(' ').toLowerCase().indexOf(q) < 0) { return; }
         shown++;
         var cls = a.oper_status === 'up' ? 'ok' : 'bad';
