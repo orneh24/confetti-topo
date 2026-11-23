@@ -2,8 +2,8 @@
 
 Runs the existing discovery paths (confetti-traffic import, subnet sweep, YAML
 seed file) on a timer, so a new VM or a new node shows up without anyone
-pressing a button. Off by default: TOPO_DISCOVERY_INTERVAL_S=0, and a source
-that is not configured is skipped. Everything still goes through
+pressing a button. Off by default: TOPO_DISCOVERY_INTERVAL_S=0 and no saved
+traffic_import_interval_min, and a source that is not configured is skipped. Everything still goes through
 identity.ingest; this module only decides when.
 
 A device that did not exist before a run gets a `device_discovered` event.
@@ -26,7 +26,7 @@ _status = {"last_run": None, "last_error": None, "last_summary": None}
 
 def status():
     out = dict(_status)
-    out["enabled"] = config.DISCOVERY_INTERVAL_S > 0
+    out["enabled"] = config.DISCOVERY_INTERVAL_S > 0 or (_thread is not None and _thread.is_alive())
     return out
 
 

@@ -266,6 +266,7 @@ TOPO_SYSLOG_ENABLED=true
 
 # --- Discovery (all off until configured) --------------------------------
 # Seconds between scheduled runs of the sources below; 0 = never.
+# (The node import from the Settings-page Confetti Traffic URL has its own timer, set on the Settings page, not here.)
 TOPO_DISCOVERY_INTERVAL_S=0
 # TOPO_DISCOVERY_CONFETTI_URL=http://10.0.0.100
 # TOPO_DISCOVERY_SWEEP_CIDRS=10.0.1.0/24,10.0.2.0/24

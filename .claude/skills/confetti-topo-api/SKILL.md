@@ -67,9 +67,10 @@ those two columns to NULL, so its neighbors become ghosts again.
   `POST /api/credentials/clear {device_ids}`
 - `POST /api/devices/<id>/merge`; `GET /api/conflicts?resolved=0|1`; `POST /api/conflicts/<id>/dismiss`
 
-**Discovery:** `POST /api/discover/{sweep,seedfile,confetti}` return `{device_ids, conflicts}`
-(`hub_url` may be a bare IP; `http://` is added).
-`POST /api/discover/run` runs the scheduled sources now (`TOPO_DISCOVERY_*`); `GET /api/discover/status`.
+**Discovery:** `POST /api/discover/{sweep,seedfile,confetti,traffic}` return `{device_ids, conflicts}`
+(`hub_url` may be a bare IP; `http://` is added; `traffic` takes no body and uses the URL saved on Settings, 400 if none, 502 if the hub fails).
+`GET|PUT /api/settings/traffic-import` `{interval_min}` sets the opt-in re-import timer (0 = off, else 5..1440); GET returns `{url, interval_min, status}`.
+`POST /api/discover/run` runs the `TOPO_DISCOVERY_*` sources now; `GET /api/discover/status` (neither covers the saved-URL timer).
 `GET /api/lldp/unknown`; `POST /api/lldp/adopt {ip, hostname?}` adds one with polling OFF (`enabled=0`).
 
 **Topology:** `GET /api/topology?layer=lldp|bgp|ospf[,..]` (vis.js `{nodes, edges}`; each edge has `details`, one report per end that saw it, default overlays all three),

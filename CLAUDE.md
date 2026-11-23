@@ -327,6 +327,9 @@ fades non-matching devices on the map; link details carry `local_port_state`.
   `TOPO_DISCOVERY_CONFETTI_URL` / `_SWEEP_CIDRS` / `_SEEDFILE`). Each source commits on its own, so one
   failing source never discards another's work. A device that did not exist before gets a
   `device_discovered` event. `POST /api/discover/run` runs it once by hand. There is no vCenter source.
+- A second, opt-in timer imports the node fleet from the hub URL saved on Settings every `traffic_import_interval_min` minutes (0 = off, else 5-1440;
+  `GET|PUT /api/settings/traffic-import`, `discovery.import_traffic`, `POST /api/discover/traffic` by hand). It runs even with `TOPO_DISCOVERY_INTERVAL_S=0`,
+  is skipped when `TOPO_DISCOVERY_CONFETTI_URL` is the same hub, and commits on its own. `discovery.start()` is idempotent and is called again when the interval is saved.
 - `app/lldp_crawl.py`: an LLDP neighbor advertising a management IP no device owns is listed by
   `GET /api/lldp/unknown` and added by `POST /api/lldp/adopt` (or automatically with
   `TOPO_LLDP_AUTO_ADOPT=true`, default false). It goes through `identity.ingest`, and the new device is
