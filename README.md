@@ -34,7 +34,8 @@ Classic layout, labelled Tools). The look follows the hub UI of the sibling proj
   the Settings page (off by default) also match an LLDP neighbor's chassis ID to a device's management MAC
   (PAN-OS reports it) or its system name to a hostname, for neighbors that advertise no known management IP.
 - **Devices.** Add routers by hand, by a subnet sweep (SSH port scan), from a YAML seed file, or import the
-  test nodes from confetti-traffic. The same router seen by two sources lands on one device. When the
+  test nodes from confetti-traffic; an imported node is managed through its hub (no login, nothing sent to the node): its up/down state,
+  build, subnet and the switch port it is plugged into (its own LLDP report) show on the map. The same router seen by two sources lands on one device. When the
   identifiers disagree (the same IP now answers with a different serial), it raises a conflict instead of
   guessing.
 - **Templates, backups and drift.** A Jinja2 config template per device, rendered from what the router reports; the
@@ -62,7 +63,7 @@ Classic layout, labelled Tools). The look follows the hub UI of the sibling proj
 - **Device page.** A status strip at the top (ping, poll, sessions, drift, errors, ports down), a Test login button, interfaces, LLDP neighbors, BGP/OSPF sessions and the routing table (filter, "export CSV"). On a switch also VLANs, trunks, the spanning-tree summary and the learned MAC addresses (filter; a MAC that belongs to a known device names it).
 - **Map notes.** A note on any node or link (circuit ID, provider, ticket), shown in its card and in the JSON export.
 - **Metrics.** `GET /metrics` serves Prometheus text.
-- **Other Confetti projects.** Type the Traffic URL on the Settings page and a small button for it appears at the right of the top menu (opens in a new tab).
+- **Confetti Traffic.** One Settings panel holds the Traffic URL (a small button for it appears at the right of the top menu and opens in a new tab) and the syslog pull from it.
 - **Dashboard.** Widgets: System, Services, Activity, Devices, Events, Sessions down, Open conflicts, Unknown LLDP neighbors (with an add button) and Map changes (each row opens that snapshot on the map). Drag a widget by its title to move it (a copy follows the pointer and a grid outline shows where it will land; drop it on the middle of another widget to put them side by side, sharing the row, or into the empty space at the end of a row), drag its corner to resize it; the arrangement is kept in the browser, "Reset layout" undoes it and "Auto sort layout" rearranges the widgets to leave as little empty space as it can. "Lock layout" keeps them where they are (no moving, resizing or automatic sorting) until it is unlocked. The Devices widget shows IP, vendor, model, OS version, ping and poll state; click a heading to sort and use Columns to add or remove columns (also role, site, platform, serial).
 - **Look.** Seven colour themes (or Shuffle) and four layouts (MS-DOS in two colour variants), picked in the header.
 

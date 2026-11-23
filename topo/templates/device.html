@@ -72,7 +72,7 @@
                     <label for="f-enabled">polling enabled</label><input id="f-enabled" name="enabled" type="checkbox">
                 </div>
                 <datalist id="role-list"><option value="router"><option value="switch"><option value="firewall"><option value="node"></datalist>
-                <datalist id="platform-list"><option value="cisco_ios"><option value="cisco_xe"><option value="paloalto_panos"><option value="snmp"><option value="linux"></datalist>
+                <datalist id="platform-list"><option value="cisco_ios"><option value="cisco_xe"><option value="paloalto_panos"><option value="snmp"><option value="confetti_node"><option value="linux"></datalist>
                 <button type="submit">Save</button><span class="msg" id="edit-msg"></span>
             </form>
         </div>
@@ -270,6 +270,9 @@
 DashGrid.init({ container: '.container', prefix: 'confetti-topo', page: 'device', autoSort: true });
 var deviceId = {{ device_id }};
 
+// A node is polled only when it came from a Confetti Traffic hub (platform confetti_node); any other node is not.
+function isUnpolled(d) { return d.role === 'node' && d.platform !== 'confetti_node'; }
+
 function esc(s) {
     var d = document.createElement('div');
     d.textContent = s === null || s === undefined ? '' : String(s);
@@ -291,7 +294,7 @@ function loadDevice() {
             kv('site', d.site || '') + kv('key', d.key) + kv('enabled', d.enabled ? 'yes' : 'no') +
             kv('ping', d.reachable === null || d.reachable === undefined ? 'not checked' : (d.reachable ? 'up' : 'down')) +
             kv('poll interval', d.poll_interval_s + 's') + kv('poll state', d.poll_state) +
-            kv('fail count', d.fail_count) + (d.last_poll_error ? kv('last poll error', d.last_poll_error) : '') + kv('first seen', d.first_seen) + kv('last seen', d.last_seen);
+            kv('fail count', d.fail_count) + (d.hub_info ? kv('hub says', d.hub_info) : '') + (d.last_poll_error ? kv('last poll error', d.last_poll_error) : '') + kv('first seen', d.first_seen) + kv('last seen', d.last_seen);
         document.getElementById('device-body').innerHTML = body;
         fillEditForm(d);
 
@@ -778,7 +781,7 @@ function loadStatus(d) {
         var adj = res[0], ifs = res[1], html = '';
         html += chip('#device-body', 'Ping', d.reachable === null || d.reachable === undefined ? 'not checked' : (d.reachable ? 'up' : 'down'),
                      d.reachable === 0 ? 'bad' : (d.reachable ? 'ok' : 'idle'));
-        if (d.role === 'node' || !d.enabled) {
+        if (isUnpolled(d) || !d.enabled) {
             html += chip('#device-body', 'Poll', 'not polled', 'idle');
         } else if (d.fail_count > 0) {
             html += chip('#device-body', 'Poll', 'failing (' + d.fail_count + ')', 'bad', (d.last_poll_error ? d.last_poll_error + ' - ' : '') + (d.last_poll_ok ? 'last good poll ' + d.last_poll_ok : 'never polled ok'));
@@ -967,7 +970,7 @@ ctxMenu.register('page', function (el, ev) {
     if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
     var d = current;
     if (!d) { return null; }
-    var isNode = d.role === 'node';
+    var isNode = isUnpolled(d);
     return { title: d.hostname || 'Device', items: [
         { label: 'Poll now', action: pollNow, disabled: isNode || !d.enabled },
         { label: 'Show on topology', action: function () { window.location.href = '/topology?device=' + deviceId; } },

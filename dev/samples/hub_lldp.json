@@ -1,0 +1,13 @@
+[
+ {
+  "node": "node-a",
+  "local_port": "eth0",
+  "chassis_id": "00:00:5e:00:53:01",
+  "port_id": "Gi1/0/7",
+  "port_descr": "GigabitEthernet1/0/7",
+  "sys_name": "lab-sw-a",
+  "sys_descr": "Cisco IOS Software, Catalyst",
+  "mgmt_ip": "192.0.2.2",
+  "updated": "2099-01-01T00:00:00Z"
+ }
+]

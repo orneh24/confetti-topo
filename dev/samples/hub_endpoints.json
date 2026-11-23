@@ -1,0 +1,34 @@
+[
+ {
+  "hostname": "node-a",
+  "ip": "192.0.2.51",
+  "subnet": "192.0.2.0/24",
+  "group_name": "labgroup",
+  "group_overridden": false,
+  "group_registered": "labgroup",
+  "last_seen": "2099-01-01T00:00:00Z",
+  "build": "2026-11-20.1",
+  "managed": true,
+  "update_state": "ok",
+  "update_msg": "",
+  "update_at": null,
+  "clock_synced": true,
+  "clock_offset_s": 0.003
+ },
+ {
+  "hostname": "node-b",
+  "ip": "192.0.2.52",
+  "subnet": "192.0.2.0/24",
+  "group_name": "labgroup",
+  "group_overridden": false,
+  "group_registered": "labgroup",
+  "last_seen": "2000-01-01T00:00:00Z",
+  "build": "2026-11-20.1",
+  "managed": true,
+  "update_state": "idle",
+  "update_msg": "",
+  "update_at": null,
+  "clock_synced": false,
+  "clock_offset_s": null
+ }
+]

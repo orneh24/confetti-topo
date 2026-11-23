@@ -4,6 +4,7 @@
 <style>
 .msg { font-size: 12px; margin-top: 8px; }
 .bulk { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+h3.sub-head { font-size: 13px; margin: 14px 0 6px; padding-top: 10px; border-top: 1px solid var(--border-soft); }
 </style>
 {% endblock %}
 {% block content %}
@@ -29,28 +30,24 @@
         </div>
     </div>
     <div class="section">
-        <div class="section-header"><span>Syslog from other servers</span></div>
-        <div class="section-body">
-            <div class="hint" id="sp-status">loading</div>
-            <form id="sp-form" onsubmit="return false;">
-                <div id="sp-rows"></div>
-                <div class="hint">Lets a device log to one Confetti server only. This server then reads the other one's own messages every few seconds
-                    (nothing it pulled itself is passed on) and skips a message it already has. Switching a server on starts from its newest message; its
-                    history is not copied. Set its URL in the section below first. A pulled message from a device here also asks for an early poll.</div>
-                <span class="msg" id="sp-msg"></span>
-            </form>
-        </div>
-    </div>
-    <div class="section">
-        <div class="section-header"><span>Other Confetti projects</span></div>
+        <div class="section-header"><span>Confetti Traffic</span></div>
         <div class="section-body">
             <form id="links-form" onsubmit="saveLinks(); return false;" autocomplete="off">
                 <div class="form-grid">
                     <label for="l-traffic" data-ctx="link" data-field="traffic">Confetti Traffic URL</label><input id="l-traffic" name="traffic" placeholder="http://confetti-hub.example">
                 </div>
-                <div class="hint">A small button for each URL that is filled in appears at the right of the top menu on every page and opens that project in a new tab. Only http:// or https://. Leave a field empty to remove its button. The server connects to one of these addresses only for the syslog pull below, and only if you switch that on.</div>
+                <div class="hint">A small button for the URL appears at the right of the top menu on every page and opens Confetti Traffic in a new tab. Only http:// or https://. Leave the field empty to remove the button. The server connects to this address only for the syslog pull below, and only if you switch that on.</div>
                 <button type="submit" class="primary">Save</button>
                 <span class="msg" id="links-msg"></span>
+            </form>
+            <h3 class="sub-head">Syslog from Confetti Traffic</h3>
+            <div class="hint" id="sp-status">loading</div>
+            <form id="sp-form" onsubmit="return false;">
+                <div id="sp-rows"></div>
+                <div class="hint">Lets a device log to one Confetti server only. This server then reads the other one's own messages every few seconds
+                    (nothing it pulled itself is passed on) and skips a message it already has. Switching it on starts from its newest message; its
+                    history is not copied. Set the URL above first. A pulled message from a device here also asks for an early poll.</div>
+                <span class="msg" id="sp-msg"></span>
             </form>
         </div>
     </div>
@@ -78,6 +75,33 @@
             <button type="button" onclick="saveFlap()">Save</button><span class="msg" id="flap-msg"></span>
         </div>
     </div>
+    <div class="section">
+        <div class="section-header"><span>Device credentials</span></div>
+        <div class="section-body">
+            <div class="hint">Set the same credentials on several devices, or remove their own credentials so they use the defaults. Confetti Traffic nodes are asked through their hub, need no login and are not listed.</div>
+            <input type="search" data-filter-table="cred-table" placeholder="Filter: hostname, IP" aria-label="Filter devices" style="margin-bottom:6px">
+            <table id="cred-table">
+                <thead>
+                    <tr>
+                        <th><input type="checkbox" id="sel-all" onchange="selectAll(this.checked)" aria-label="Select all"></th>
+                        <th>Hostname</th><th>Mgmt IP</th><th>Own credentials</th><th>Changed</th><th>Login</th>
+                    </tr>
+                </thead>
+                <tbody id="dev-rows"></tbody>
+            </table>
+            <div class="empty" id="dev-empty" style="display:none">No pollable devices yet.</div>
+            <form class="bulk" id="bulk-form" onsubmit="return false;" autocomplete="off">
+                <input type="text" name="username" placeholder="ssh username" autocomplete="off">
+                <input type="password" name="password" placeholder="ssh password" autocomplete="new-password">
+                <input type="password" name="enable_secret" placeholder="enable secret" autocomplete="new-password">
+                <button type="button" class="primary" onclick="applySelected()">Apply to selected</button>
+                <button type="button" onclick="removeSelected()">Remove own credentials from selected</button>
+                <span class="msg" id="bulk-msg"></span>
+            </form>
+            <div class="hint">Apply only changes the fields you fill in. Test login signs in with what the device would use now
+                (its own, else the defaults) and runs only the version command; nothing is stored.</div>
+        </div>
+    </div>
     <div class="section" data-fold="backup" data-fold-default="closed">
         <div class="section-header"><span>Backup and restore</span></div>
         <div class="section-body">
@@ -100,33 +124,6 @@
                 <button type="submit">Restore from file</button>
                 <span class="msg" id="rs-msg"></span>
             </form>
-        </div>
-    </div>
-    <div class="section">
-        <div class="section-header"><span>Device credentials</span></div>
-        <div class="section-body">
-            <div class="hint">Set the same credentials on several devices, or remove their own credentials so they use the defaults. Nodes imported from Confetti Traffic are never polled and are not listed.</div>
-            <input type="search" data-filter-table="cred-table" placeholder="Filter: hostname, IP" aria-label="Filter devices" style="margin-bottom:6px">
-            <table id="cred-table">
-                <thead>
-                    <tr>
-                        <th><input type="checkbox" id="sel-all" onchange="selectAll(this.checked)" aria-label="Select all"></th>
-                        <th>Hostname</th><th>Mgmt IP</th><th>Own credentials</th><th>Changed</th><th>Login</th>
-                    </tr>
-                </thead>
-                <tbody id="dev-rows"></tbody>
-            </table>
-            <div class="empty" id="dev-empty" style="display:none">No pollable devices yet.</div>
-            <form class="bulk" id="bulk-form" onsubmit="return false;" autocomplete="off">
-                <input type="text" name="username" placeholder="ssh username" autocomplete="off">
-                <input type="password" name="password" placeholder="ssh password" autocomplete="new-password">
-                <input type="password" name="enable_secret" placeholder="enable secret" autocomplete="new-password">
-                <button type="button" class="primary" onclick="applySelected()">Apply to selected</button>
-                <button type="button" onclick="removeSelected()">Remove own credentials from selected</button>
-                <span class="msg" id="bulk-msg"></span>
-            </form>
-            <div class="hint">Apply only changes the fields you fill in. Test login signs in with what the device would use now
-                (its own, else the defaults) and runs only the version command; nothing is stored.</div>
         </div>
     </div>
 </div>
@@ -197,7 +194,7 @@ function loadSyslogPull() {
             cb.disabled = !sv.url && !sv.pull;
             cb.onchange = function () { saveSyslogPull(name, cb.checked); };
             label.appendChild(cb);
-            label.appendChild(document.createTextNode(' Pull syslog from ' + SP_NAMES[name] + (sv.url ? '' : ' (set its URL below first)')));
+            label.appendChild(document.createTextNode(' Pull syslog from ' + SP_NAMES[name] + (sv.url ? '' : ' (set the URL above first)')));
             row.appendChild(label);
             var info = document.createElement('div');
             info.className = 'hint';

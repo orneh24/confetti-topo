@@ -419,6 +419,9 @@ def init_db():
     # Why the last poll failed (pollerr.py); empty after a good poll.
     if "last_poll_error" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
         db.execute("ALTER TABLE devices ADD COLUMN last_poll_error TEXT NOT NULL DEFAULT ''")
+    # What the hub says about a Confetti Traffic node: clock state, update state (collectors/hub.py).
+    if "hub_info" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
+        db.execute("ALTER TABLE devices ADD COLUMN hub_info TEXT NOT NULL DEFAULT ''")
     if "drift_status" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
         db.execute("ALTER TABLE devices ADD COLUMN drift_status TEXT")
     if "snmp_community" not in [r[1] for r in db.execute("PRAGMA table_info(credentials)")]:

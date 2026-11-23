@@ -133,6 +133,9 @@ function kv(k, v, cls) {
         (cls ? ' ' + cls : '') + '">' + v + '</span></div>';
 }
 
+// A node is polled only when it came from a Confetti Traffic hub (platform confetti_node); any other node is not.
+function isUnpolled(d) { return d.role === 'node' && d.platform !== 'confetti_node'; }
+
 function esc(s) {
     var d = document.createElement('div');
     d.textContent = s === null || s === undefined ? '' : String(s);
@@ -238,7 +241,7 @@ function ipKey(ip) {
 }
 function pingRank(d) { return d.reachable === 0 ? 0 : (d.reachable === 1 ? 2 : 1); }
 function pollRank(d) {
-    if (d.role === 'node' || !d.enabled) { return 3; }
+    if (isUnpolled(d) || !d.enabled) { return 3; }
     return d.fail_count > 0 ? 0 : (d.last_poll_ok ? 2 : 1);
 }
 function textCell(field) { return function (d) { return esc(d[field]); }; }
@@ -258,12 +261,12 @@ var DEV_COLUMNS = [
       } },
     { key: 'poll', label: 'Poll', val: pollRank,
       cell: function (d) {
-          return d.role === 'node' || !d.enabled ? '<span class="pill idle">not polled</span>'
+          return isUnpolled(d) || !d.enabled ? '<span class="pill idle">not polled</span>'
               : (d.fail_count > 0 ? '<span class="pill bad" title="' + d.fail_count + ' failed in a row">failing</span>'
                  : (d.last_poll_ok ? '<span class="pill ok">ok</span>' : '<span class="pill idle">waiting</span>'));
       } },
-    { key: 'last_poll_ok', label: 'Last good poll', val: function (d) { return d.role === 'node' ? '' : (d.last_poll_ok || ''); },
-      cell: function (d) { return d.role === 'node' ? '' : esc(timeAgo(d.last_poll_ok)); } },
+    { key: 'last_poll_ok', label: 'Last good poll', val: function (d) { return isUnpolled(d) ? '' : (d.last_poll_ok || ''); },
+      cell: function (d) { return isUnpolled(d) ? '' : esc(timeAgo(d.last_poll_ok)); } },
     { key: 'role', label: 'Role', val: textVal('role'), cell: textCell('role') },
     { key: 'site', label: 'Site', val: textVal('site'), cell: textCell('site') },
     { key: 'platform', label: 'Platform', val: textVal('platform'), cell: textCell('platform') },
@@ -333,7 +336,7 @@ function toggleCap(name) {
 
 // "Problems only": just the devices that are down, failing to poll or off their template. A long list starts that way.
 var PROB_KEY = 'confetti-topo-dashboard-problems';
-function isProblem(d) { return d.reachable === 0 || (d.role !== 'node' && d.fail_count > 0) || d.drift_status === 'drifted'; }
+function isProblem(d) { return d.reachable === 0 || (!isUnpolled(d) && d.fail_count > 0) || d.drift_status === 'drifted'; }
 function problemsOn() {
     var saved = null;
     try { saved = localStorage.getItem(PROB_KEY); } catch (e) { saved = null; }
@@ -445,7 +448,7 @@ function loadKpis() {
         renderDevices(list);
         var failing = list.filter(function (d) { return d.fail_count > 0; });
         var silent = list.filter(function (d) { return d.reachable === 0; });
-        var nodes = list.filter(function (d) { return d.role === 'node'; }).length;
+        var nodes = list.filter(isUnpolled).length;
         setKpi('dev', list.length, '', (list.length - nodes) + ' polled, ' + nodes + ' nodes');
         setKpi('fail', failing.length, failing.length ? 'bad' : 'good',
             failing.slice(0, 3).map(function (d) { return d.hostname; }).join(', '));
@@ -616,11 +619,11 @@ function go(url) { window.location.href = url; }
 ctxMenu.register('device', function (tr) {
     var d = devById[tr.getAttribute('data-id')];
     if (!d) { return null; }
-    var pollable = d.role !== 'node' && d.enabled;
+    var pollable = !isUnpolled(d) && d.enabled;
     return { title: d.hostname, items: [
         { label: 'Open device page', action: function () { go('/devices/' + d.id); } },
         { label: 'Show on topology', action: function () { go('/topology?device=' + d.id); } },
-        { label: 'Routing table', action: function () { go('/devices/' + d.id + '#routes'); }, disabled: d.role === 'node' },
+        { label: 'Routing table', action: function () { go('/devices/' + d.id + '#routes'); }, disabled: isUnpolled(d) },
         { label: 'Copy name', action: function () { ctxMenu.copy(d.hostname || ''); } },
         { label: 'Copy IP', action: function () { ctxMenu.copy(d.mgmt_ip || ''); }, disabled: !d.mgmt_ip },
         { label: 'Poll now', disabled: !pollable, action: function () {

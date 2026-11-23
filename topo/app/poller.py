@@ -21,6 +21,7 @@ from . import history
 from . import identity
 from . import platforms
 from . import pollerr
+from .collectors import hub as hub_collector
 from .collectors import panos as panos_collector
 from .collectors import ssh as ssh_collector
 
@@ -84,7 +85,7 @@ def _tick(executor):
         now = db.sqlite_now()
         rows = conn.execute(
             """SELECT id FROM devices
-               WHERE enabled = 1 AND poll_state = 'idle' AND role != 'node'
+               WHERE enabled = 1 AND poll_state = 'idle' AND (role != 'node' OR platform = 'confetti_node')
                  AND (next_poll_at = '' OR next_poll_at <= ?
                       OR (poll_requested_at != '' AND fail_count = 0))
                LIMIT ?""",
@@ -152,7 +153,7 @@ def _poll_device(device_id):
         creds = ssh_collector.resolve_credentials(conn, device_id)
         # The platform says how to ask the device; what comes back is applied the same way for all.
         transport = platforms.get(device["platform"])["transport"]
-        collector = panos_collector if transport == "xml_api" else ssh_collector
+        collector = panos_collector if transport == "xml_api" else hub_collector if transport == "hub_api" else ssh_collector
 
         results = {}
         started = db.sqlite_now()

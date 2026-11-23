@@ -68,8 +68,9 @@ queued twice), and hand each to a `ThreadPoolExecutor` (`TOPO_POLL_WORKERS`, def
 Per device, eleven tasks run independently, **each committing its own transaction**: `version`, `interfaces`,
 `lldp`, `bgp`, `ospf`, `routes`, `config` (IOS only, the running-config backup, last so a slow read delays nothing) and `vlans`, `trunks`, `stp` and `mac` (IOS **switches** only: `ssh.run_tasks` leaves it out for a router, which answers
 `Invalid input`, and PAN-OS has none; a new switch gets it from its second poll, once its model is known). Partial failure is the normal case — an LLDP timeout must never discard interface data
-collected 200ms earlier. `role='node'` devices (confetti-traffic's imported Alpine fleet) are never polled —
-`poller.py`'s device-selection query filters `role != 'node'`.
+collected 200ms earlier. `role='node'` devices (confetti-traffic's imported Alpine fleet) are polled only when their platform is
+`confetti_node`, and then through the hub, not by SSH (`collectors/hub.py`, constraint 39); any other node is never polled —
+`poller.py`'s device-selection query is `role != 'node' OR platform = 'confetti_node'`.
 
 All eleven tasks share **one SSH session** per poll (PAN-OS: one keygen per poll) (`ssh.run_tasks` is a generator, so each task still commits
 before the next command runs). Each apply step deletes that device's rows not seen in this poll — a removed
@@ -409,7 +410,7 @@ There is no Packer template: topo is installed once per environment, so the buil
 | Manual | `POST /api/devices` | Operator-entered, from the Devices page |
 | Subnet sweep | `POST /api/discover/sweep` | TCP connect to port 22 only (a firewall with SSH off must be added by hand or seed file) — coarse on purpose; the poller's own `version` task does real identification next cycle |
 | YAML seed file | `POST /api/discover/seedfile` | `seed/devices.yaml.sample` shows the shape |
-| confetti-traffic import | `POST /api/discover/confetti` | `GET <hub_url>/endpoints`, imported as `role='node'`, `vendor='alpine'`, `platform='linux'` — never SSH-polled. `site` is the endpoint's `group_name`, which is confetti-traffic's *effective* group: a group set on its dashboard overrides what the node registers, so an override changes `site` on the next import |
+| confetti-traffic import | `POST /api/discover/confetti` | `GET <hub_url>/endpoints`, imported as `role='node'`, `vendor='alpine'`, `platform='confetti_node'` — managed through the hub, never SSH-polled. `site` is the endpoint's `group_name`, which is confetti-traffic's *effective* group: a group set on its dashboard overrides what the node registers, so an override changes `site` on the next import |
 | LLDP crawl | `POST /api/lldp/adopt` | A neighbor with an unknown management IP, added inventory-only (polling off) |
 
 ## Project Structure
@@ -540,11 +541,12 @@ Keep the two in step; `confetti-interop-checker` reports drift.
 7. **`identity.observe` (poller path) and `identity.ingest` (discovery paths) are not interchangeable.**
    `observe` skips alias-matching because the caller already knows the device_id; calling `ingest` from the
    poller with only a newly-discovered `serial` would create a duplicate device.
-8. **`role='node'` devices are never SSH-polled.** `poller.py`'s device-selection query filters
-   `role != 'node'` — confetti-traffic's imported Alpine test VMs would fail every IOS `show` command.
+8. **`role='node'` devices are never SSH-polled.** `poller.py`'s device-selection query is
+   `role != 'node' OR platform = 'confetti_node'` — confetti-traffic's imported Alpine test VMs would fail every IOS `show` command; a
+   managed node (platform `confetti_node`) is asked through its hub instead (constraint 39), and `POST /api/devices/<id>/poll` refuses any other node.
 9. **A subnet sweep's ingest passes no `hostname` field**, only the `mgmt_ip` candidate. A known device's real
    hostname must never be overwritten with a raw IP string on re-sweep.
-10. **confetti-traffic's imported nodes get explicit `vendor='alpine'`, `platform='linux'`** in
+10. **confetti-traffic's imported nodes get explicit `vendor='alpine'`, `platform='confetti_node'`** in
     `collectors/confetti.py` — empty strings would fall through to `identity._create_device`'s
     `cisco`/`cisco_ios` defaults and mislabel every Alpine VM as a Cisco router.
 11. **Events are written inside the transaction of the change they describe, and not on a task's first
@@ -651,6 +653,15 @@ Keep the two in step; `confetti-interop-checker` reports drift.
     (constraint 12), Test login runs the `version` task alone and never on `role='node'`. Checked by R54.
 38. **A failed poll says why, and never leaks a secret.** `app/pollerr.py` `explain()` is the one place that turns a caught error (Netmiko, paramiko, requests, net-snmp) into a one-line reason plus advice: login rejected, port refused, no answer within N s, no route, DNS, command did not finish (a `ReadTimeout` is not a connection problem), SSH negotiation, enable secret, TLS, API login, SNMP. Login errors are fixed texts; the library's own text is used only for negotiation and unknown errors, cut to one line. `poller._finish(conn, id, any_ok, errors)` writes the reason into the one `device_unreachable` event (subject carries the first sentence, detail the whole text; still once, constraint 11) and into `devices.last_poll_error` on every failed poll; a good poll clears it. The Devices tooltip, device page and topology toast show it. Checked by R55.
 
+39. **A Confetti Traffic node is managed from its hub, read-only.** Platform `confetti_node` (transport `hub_api`, `collectors/hub.py`, role stays `node`):
+    the poller asks the hub that imported the node (`device_sources` source `confetti`, ref = its URL), never the node. Per poll one cached read
+    (20 s, shared by all nodes of a tick) of `GET /endpoints` and `GET /api/lldp`: GET only, http(s), no redirect, 5 s timeout, 2 MB cap, no credentials
+    sent, every field length-limited text. Tasks `version` (build, `devices.hub_info` = clock and update state; never a serial or a hostname),
+    `interfaces` (the one reported address and subnet) and `lldp` (the node's own LLDP report: the switch and port it is plugged into, drawn on
+    the existing LLDP layer). A node the hub no longer lists, or whose `last_seen` is older than 15 minutes, or an unreachable hub, fails all
+    three tasks with a reason (`pollerr`, constraint 38) and deletes nothing (constraint 14); an empty LLDP list is a real answer and clears. A plain
+    `role='node'` device on another platform is still never polled. Checked by R56 (and R8, R10, R19).
+
 ## Regression gate
 
 `python dev/regress.py` (stdlib only, except that `R39` runs ruff: `pip install -r dev/requirements-dev.txt`, else R39 is `NOT RUN`; `--static` skips the live tier, `-v` shows detail for passes) is the
@@ -663,7 +674,7 @@ container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
 the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti project's URL; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll; `R39` is the ruff `F` lint over `topo/` and `dev/` (not a constraint check); `R40` (constraint 24) the shared syslog parser and insert rule, `R40-sync` that `syslog_core.py`, `syslog_pull.py` and `syslog_cases.json` are byte-identical in both repos (`NOT RUN` if confetti-traffic is not next to this repo); `R41` (constraint 25) the syslog poll trigger; `R42` (constraint 26) the syslog pull; `R43`..`R50` (constraints 27..33) the checks that came with the former butler's features: template sandbox, the open `/configs/` pull, config backups,
 SNMP, drift and interface error history; `R51` (constraint 34) the in-place upgrade of an old database; `R52`..`R55` (constraints 35..38) traffic rates, database backup/restore,
-Find / Test login storing nothing, and failed-poll reasons (R55); the next constraint (39) takes `R56`. Output is one line per check
+Find / Test login storing nothing, failed-poll reasons (R55) and the managed Confetti Traffic node (R56); the next constraint (40) takes `R57`. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

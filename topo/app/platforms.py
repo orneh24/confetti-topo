@@ -82,7 +82,11 @@ PANOS = {
 # SNMP v1/v2c via net-snmp (collectors/snmp.py): version + interfaces only.
 SNMP = {"transport": "snmp", "tasks": ("version", "interfaces")}
 
+# A Confetti Traffic node, asked through its hub (collectors/hub.py): version, interfaces and lldp, nothing sent to the node.
+CONFETTI_NODE = {"transport": "hub_api", "tasks": ("version", "interfaces", "lldp")}
+
 PLATFORMS = {
+    "confetti_node": CONFETTI_NODE,
     "cisco_ios": IOS,
     "cisco_xe": IOS,
     "paloalto_panos": PANOS,
@@ -99,4 +103,4 @@ SWITCH_TASKS = ("vlans", "trunks", "stp", "mac")
 
 
 def tasks(plat):
-    return tuple(plat["commands"]) if plat["transport"] != "snmp" else plat["tasks"]
+    return tuple(plat["commands"]) if plat["transport"] not in ("snmp", "hub_api") else plat["tasks"]

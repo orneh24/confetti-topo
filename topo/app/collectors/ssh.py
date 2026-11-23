@@ -214,6 +214,8 @@ def _apply_version(conn, device_id, parsed, now):
             "WHERE id = ?",
             (fields.get("model"), fields.get("os_version"), device_id),
         )
+    if parsed.get("hub_info") is not None:   # a Confetti Traffic node (collectors/hub.py)
+        conn.execute("UPDATE devices SET hub_info = ? WHERE id = ?", (parsed["hub_info"], device_id))
     # Not an identity alias (constraint 16): only used to match an LLDP chassis ID when that is switched on.
     if parsed.get("mgmt_mac"):
         conn.execute("UPDATE devices SET mgmt_mac = ? WHERE id = ?", (parsed["mgmt_mac"], device_id))

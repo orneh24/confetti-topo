@@ -373,7 +373,7 @@ def api_list_devices():
     rows = conn.execute(
         """SELECT id, key, hostname, mgmt_ip, vendor, platform, model, serial,
                   os_version, role, site, enabled, poll_interval_s, next_poll_at,
-                  poll_state, fail_count, last_poll_error, first_seen, last_seen, last_poll_ok,
+                  poll_state, fail_count, last_poll_error, hub_info, first_seen, last_seen, last_poll_ok,
                   reachable, last_ping_at, template_name, drift_status
            FROM devices ORDER BY role, hostname"""
     ).fetchall()
@@ -1052,6 +1052,10 @@ def api_poll_device_now(device_id):
     conn = db.get_db()
     if not conn.execute("SELECT 1 FROM devices WHERE id = ?", (device_id,)).fetchone():
         return jsonify({"error": "not found"}), 404
+
+    dev = conn.execute("SELECT role, platform FROM devices WHERE id = ?", (device_id,)).fetchone()
+    if dev["role"] == "node" and dev["platform"] != "confetti_node":
+        return jsonify({"error": "this node is not polled: only a node imported from a Confetti Traffic hub (platform confetti_node) is"}), 400
 
     conn.execute("UPDATE devices SET poll_state = 'running' WHERE id = ?", (device_id,))
     conn.commit()

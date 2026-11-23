@@ -3,9 +3,9 @@
 GET <hub_url>/endpoints returns confetti-traffic's Alpine test VMs, not managed
 routers — imported with role='node' and vendor/platform set explicitly so
 they don't inherit this app's cisco/cisco_ios defaults for a brand-new
-device (see identity._create_device). role='node' is what makes
-poller.py skip them (`WHERE ... role != 'node'`) — they are never
-SSH-polled with IOS show commands.
+device (see identity._create_device). platform='confetti_node' makes the poller
+ask the hub about them (collectors/hub.py); a role='node' device on any other
+platform is never polled, and none is ever SSH-polled with IOS show commands.
 """
 
 import requests
@@ -31,7 +31,7 @@ def discover(conn, hub_url):
         if not candidates:
             continue
 
-        fields = {"role": "node", "vendor": "alpine", "platform": "linux"}
+        fields = {"role": "node", "vendor": "alpine", "platform": "confetti_node"}
         if ep.get("group_name"):
             fields["site"] = ep["group_name"]
 

@@ -85,6 +85,9 @@ td.poll-err { color: var(--red); }
 colPick.attach(document.getElementById('dev-table'), document.getElementById('dev-cols-btn'), 'confetti-topo-devices-columns',
                [5, 9, 10, 11, 12, 13]);
 
+// A node is polled only when it came from a Confetti Traffic hub (platform confetti_node); any other node is not.
+function isUnpolled(d) { return d.role === 'node' && d.platform !== 'confetti_node'; }
+
 function esc(s) {
     var d = document.createElement('div');
     d.textContent = s === null || s === undefined ? '' : String(s);
@@ -109,7 +112,7 @@ function pingCell(r) {
 // Result of the last poll: a tick, a cross, or a dash when it was never polled.
 // fail_count is the number of polls in a row that got nothing; last_poll_ok is the last time one did.
 function pollResultIcon(d) {
-    if (d.role === 'node') { return ''; }
+    if (isUnpolled(d)) { return ''; }
     if (d.fail_count > 0) {
         return '<span class="pill bad" title="Last poll failed (' + d.fail_count + ' in a row)' +
             (d.last_poll_error ? ': ' + ctxMenu.attr(d.last_poll_error) : '') +
@@ -169,8 +172,8 @@ var foldedSites = {};
 try { foldedSites = JSON.parse(localStorage.getItem(FOLD_KEY)) || {}; } catch (e) { foldedSites = {}; }
 
 function isDown(d) { return d.reachable === 0 || d.reachable === false; }
-function isFailing(d) { return d.role !== 'node' && d.fail_count > 0; }
-function neverPolled(d) { return d.role !== 'node' && d.enabled && !d.last_poll_ok && !(d.fail_count > 0); }
+function isFailing(d) { return !isUnpolled(d) && d.fail_count > 0; }
+function neverPolled(d) { return !isUnpolled(d) && d.enabled && !d.last_poll_ok && !(d.fail_count > 0); }
 function isDrifted(d) { return d.drift_status === 'drifted'; }
 function chipMatch(d) {
     if (chip === 'all') { return true; }
@@ -258,11 +261,11 @@ function renderDevices(fresh) {
         if (ordered[i].members) { rows += groupHead(ordered[i].head, ordered[i].members); continue; }
         var d = ordered[i].d;
         var pollCls = d.poll_state === 'running' ? 'running' : 'idle';
-        if (d.role === 'node') { pollCls = 'node'; }
+        if (isUnpolled(d)) { pollCls = 'node'; }
         rows += '<tr data-ctx="device" data-id="' + ctxMenu.attr(d.id) + '" data-site="' + attr(d.site || '') + '"' +
             (grouped && foldedSites[d.site || ''] ? ' class="grp-hidden"' : '') + '>' +
             '<td><a href="/devices/' + d.id + '">' + esc(d.hostname) + '</a></td>' +
-            '<td>' + pollResultIcon(d) + '<span class="pill ' + pollCls + '">' + esc(d.role === 'node' ? 'not polled' : d.poll_state) + '</span></td>' +
+            '<td>' + pollResultIcon(d) + '<span class="pill ' + pollCls + '">' + esc(isUnpolled(d) ? 'not polled' : d.poll_state) + '</span></td>' +
             '<td>' + esc(d.role) + '</td>' +
             '<td>' + esc(d.mgmt_ip || '') + '</td>' +
             '<td>' + esc(d.site || '') + '</td>' +
@@ -273,7 +276,7 @@ function renderDevices(fresh) {
             '<td>' + esc(d.vendor || '') + '</td><td>' + esc(d.model || '') + '</td><td>' + esc(d.os_version || '') + '</td>' +
             '<td>' + esc(d.platform || '') + '</td><td>' + esc(d.serial || '') + '</td>' +
             '<td class="poll-err" title="' + ctxMenu.attr(d.fail_count > 0 ? d.last_poll_error || '' : '') + '">' +
-            (d.role !== 'node' && d.fail_count > 0 && d.last_poll_error ? esc(d.last_poll_error.split('. ')[0]) : '') + '</td>' +
+            (!isUnpolled(d) && d.fail_count > 0 && d.last_poll_error ? esc(d.last_poll_error.split('. ')[0]) : '') + '</td>' +
             '</tr>';
     }
     document.getElementById('device-rows').innerHTML = rows;
@@ -317,7 +320,7 @@ function pollAll() {
     var msg = document.getElementById('poll-msg');
     var btn = document.getElementById('poll-all-btn');
     fetch('/api/devices').then(function (r) { return r.json(); }).then(function (list) {
-        var ids = list.filter(function (d) { return d.role !== 'node' && d.enabled; })
+        var ids = list.filter(function (d) { return !isUnpolled(d) && d.enabled; })
                       .map(function (d) { return d.id; });
         if (!ids.length) { msg.textContent = 'no pollable devices'; msg.className = 'msg'; return; }
         btn.disabled = true;
@@ -428,7 +431,7 @@ ctxMenu.register('device', function (tr) {
     var id = parseInt(tr.getAttribute('data-id'), 10);
     var d = allDevices.filter(function (x) { return x.id === id; })[0];
     if (!d) { return null; }
-    var isNode = d.role === 'node';
+    var isNode = isUnpolled(d);
     return { title: d.hostname, items: [
         { label: 'Open device page', action: function () { go('/devices/' + d.id); } },
         { label: 'Open in new tab', action: function () { window.open('/devices/' + d.id, '_blank', 'noopener'); } },

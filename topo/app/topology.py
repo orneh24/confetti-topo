@@ -48,7 +48,7 @@ def device_type(role, model, hostname, platform=None):
         return role
     if platform == "paloalto_panos":
         return "firewall"
-    if platform == "linux":
+    if platform in ("linux", "confetti_node"):
         return "linux"
     if role not in ("router", None, ""):
         return "host"

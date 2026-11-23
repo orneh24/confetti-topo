@@ -19,7 +19,7 @@ MAX_DETAIL = 140
 _REFUSED = {errno.ECONNREFUSED, 10061}
 _NO_ROUTE = {errno.EHOSTUNREACH, errno.ENETUNREACH, 10065, 10051}
 _RESET = {errno.ECONNRESET, 10054}
-_LABEL = {"ssh": "SSH (port 22)", "https": "HTTPS (port 443)", "snmp": "SNMP (UDP 161)"}
+_LABEL = {"ssh": "SSH (port 22)", "https": "HTTPS (port 443)", "snmp": "SNMP (UDP 161)", "hub": "the Confetti Traffic hub"}
 
 
 def _one_line(text, limit=MAX_DETAIL):
@@ -78,6 +78,8 @@ def explain(exc, via="ssh", task=None, timeout=None):
             return _sentence("API login rejected: wrong username or password, or the account has no XML API role",
                              "Check this device's credentials, or the defaults on the Settings page")
         return _one_line("firewall answered: " + text)
+    if kind == "HubError":   # collectors/hub.py: the hub answered with something a node poll cannot use
+        return _one_line(text)
     if kind == "SnmpError":   # collectors/snmp.py
         low = text.lower()
         if "timeout" in low or "timed out" in low or "no response" in low:
@@ -109,6 +111,8 @@ def explain(exc, via="ssh", task=None, timeout=None):
         return _sentence("no route to the device", "Check the management IP and this server's network")
     if cause == "reset":
         return _sentence("the device closed the connection", "Too many SSH sessions, or an ACL or login limit on the device")
+    if via == "hub" and isinstance(exc, requests.exceptions.ConnectionError):
+        return _sentence("could not connect to the Confetti Traffic hub", "Check that the hub is running and its address is right")
     if via == "https" and isinstance(exc, requests.exceptions.ConnectionError):
         return _sentence("could not connect to HTTPS (port 443)", "The management web interface may be off, or the IP is wrong")
 

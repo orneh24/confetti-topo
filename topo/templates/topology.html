@@ -169,7 +169,7 @@ button.active { border-color: var(--cyan); color: var(--text); background: var(-
         <h4>Devices</h4>
         <div class="icons" id="legend-icons"></div>
         <div class="row"><span class="sw" style="background:var(--blue)"></span>router, switch or firewall polled over SSH or the PAN-OS API</div>
-        <div class="row"><span class="sw" style="background:var(--text-dim)"></span>Confetti Traffic node (never polled)</div>
+        <div class="row"><span class="sw" style="background:var(--text-dim)"></span>Confetti Traffic node (asked through its hub)</div>
         <div class="row"><span class="sw" style="background:var(--green)"></span>device with another role (host, ...)</div>
         <div class="row"><span class="sw" style="background:var(--blue);outline:2px solid var(--red)"></span>red outline: device not answering ping</div>
         <div class="row"><span class="sw ghost"></span>unresolved neighbor or peer: seen, but not matched to a known device</div>
@@ -434,7 +434,7 @@ function toVisEdges(edges) {
             // Lines between the same two devices would sit on top of each other: bend BGP one way, OSPF the other, and a
             // second link of the same kind between the same two (two cables, a default route per VRF) further out.
             smooth: perPair[pairKey(e)] === 1 ? false : { type: 'curvedCW', roundness: bend + twin * (bend < 0 ? -0.25 : 0.25) },
-            font: { color: themeColor('--text-dim'), size: 10, strokeWidth: 0, background: themeColor('--bg') },
+            font: { color: themeColor('--text'), size: 10, strokeWidth: 0, background: themeColor('--bg') },
         };
     }));
 }
@@ -1605,7 +1605,8 @@ function fillDeviceInfo(info, d, type) {
     addRow(info, 'os', d.os_version || '-');
     addRow(info, 'serial', d.serial || '-');
     addRow(info, 'ping', d.reachable === null || d.reachable === undefined ? 'not checked' : (d.reachable ? 'up' : 'down'));
-    if (d.role !== 'node') {
+    if (d.hub_info) { addRow(info, 'hub says', d.hub_info); }
+    if (!(d.role === 'node' && d.platform !== 'confetti_node')) {
         addRow(info, 'last poll', d.fail_count > 0 ? 'failing (' + d.fail_count + ' in a row)'
             : (d.last_poll_ok ? 'ok, ' + ago(d.last_poll_ok) : 'not polled yet'));
     }
@@ -2132,7 +2133,7 @@ function openContextMenu(id, x, y) {
         // Poll now is enabled once the device's record says it is polled; the menu may be gone by then.
         fetch('/api/devices/' + node.device_id).then(function (r) { return r.json(); }).then(function (d) {
             if (d.error || menu.style.display === 'none') { return; }
-            if (d.role !== 'node' && d.enabled) {
+            if (!(d.role === 'node' && d.platform !== 'confetti_node') && d.enabled) {
                 pollItem.disabled = false;
                 pollItem.action = function () { pollFromMenu(d.id, node.label); };
                 Array.prototype.forEach.call(menu.querySelectorAll('button'), function (b) {

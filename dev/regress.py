@@ -289,12 +289,15 @@ def _():
     return p
 
 
-@check("R8", "role='node' devices are never claimed by the poller")
+@check("R8", "role='node' devices are never claimed by the poller, unless they are managed (platform confetti_node)")
 def _():
     p = []
     m, conn = fresh_db()
     router = add_device(conn, "192.0.2.1", "r1", "router")
     add_device(conn, "192.0.2.2", "n1", "node")
+    managed = add_device(conn, "192.0.2.3", "n2", "node")
+    conn.execute("UPDATE devices SET platform = 'confetti_node' WHERE id = ?", (managed,))
+    conn.commit()
     conn.close()
 
     class Rec:
@@ -305,7 +308,7 @@ def _():
             self.ids.append(device_id)
     rec = Rec()
     m["poller"]._tick(rec)
-    need(rec.ids == [router], "poller claimed %r, expected only the router [%d]" % (rec.ids, router), p)
+    need(sorted(rec.ids) == sorted([router, managed]), "poller claimed %r, expected the router and the managed node [%d, %d]" % (rec.ids, router, managed), p)
     return p
 
 
@@ -331,7 +334,7 @@ def _():
     return p
 
 
-@check("R10", "confetti-traffic imports are vendor=alpine, platform=linux, role=node")
+@check("R10", "confetti-traffic imports are vendor=alpine, platform=confetti_node, role=node")
 def _():
     p = []
     m, conn = fresh_db()
@@ -352,7 +355,7 @@ def _():
     conn.commit()
     row = conn.execute("SELECT vendor, platform, role, site FROM devices").fetchone()
     need(row is not None and (row["vendor"], row["platform"], row["role"], row["site"])
-         == ("alpine", "linux", "node", "labgroup"), "imported node row is %r" % (dict(row) if row else None), p)
+         == ("alpine", "confetti_node", "node", "labgroup"), "imported node row is %r" % (dict(row) if row else None), p)
     conn.close()
     return p
 
@@ -528,7 +531,7 @@ def _():
     # node icons: the type and vendor the page draws come from here
     dt = topology.device_type
     need(dt("router", "", "core-sw-01") == "switch" and dt("router", "ASA5506", "e1") == "firewall"
-         and dt("router", "CSR1000V", "r1") == "router" and dt("node", "", "a", "linux") == "linux"
+         and dt("router", "CSR1000V", "r1") == "router" and dt("node", "", "a", "linux") == "linux" and dt("node", "", "a", "confetti_node") == "linux"
          and dt("router", "", "answer") == "router", "device_type words/platform rules are off", p)
     conn.execute("UPDATE devices SET vendor = 'Juniper'")
     conn.commit()
@@ -667,6 +670,10 @@ def _():
             # SNMP asks version and interfaces only, through net-snmp's get and walk: no CLI.
             need(tuple(plat["tasks"]) == ("version", "interfaces"), "%s tasks are %r" % (name, plat.get("tasks")), p)
             need("commands" not in plat, "%s: an SNMP platform has no CLI commands" % name, p)
+            continue
+        if plat["transport"] == "hub_api":
+            # A Confetti Traffic node, asked through its hub: three tasks, no device command at all.
+            need(tuple(plat["tasks"]) == ("version", "interfaces", "lldp") and "commands" not in plat, "%s: hub platform is %r" % (name, plat), p)
             continue
         # "vlans" is a switch task of the IOS entry only, and "config" (the running-config backup) too;
         # every platform has the six core tasks.
@@ -1741,6 +1748,94 @@ def _():
     return p
 
 
+@check("R56", "a Confetti Traffic node is managed from its hub, read-only: three tasks parsed from the hub's answers, a silent node or an unreachable hub fails and deletes nothing, GET only, one fetch per round")
+def _():
+    p = []
+    m, conn = fresh_db()
+    app_modules()
+    from app.collectors import hub
+    poller = m["poller"]
+    eps = json.loads(read(SAMPLES + "hub_endpoints.json"))
+    lldp = json.loads(read(SAMPLES + "hub_lldp.json"))
+    calls = []
+
+    class Resp:
+        status_code = 200
+
+        def __init__(self, data):
+            self.content = json.dumps(data).encode()
+            self.data = data
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.data
+    answer = {"/endpoints": eps, "/api/lldp": lldp}
+
+    def fake_get(url, **kw):
+        calls.append((url, kw))
+        key = "/" + url.split("//", 1)[1].split("/", 1)[1]
+        if key not in answer:
+            raise AssertionError("unexpected hub path " + key)
+        return Resp(answer[key])
+    real_get = hub.requests.get
+    hub.requests.get = fake_get
+    try:
+        ids, _ = m["confetti"].discover(conn, "http://hub.invalid")
+        conn.commit()
+        need(len(ids) == 2, "import gave %r" % ids, p)
+        a, b = ids
+        calls.clear()
+        # node-a reports now, node-b went silent long ago.
+        from datetime import datetime, timezone
+        eps[0]["last_seen"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        eps[1]["last_seen"] = "2000-01-01T00:00:00Z"
+        hub._cache.clear()
+        res = poller.poll_now(a)
+        need(all(r["ok"] for r in res.values()) and set(res) == {"version", "interfaces", "lldp"}, "node-a poll: %r" % res, p)
+        need(len(calls) == 2 and all(k.get("allow_redirects") is False and "auth" not in k and "headers" not in k for _, k in calls),
+             "expected two plain GETs without redirects or credentials: %r" % calls, p)
+        row = conn.execute("SELECT os_version, model, hub_info FROM devices WHERE id = ?", (a,)).fetchone()
+        need(row["os_version"] == "build 2026-11-20.1" and "clock synced" in row["hub_info"], "version not applied: %r" % dict(row), p)
+        ifc = conn.execute("SELECT ip, prefix_len, network FROM interfaces WHERE device_id = ?", (a,)).fetchall()
+        need(len(ifc) == 1 and ifc[0]["network"] == "192.0.2.0/24" and ifc[0]["prefix_len"] == 24, "interface row: %r" % [dict(r) for r in ifc], p)
+        nb = conn.execute("SELECT local_if, remote_sysname, remote_port, remote_mgmt_ip FROM lldp_neighbors WHERE device_id = ?", (a,)).fetchall()
+        need(len(nb) == 1 and nb[0]["remote_sysname"] == "lab-sw-a" and nb[0]["remote_port"] == "Gi1/0/7", "lldp row: %r" % [dict(r) for r in nb], p)
+        before = len(calls)
+        res_b = poller.poll_now(b)
+        need(len(calls) == before and not any(r["ok"] for r in res_b.values()) and "stopped reporting" in res_b["version"]["error"],
+             "a silent node must fail with a reason and reuse the cached hub answer: %r" % res_b, p)
+        # an empty LLDP answer is real and clears; a hub that fails changes nothing
+        answer["/api/lldp"] = []
+        hub._cache.clear()
+        conn.execute("UPDATE lldp_neighbors SET last_seen = '2000-01-01 00:00:00'")   # polls in one second share a stamp
+        conn.commit()
+        poller.poll_now(a)
+        need(conn.execute("SELECT COUNT(*) FROM lldp_neighbors WHERE device_id = ?", (a,)).fetchone()[0] == 0, "an empty LLDP answer did not clear the neighbours", p)
+        answer["/api/lldp"] = lldp
+        hub._cache.clear()
+        poller.poll_now(a)
+        need(conn.execute("SELECT COUNT(*) FROM lldp_neighbors WHERE device_id = ?", (a,)).fetchone()[0] == 1, "the neighbour did not come back", p)
+
+        def boom(url, **kw):
+            raise hub.requests.exceptions.ConnectionError("x")
+        hub.requests.get = boom
+        hub._cache.clear()
+        res = poller.poll_now(a)
+        need(not any(r["ok"] for r in res.values()) and "hub" in res["lldp"]["error"], "an unreachable hub must fail every task naming the hub: %r" % res, p)
+        need(conn.execute("SELECT COUNT(*) FROM lldp_neighbors WHERE device_id = ?", (a,)).fetchone()[0] == 1, "a failed hub read deleted the neighbours", p)
+    finally:
+        hub.requests.get = real_get
+    # a plain role='node' device is not polled (and the API says so)
+    plain = add_device(conn, "192.0.2.9", "plain", "node")
+    c = m["appmod"].app.test_client()
+    need(c.post("/api/devices/%d/poll" % plain).status_code == 400, "poll now on a plain node must be refused", p)
+    conn.close()
+    p += at("topo/app/collectors/hub.py", grep(r"requests\.(post|put|delete|patch)|send_config|\.config_mode\(", "topo/app/collectors/hub.py"))
+    return p
+
+
 @check("R32", "routes: real-output fixtures parse, an empty table deletes nothing, one summary event per changed poll, none on baseline")
 def _():
     p = []
@@ -2027,7 +2122,7 @@ def _():
     need(conn.execute("SELECT COUNT(*) FROM settings WHERE key != 'url_traffic'").fetchone()[0] == 0, "only url_* rows may be written", p)
     need(client.delete(url).status_code == 405 and client.post(url, json={}).status_code == 405, "only GET and PUT", p)
     page = client.get("/settings").get_data(as_text=True)
-    need("Other Confetti projects" in page and 'id="links-form"' in page, "/settings has no Other Confetti projects section", p)
+    need("Confetti Traffic</span>" in page and 'id="links-form"' in page and 'id="sp-form"' in page, "/settings has no Confetti Traffic section holding the URL and the syslog pull", p)
     # The header shortcut: a placeholder in base.html, the shared script, never HTML built from the URL, opens safely.
     base = open("topo/templates/base.html", encoding="utf-8").read()
     need('id="confetti-links"' in base and 'src="/static/confetti-links.js"' in base, "base.html must hold the shortcut span and load confetti-links.js", p)
