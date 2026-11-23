@@ -54,15 +54,20 @@ table.compact td.wrap { white-space: normal; overflow-wrap: anywhere; }
     </div>
     <div class="section wide" data-box="devices">
         <div class="section-header"><span>Devices <span id="dev-count"></span></span>
-            <button type="button" class="btn-small" id="dev-cols-btn" title="Choose the columns" aria-haspopup="true" aria-expanded="false">Columns</button>
+            <span class="hdr-actions">
+                <button type="button" class="btn-small" id="dev-prob-btn" onclick="toggleProblems()" title="Show only devices that are down, failing to poll or off their template"></button>
+                <button type="button" class="btn-small" id="dev-more" style="display:none" onclick="toggleCap('dev')"></button>
+                <button type="button" class="btn-small" id="dev-cols-btn" title="Choose the columns" aria-haspopup="true" aria-expanded="false">Columns</button>
+            </span>
         </div>
         <div class="col-menu" id="dev-cols-menu" hidden></div>
         <div class="section-body">
             <table class="striped compact">
                 <thead><tr id="dev-head"></tr></thead>
-                <tbody id="dev-rows"></tbody>
+                <tbody id="dev-rows" class="capped"></tbody>
             </table>
             <div class="empty" id="dev-empty" style="display:none">no devices yet</div>
+            <div class="note"><a href="/devices">Open Devices page (all devices, by site)</a></div>
         </div>
     </div>
     <div class="section wide" data-box="events">
@@ -97,11 +102,12 @@ table.compact td.wrap { white-space: normal; overflow-wrap: anywhere; }
         </div>
     </div>
     <div class="section" data-box="lldp-unknown">
-        <div class="section-header"><span>Unknown LLDP neighbors <span id="unk-count"></span></span></div>
+        <div class="section-header"><span>Unknown LLDP neighbors <span id="unk-count"></span></span>
+            <span class="hdr-actions"><button type="button" class="btn-small" id="unk-more" style="display:none" onclick="toggleCap('unk')"></button></span></div>
         <div class="section-body">
             <table class="striped compact">
                 <thead><tr><th>IP</th><th>Name</th><th>Seen on</th><th></th></tr></thead>
-                <tbody id="unk-rows"></tbody>
+                <tbody id="unk-rows" class="capped"></tbody>
             </table>
             <div class="empty" id="unk-empty" style="display:none">every LLDP neighbor is a known device</div>
         </div>
@@ -312,9 +318,38 @@ function sortedDevices() {
     });
 }
 
+// The Devices and Unknown LLDP widgets show their first 10 rows (after any sort); "Show all" shows the rest. Kept across refreshes.
+var CAP_ROWS = 10;
+function showCap(name) {
+    var body = document.getElementById(name + '-rows'), btn = document.getElementById(name + '-more');
+    var extra = body.rows.length - CAP_ROWS;
+    btn.style.display = extra > 0 ? '' : 'none';
+    btn.textContent = body.classList.contains('capped') ? 'Show all (' + extra + ' more)' : 'Show 10';
+}
+function toggleCap(name) {
+    document.getElementById(name + '-rows').classList.toggle('capped');
+    showCap(name);
+}
+
+// "Problems only": just the devices that are down, failing to poll or off their template. A long list starts that way.
+var PROB_KEY = 'confetti-topo-dashboard-problems';
+function isProblem(d) { return d.reachable === 0 || (d.role !== 'node' && d.fail_count > 0) || d.drift_status === 'drifted'; }
+function problemsOn() {
+    var saved = null;
+    try { saved = localStorage.getItem(PROB_KEY); } catch (e) { saved = null; }
+    return saved === null ? devList.length > 20 : saved === '1';
+}
+function toggleProblems() {
+    try { localStorage.setItem(PROB_KEY, problemsOn() ? '0' : '1'); } catch (e) { /* not remembered */ }
+    renderDevices();
+}
+
 function renderDevices(list) {
     if (list) { devList = list; }
     devById = {};
+    var onlyProblems = problemsOn();
+    devList.forEach(function (d) { devById[d.id] = d; });
+    document.getElementById('dev-prob-btn').textContent = onlyProblems ? 'Show all devices' : 'Problems only';
     var cols = visibleDevCols();
     var head = '';
     cols.forEach(function (c) {
@@ -324,14 +359,18 @@ function renderDevices(list) {
     });
     document.getElementById('dev-head').innerHTML = head;
     var rows = '';
-    sortedDevices().forEach(function (d) {
-        devById[d.id] = d;
+    var shown = sortedDevices().filter(function (d) { return !onlyProblems || isProblem(d); });
+    shown.forEach(function (d) {
         rows += '<tr data-ctx="device" data-id="' + ctxMenu.attr(d.id) + '">' +
             cols.map(function (c) { return '<td>' + c.cell(d) + '</td>'; }).join('') + '</tr>';
     });
     document.getElementById('dev-rows').innerHTML = rows;
-    document.getElementById('dev-count').textContent = devList.length ? '(' + devList.length + ')' : '';
-    document.getElementById('dev-empty').style.display = devList.length ? 'none' : 'block';
+    showCap('dev');
+    document.getElementById('dev-count').textContent = devList.length ?
+        '(' + (onlyProblems ? shown.length + ' with problems of ' : '') + devList.length + ')' : '';
+    var empty = document.getElementById('dev-empty');
+    empty.style.display = shown.length ? 'none' : 'block';
+    empty.textContent = devList.length ? 'no device is down, failing or off its template (' + devList.length + ' in all)' : 'no devices yet';
 }
 
 function pickDevSort(key) {
@@ -477,6 +516,7 @@ function loadUnknown() {
                 '</td><td><button class="btn-small" data-ip="' + ctxMenu.attr(n.ip) + '" onclick="adoptNeighbor(this.getAttribute(\'data-ip\'))">add</button></td></tr>';
         });
         document.getElementById('unk-rows').innerHTML = rows;
+        showCap('unk');
         document.getElementById('unk-count').textContent = list.length ? '(' + list.length + ')' : '';
         document.getElementById('unk-empty').style.display = list.length ? 'none' : 'block';
     });

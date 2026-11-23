@@ -14,6 +14,7 @@ th { position: sticky; top: 0; background: var(--bg-card); }
 .sev-null { color: var(--gray); }
 .mono { white-space: pre-wrap; word-break: break-word; }
 .count { color: var(--text-dim); font-size: 11px; margin-left: auto; }
+.more-row { margin: 10px 0 4px; text-align: center; }
 .setup-help { margin: 10px 0 4px; font-size: 12px; }
 .setup-help pre { background: var(--bg-code); padding: 8px 10px; margin: 6px 0; white-space: pre-wrap; user-select: all; }
 </style>
@@ -25,6 +26,8 @@ th { position: sticky; top: 0; background: var(--bg-card); }
         <option value="60" selected>last 60m</option>
         <option value="360">last 6h</option>
         <option value="1440">last 24h</option>
+        <option value="10080">last 7 days</option>
+        <option value="20160">last 14 days</option>
     </select>
     <select id="f-host"><option value="">all hosts</option></select>
     <select id="f-severity">
@@ -39,11 +42,15 @@ th { position: sticky; top: 0; background: var(--bg-card); }
 <div class="container stack">
     <div class="section">
         <div class="section-body">
-            <table>
+            <table class="sticky-head">
                 <thead><tr><th>Time</th><th>Host</th><th>Sev</th><th>Mnemonic</th><th>Message</th><th>Via</th></tr></thead>
                 <tbody id="rows"></tbody>
             </table>
             <div class="empty" id="empty" style="display:none">no messages in this window</div>
+            <div class="more-row" id="more-row" style="display:none">
+                <button type="button" onclick="loadOlder()">Load older messages</button>
+                <span class="msg" id="more-note"></span>
+            </div>
             <!-- Shown with the empty message: what to type on a router so it logs here. Text to copy; nothing is sent to a device. -->
             <div class="setup-help hint" id="setup-help" style="display:none">
                 {% if syslog_enabled %}
@@ -86,17 +93,57 @@ function loadSources() {
     });
 }
 
-function load() {
+// The server answers at most 2000 rows (newest first). When that many come back there may be more: "Load older messages"
+// asks again for the stretch before the oldest row shown. While older rows are shown the 15 s refresh waits (it would drop them).
+var PAGE_LIMIT = 2000;
+var loaded = [], moreAvailable = false, olderShown = false;
+
+function filterParams() {
     var params = [];
-    params.push('minutes=' + document.getElementById('f-minutes').value);
     var host = document.getElementById('f-host').value;
     if (host) { params.push('host=' + encodeURIComponent(host)); }
     var sev = document.getElementById('f-severity').value;
     if (sev !== '') { params.push('severity=' + sev); }
     var q = document.getElementById('f-q').value.trim();
     if (q) { params.push('q=' + encodeURIComponent(q)); }
+    return params;
+}
 
+function load() {
+    olderShown = false;
+    var params = filterParams();
+    params.push('minutes=' + document.getElementById('f-minutes').value);
     fetch('/api/syslog?' + params.join('&')).then(function (r) { return r.json(); }).then(function (list) {
+        moreAvailable = list.length >= PAGE_LIMIT;
+        draw(list);
+    });
+}
+
+function loadOlder() {
+    if (!loaded.length) { return; }
+    var oldest = loaded[loaded.length - 1];
+    var from = new Date(Date.now() - parseInt(document.getElementById('f-minutes').value, 10) * 60000).toISOString();
+    var params = filterParams();
+    params.push('from=' + encodeURIComponent(from), 'to=' + encodeURIComponent(oldest.received_at));
+    fetch('/api/syslog?' + params.join('&')).then(function (r) { return r.json(); }).then(function (list) {
+        var have = {};
+        loaded.forEach(function (m) { have[m.id] = true; });
+        var fresh = list.filter(function (m) { return !have[m.id]; });
+        moreAvailable = list.length >= PAGE_LIMIT && fresh.length > 0;
+        olderShown = true;
+        draw(loaded.concat(fresh));
+    });
+}
+
+function sevSummary(list) {
+    var n = {};
+    list.forEach(function (m) { var k = m.severity === null || m.severity === undefined ? '-' : m.severity; n[k] = (n[k] || 0) + 1; });
+    return Object.keys(n).sort().map(function (k) { return n[k] + ' ' + (k === '-' ? 'no severity' : SEV_NAMES[k]); }).join(' · ');
+}
+
+function draw(list) {
+    loaded = list;
+    {
         var rows = '';
         var band = false, lastSrc = null;
         for (var i = 0; i < list.length; i++) {
@@ -125,8 +172,10 @@ function load() {
         document.getElementById('rows').innerHTML = rows;
         document.getElementById('empty').style.display = list.length ? 'none' : 'block';
         document.getElementById('setup-help').style.display = list.length ? 'none' : 'block';
-        document.getElementById('row-count').textContent = list.length + ' messages';
-    });
+        document.getElementById('row-count').textContent = list.length + ' messages' + (list.length ? ': ' + sevSummary(list) : '');
+        document.getElementById('more-row').style.display = moreAvailable ? 'block' : 'none';
+        document.getElementById('more-note').textContent = list.length + ' shown' + (olderShown ? '; auto refresh is paused, change a filter to start again' : '');
+    }
 }
 
 document.getElementById('f-minutes').addEventListener('change', load);
@@ -160,7 +209,7 @@ ctxMenu.register('syslog', function (row) {
 
 loadSources();
 load();
-setInterval(function () { loadSources(); load(); }, 15000);
+setInterval(function () { loadSources(); if (!olderShown) { load(); } }, 15000);
 
 // The whole page is one more menu target, so empty space has a menu. Header, nav, taskbar, DOS bars and footer keep the browser's menu.
 document.documentElement.setAttribute('data-ctx', 'page');

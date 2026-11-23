@@ -5,9 +5,12 @@
 // on timers, so one listener on the document finds the row, not one per row.
 // Safe items first; items with danger:true are drawn last, in red. An item with
 // confirm:'text' asks before it runs.
+// ctxMenu.extend(fn(target, ev)) adds items to every menu: fn returns a list of items or null (confetti-topo's
+// colresize.js uses it for "Resize (compact)" on any table); with no row handler those items make a menu of their own.
 // The same file is in confetti-traffic and confetti-topo.
 (function () {
     var handlers = {};
+    var extenders = [];
     var menu = null;
     var toastBox = null;
     var toastTimer = null;
@@ -102,8 +105,10 @@
         if (String(window.getSelection()).length) { return; }
         var el = t.closest('[data-ctx]');
         var fn = el && handlers[el.getAttribute('data-ctx')];
-        if (!fn) { closeMenu(); return; }
-        var spec = fn(el, ev);
+        var spec = fn ? fn(el, ev) : null;
+        var extra = [];
+        extenders.forEach(function (x) { extra = extra.concat(x(t, ev) || []); });
+        if (extra.length) { spec = { title: (spec && spec.title) || '', items: ((spec && spec.items) || []).concat(extra) }; }
         if (!spec || !spec.items || !spec.items.length) { closeMenu(); return; }
         ev.preventDefault();
         open(ev.clientX, ev.clientY, spec);
@@ -115,6 +120,7 @@
 
     window.ctxMenu = {
         register: function (type, fn) { handlers[type] = fn; },
+        extend: function (fn) { extenders.push(fn); },
         open: open,
         close: closeMenu,
         copy: copy,

@@ -30,16 +30,25 @@
     function sortBody(table, col, dir) {
         var tbody = table.tBodies[0];
         var rows = Array.prototype.slice.call(tbody.rows);
-        if (!rows.length || rows.some(function (r) { return r.cells.length === 1 && r.cells[0].colSpan > 1; })) {
+        // A row with class "grp" is a group heading (Devices by site): it stays where it is and the rows under it sort among themselves.
+        if (!rows.length || rows.some(function (r) { return r.cells.length === 1 && r.cells[0].colSpan > 1 && !r.classList.contains('grp'); })) {
             return;   // nothing to sort, or the "none" placeholder row
         }
-        var keyed = rows.map(function (r, i) { return { row: r, i: i, v: cellValue(r, col) }; });
-        keyed.sort(function (x, y) {
-            if (x.v === '' || y.v === '') { return x.v === y.v ? x.i - y.i : (x.v === '' ? 1 : -1); }   // empty last
-            return (compare(x.v, y.v) * dir) || (x.i - y.i);
+        var segments = [[]];
+        rows.forEach(function (r) {
+            if (r.classList.contains('grp')) { segments.push([r]); } else { segments[segments.length - 1].push(r); }
         });
         table._sorting = true;
-        keyed.forEach(function (k) { tbody.appendChild(k.row); });
+        segments.forEach(function (seg) {
+            var head = seg.length && seg[0].classList.contains('grp') ? seg.shift() : null;
+            var keyed = seg.map(function (r, i) { return { row: r, i: i, v: cellValue(r, col) }; });
+            keyed.sort(function (x, y) {
+                if (x.v === '' || y.v === '') { return x.v === y.v ? x.i - y.i : (x.v === '' ? 1 : -1); }   // empty last
+                return (compare(x.v, y.v) * dir) || (x.i - y.i);
+            });
+            if (head) { tbody.appendChild(head); }
+            keyed.forEach(function (k) { tbody.appendChild(k.row); });
+        });
         table._sorting = false;
         if (table._observer) { table._observer.takeRecords(); }
     }

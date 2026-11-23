@@ -19,17 +19,19 @@
         </div>
     </div>
     <div class="section">
-        <div class="section-header"><span>Prefixes in use</span></div>
+        <div class="section-header"><span>Prefixes in use</span>
+            <span class="hdr-actions"><button type="button" class="btn-small" id="prefix-more" style="display:none" onclick="toggleCap('prefix')"></button></span></div>
         <div class="section-body">
             <table data-sortable><thead><tr><th>Network</th><th>Interfaces</th><th>Devices</th><th>Used</th><th>Free</th></tr></thead>
-                <tbody id="prefix-rows"></tbody></table>
+                <tbody id="prefix-rows" class="capped25"></tbody></table>
         </div>
     </div>
     <div class="section">
-        <div class="section-header"><span>Addresses</span></div>
+        <div class="section-header"><span>Addresses</span>
+            <span class="hdr-actions"><button type="button" class="btn-small" id="address-more" style="display:none" onclick="toggleCap('address')"></button></span></div>
         <div class="section-body">
             <table data-sortable><thead><tr><th>IP</th><th>Device</th><th>Interface</th><th>Status</th></tr></thead>
-                <tbody id="address-rows"></tbody></table>
+                <tbody id="address-rows" class="capped25"></tbody></table>
         </div>
     </div>
 </div>
@@ -91,8 +93,23 @@ function loadPrefixes() {
     });
 }
 
+// Prefixes and Addresses show their first 25 rows; "Show all" shows the rest. Kept across refreshes.
+var CAP25 = 25;
+function showCap(name) {
+    var body = document.getElementById(name + '-rows'), btn = document.getElementById(name + '-more');
+    var extra = body.rows.length - CAP25;
+    btn.style.display = extra > 0 ? '' : 'none';
+    btn.textContent = body.classList.contains('capped25') ? 'Show all (' + extra + ' more)' : 'Show 25';
+}
+function toggleCap(name) {
+    document.getElementById(name + '-rows').classList.toggle('capped25');
+    showCap(name);
+}
+
 function renderAll() {
     var a = renderPrefixes(), b = renderAddresses(), q = query();
+    showCap('prefix');
+    showCap('address');
     document.getElementById('ipam-count').textContent = q ? a + ' prefix(es), ' + b + ' address(es)' : '';
 }
 

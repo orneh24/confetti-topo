@@ -105,8 +105,10 @@ button.active { border-color: var(--cyan); color: var(--text); background: var(-
         <select id="width-sel" onchange="setLineWidth(this.value)"><option value="small">Small</option><option value="medium" selected>Medium</option><option value="large">Large</option></select></label>
     <label class="hist-label" title="Link labels. Default: BGP and OSPF labels always show, LLDP, subnet and default-route labels on hover. Hover only: every label on hover or selection. Off: no labels. Only this browser remembers it">Labels
         <select id="label-sel" onchange="setLabelMode(this.value)"><option value="default" selected>Default</option><option value="hover">Hover only</option><option value="off">Off</option></select></label>
-    <label class="hist-label" title="Free: the saved places. Hierarchical: a tree from the best connected device, one row per hop. Only this browser remembers it; the places are not saved">Layout
-        <select id="layout-sel" onchange="setLayoutMode(this.value)"><option value="free" selected>Free</option><option value="tree">Hierarchical</option></select></label>
+    <label class="hist-label" title="Free: the saved places. Hierarchical: a tree from the best connected device, one row per hop (not saved). By site: each site in its own box, rows from the best connected device of the site; these places are saved and can be dragged. Only this browser remembers the choice">Layout
+        <select id="layout-sel" onchange="setLayoutMode(this.value)"><option value="free" selected>Free</option><option value="tree">Hierarchical</option><option value="site">By site</option></select></label>
+    <label class="hist-label" id="bundle-label" style="display:none" title="By site only: the links between two sites are drawn as one line with a count. Click that line, or select a device, to see its links. A session that is down is always drawn. Only this browser remembers it">
+        <input type="checkbox" id="bundle-chk" checked onchange="setBundle(this.checked)"> Bundle site links</label>
     </div>
     <div class="tb-group" role="group" aria-label="Actions">
     <span class="tb-label">Actions</span>
@@ -262,9 +264,14 @@ function fillLegendIcons() {
 }
 document.addEventListener('themechange', fillLegendIcons);
 
+function groupColors() {
+    return { router: themeColor('--blue'), node: themeColor('--text-dim'), unknown: themeColor('--border') };
+}
+
 function toVisNodes(nodes) {
     findSearchNear();
-    var GROUP_COLOR = { router: themeColor('--blue'), node: themeColor('--text-dim'), unknown: themeColor('--border') };
+    lastNodes = nodes;
+    var GROUP_COLOR = groupColors();
     return nodes.map(function (n) {
         var o = oneVisNode(n, GROUP_COLOR);
         o.opacity = searchOpacity(n);
@@ -291,7 +298,7 @@ function oneVisNode(n, GROUP_COLOR) {
                 id: n.id,
                 label: n.label,
                 shape: 'image',
-                image: deviceIcon(n.device_type, line, themeColor('--bg-card'), vendorOn() ? n.vendor : '', themeColor('--text')),
+                image: deviceIcon(n.device_type, line, themeColor('--bg-card'), vendorOn() && !zoomedOut ? n.vendor : '', themeColor('--text')),
                 size: n.ghost ? 14 : 24,   // vis fixes the image height at 2 x size, so a wider vendor image keeps the same icon size
                 // vis paints a pale blue square behind an image unless the background is set: make it clear.
                 color: { background: 'rgba(0,0,0,0)', border: 'rgba(0,0,0,0)',
@@ -379,7 +386,28 @@ function toVisEdges(edges) {
                         default: themeColor('--green'), connected: themeColor('--orange') };
     var BEND = { lldp: 0, bgp: 0.25, ospf: -0.25, default: 0.45, connected: -0.45 };
     var twins = {};   // from|to|layer -> how many such links came before: each next one bends further out
-    return edges.map(function (e) {
+    // By site with "Bundle site links": the links between two sites become one line each (a session that is down, a link of
+    // the selected device and a bundle clicked open stay as they are). One link between two sites is not worth a bundle.
+    var bundles = {};
+    if (bundleOn()) {
+        var focus = focusId();
+        var kept = edges.filter(function (e) {
+            var a = siteOf(e.from), b = siteOf(e.to);
+            if (a === null || b === null || a === b || e.up === false || e.from === focus || e.to === focus) { return true; }
+            var key = [encodeURIComponent(a), encodeURIComponent(b)].sort().join('|');
+            if (expandedBundles[key]) { return true; }
+            (bundles[key] = bundles[key] || []).push(e);
+            return false;
+        });
+        Object.keys(bundles).forEach(function (key) { if (bundles[key].length < 2) { kept = kept.concat(bundles[key]); delete bundles[key]; } });
+        edges = kept;
+    }
+    // A pair of nodes with only one link between them gets a straight line; curves are only for keeping parallel links apart.
+    var perPair = {};
+    function pairKey(e) { return e.from < e.to ? e.from + '|' + e.to : e.to + '|' + e.from; }
+    edges.forEach(function (e) { perPair[pairKey(e)] = (perPair[pairKey(e)] || 0) + 1; });
+    var bundleEdges = Object.keys(bundles).map(function (key) { return bundleEdge(key, bundles[key]); });
+    return bundleEdges.concat(edges.map(function (e) {
         var twin = (twins[e.from + '|' + e.to + '|' + e.layer] = (twins[e.from + '|' + e.to + '|' + e.layer] || 0) + 1) - 1;
         var bend = BEND[e.layer] || 0;
         var ebgp = e.bgp_type === 'ebgp';   // a session between two ASes: purple and thick; iBGP stays yellow and thin
@@ -405,10 +433,39 @@ function toVisEdges(edges) {
             width: (e.up === false ? 2 : (e.flapping || ebgp ? 3 : 1)) * lineScale(),
             // Lines between the same two devices would sit on top of each other: bend BGP one way, OSPF the other, and a
             // second link of the same kind between the same two (two cables, a default route per VRF) further out.
-            smooth: { type: 'curvedCW', roundness: bend + twin * (bend < 0 ? -0.25 : 0.25) },
+            smooth: perPair[pairKey(e)] === 1 ? false : { type: 'curvedCW', roundness: bend + twin * (bend < 0 ? -0.25 : 0.25) },
             font: { color: themeColor('--text-dim'), size: 10, strokeWidth: 0, background: themeColor('--bg') },
         };
+    }));
+}
+
+// A device's site ('' = none), or null for anything that is not a device (unknown nodes, groups, subnets).
+function siteOf(id) { return id.indexOf('dev:') === 0 && nodeSite[id] !== undefined ? nodeSite[id] : null; }
+
+// One line for all the links between two sites, from the best linked device of one site to the best linked of the other.
+// Its id is "bundle|<site>|<site>"; a click opens it (openBundle).
+function bundleEdge(key, list) {
+    var sites = key.split('|').map(decodeURIComponent), count = {}, layers = {};
+    list.forEach(function (e) {
+        [e.from, e.to].forEach(function (id) { count[id] = (count[id] || 0) + 1; });
+        layers[e.layer] = (layers[e.layer] || 0) + 1;
     });
+    function hub(site) {
+        var best = null;
+        Object.keys(count).forEach(function (id) { if (siteOf(id) === site && (best === null || count[id] > count[best])) { best = id; } });
+        return best;
+    }
+    var detail = Object.keys(layers).sort().map(function (l) { return layers[l] + ' ' + l; }).join(', ');
+    return {
+        id: 'bundle|' + key,
+        from: hub(sites[0]), to: hub(sites[1]),
+        label: list.length + ' links (' + detail + ')',
+        title: list.length + ' links between ' + (sites[0] || 'No site') + ' and ' + (sites[1] || 'No site') + ' (' + detail + '). Click to show them',
+        color: { color: themeColor('--text-dim'), highlight: themeColor('--text'), opacity: edgeOpacity(hub(sites[0]), hub(sites[1])) },
+        width: (1 + Math.min(4, Math.log(list.length) / Math.LN2)) * lineScale(),
+        dashes: [8, 5], smooth: false, arrows: { to: { enabled: false } },
+        font: { color: themeColor('--text'), size: 12, strokeWidth: 0, background: themeColor('--bg') },
+    };
 }
 
 // Replace a DataSet's contents in place: update what is still there, drop
@@ -565,6 +622,22 @@ function fitMap() {
     var wrapW = document.getElementById('net').offsetWidth || 1;
     network.moveTo({ position: network.getViewPosition(), scale: network.getScale() * Math.max(0.3, (wrapW - legendW - listW) / wrapW),
                      offset: { x: (legendW - listW) / 2, y: 0 } });
+    zoomDetail();
+}
+
+// Zoomed out (below ZOOM_DETAIL) the vendor mark and name are left out of the device icons, so the map is not a wall of
+// small text; zoomed in they come back. Only the icon images change (vis hides small labels on its own).
+var ZOOM_DETAIL = 0.6, zoomedOut = false, lastNodes = [];
+function zoomDetail() {
+    if (!network || !nodeSet) { return; }
+    var out = network.getScale() < ZOOM_DETAIL;
+    if (out === zoomedOut) { return; }
+    zoomedOut = out;
+    if (!iconsOn() || !vendorOn()) { return; }
+    var colors = groupColors();
+    nodeSet.update(lastNodes.filter(function (n) { return n.vendor && nodeSet.get(n.id); }).map(function (n) {
+        return { id: n.id, image: oneVisNode(n, colors).image };
+    }).filter(function (o) { return o.image; }));
 }
 
 // Download the map as it is on screen (the canvas is transparent, so paint the page colour under it first).
@@ -702,18 +775,100 @@ function treePositions(data, masterId) {
 
 // Layout dropdown: "tree" lays the map out like the focus tree, from the best connected device when no master is
 // set. A view setting of this browser; the places are never saved (treeOn).
+// "site" (By site) puts each site (devices.site) in a block of its own, laid out like the tree inside, and SAVES those
+// places: it is the shared map, dragging works as in Free. A browser that never picked a layout starts By site on a big
+// map with no saved places (BIG_MAP).
 var LAYOUT_KEY = 'confetti-topo-layout-mode';
 var layoutMode = 'free';
+var layoutPicked = false;   // this browser has a saved layout choice
+var siteRelayout = false;   // the next load lays every device out by site again (By site was just picked)
+var BIG_MAP = 20;           // more devices than this: start with fewer layers and By site (only without a saved choice)
 
 function restoreLayoutMode() {
-    try { layoutMode = localStorage.getItem(LAYOUT_KEY) === 'tree' ? 'tree' : 'free'; } catch (e) { layoutMode = 'free'; }
+    var v = null;
+    try { v = localStorage.getItem(LAYOUT_KEY); } catch (e) { v = null; }
+    layoutPicked = v === 'free' || v === 'tree' || v === 'site';
+    layoutMode = v === 'tree' || v === 'site' ? v : 'free';
     document.getElementById('layout-sel').value = layoutMode;
+    updateBundleBox();
+}
+
+// "Bundle site links" (By site only): the links between two sites are one line with a count between the sites' best connected
+// devices, unless the device is selected, the bundle was clicked open, or the session is down. A view setting of this browser.
+var BUNDLE_KEY = 'confetti-topo-bundle-links';
+var expandedBundles = {};   // bundle key -> true once clicked open
+var lastEdges = [];         // the links now on the map, so a selection can redraw them
+function bundleSaved() {
+    var v = null;
+    try { v = localStorage.getItem(BUNDLE_KEY); } catch (e) { v = null; }
+    return v !== '0';
+}
+function bundleOn() { return layoutMode === 'site' && !treeOn && bundleSaved(); }
+function updateBundleBox() {
+    document.getElementById('bundle-label').style.display = layoutMode === 'site' ? '' : 'none';
+    document.getElementById('bundle-chk').checked = bundleSaved();
+}
+function setBundle(on) {
+    try { localStorage.setItem(BUNDLE_KEY, on ? '1' : '0'); } catch (e) { /* not remembered */ }
+    expandedBundles = {};
+    dimMap();   // redraws the links
+}
+function openBundle(key) {
+    expandedBundles[key] = true;
+    dimMap();   // redraws the links
 }
 
 function setLayoutMode(value) {
-    layoutMode = value === 'tree' ? 'tree' : 'free';
+    layoutMode = value === 'tree' || value === 'site' ? value : 'free';
+    updateBundleBox();
+    layoutPicked = true;
     try { localStorage.setItem(LAYOUT_KEY, layoutMode); } catch (e) { /* not remembered */ }
+    siteRelayout = layoutMode === 'site';
     resetTree();   // new network: leaving the tree must bring the saved places back
+}
+
+// By site: one block per site, biggest first, packed left to right in rows. Inside a block the site's devices are laid
+// out as the tree is (treePositions), from the site's best connected device, over the links between them. Devices with no
+// site share a "No site" block. Unknown nodes get no place here (physics and tuckUnknown put them by their device).
+var SITE_GAP = 260, SITE_MAXW = 3000;
+function sitePositions(data) {
+    var bySite = {};
+    data.nodes.forEach(function (n) { if (n.id.indexOf('dev:') === 0) { (bySite[n.site || ''] = bySite[n.site || ''] || []).push(n); } });
+    var sites = Object.keys(bySite).sort(function (a, b) { return bySite[b].length - bySite[a].length || (a < b ? -1 : 1); });
+    var pos = {}, x0 = 0, y0 = 0, rowH = 0;
+    sites.forEach(function (site) {
+        var ids = {};
+        bySite[site].forEach(function (n) { ids[n.id] = true; });
+        var sub = { nodes: bySite[site], edges: data.edges.filter(function (e) { return ids[e.from] && ids[e.to]; }) };
+        var p = treePositions(sub, autoRoot(sub)) || {};
+        var keys = Object.keys(p);
+        if (!keys.length) { return; }
+        var minX = Math.min.apply(null, keys.map(function (k) { return p[k].x; }));
+        var maxX = Math.max.apply(null, keys.map(function (k) { return p[k].x; }));
+        var maxY = Math.max.apply(null, keys.map(function (k) { return p[k].y; }));
+        var w = maxX - minX, h = maxY;
+        if (x0 > 0 && x0 + w > SITE_MAXW) { x0 = 0; y0 += rowH + SITE_GAP; rowH = 0; }
+        keys.forEach(function (k) { pos[k] = { x: x0 + p[k].x - minX, y: y0 + p[k].y }; });
+        x0 += w + SITE_GAP;
+        rowH = Math.max(rowH, h);
+    });
+    return pos;
+}
+
+// A device that is new on a By site map: the next place right of its site's last row (several new ones line up). A site
+// that is new altogether starts below the map.
+function siteSlot(data, n, added) {
+    var pos = network ? network.getPositions() : {};
+    var site = n.site || '', xs = [], ys = [], allY = [];
+    data.nodes.forEach(function (m) {
+        var q = pos[m.id] || (m.x !== undefined ? m : null);
+        if (!q || m.id === n.id) { return; }
+        allY.push(q.y);
+        if (m.id.indexOf('dev:') === 0 && (m.site || '') === site) { xs.push(q.x); ys.push(q.y); }
+    });
+    var k = added[site] = (added[site] || 0) + 1;
+    if (!xs.length) { return { x: (k - 1) * 170, y: (allY.length ? Math.max.apply(null, allY) : 0) + SITE_GAP + 60 }; }
+    return { x: Math.max.apply(null, xs) + k * 170, y: Math.max.apply(null, ys) };
 }
 
 // The root of a hierarchical layout: the shown device with the most links (ties: first name). Null with no device.
@@ -868,8 +1023,57 @@ function load() {
         }
         treeOn = !!tree;
         updateMasterBar();
+        // A big map, first time in this browser: start with LLDP and BGP only, and By site when nothing is placed yet.
+        var devCount = data.nodes.filter(function (n) { return n.id.indexOf('dev:') === 0; }).length;
+        if (!viewSnap && devCount > BIG_MAP) {
+            if (layersAuto) {
+                layersAuto = false;
+                layersBig = true;
+                document.querySelectorAll('.filters button[data-layer]').forEach(function (b) {
+                    setLayerButton(b, ['lldp', 'bgp'].indexOf(b.getAttribute('data-layer')) !== -1);
+                });
+                updateFilterMarker();
+                load();
+                return;
+            }
+            if (!layoutPicked && !treeOn && !data.nodes.some(function (n) { return n.x !== undefined; })) {
+                layoutPicked = true;
+                layoutMode = 'site';
+                document.getElementById('layout-sel').value = 'site';
+                updateBundleBox();
+                try { localStorage.setItem(LAYOUT_KEY, 'site'); } catch (e) { /* not remembered */ }
+                // The AS boxes would sit over the site boxes: off, unless this browser chose either way before.
+                try { if (localStorage.getItem(AS_AREAS_KEY) === null) { setLayerButton(document.getElementById('as-btn'), false); } } catch (e) { /* stays on */ }
+            }
+        }
+        layersAuto = false;
+        var sitePlaced = [];
+        if (layoutMode === 'site' && !treeOn) {
+            var full = siteRelayout || !data.nodes.some(function (n) { return n.id.indexOf('dev:') === 0 && n.x !== undefined; });
+            siteRelayout = false;
+            if (full) {
+                var sp = sitePositions(data);
+                if (network) { network.destroy(); network = null; }
+                data.nodes = data.nodes.map(function (n) {
+                    var c = Object.assign({}, n);
+                    if (sp[n.id]) { sitePlaced.push(n.id); return Object.assign(c, sp[n.id]); }
+                    delete c.x; delete c.y;   // unknown nodes: physics puts them by their device
+                    return c;
+                });
+            } else {
+                var added = {};
+                data.nodes = data.nodes.map(function (n) {
+                    if (n.id.indexOf('dev:') !== 0 || n.x !== undefined || (network && nodeSet.get(n.id))) { return n; }
+                    sitePlaced.push(n.id);
+                    return Object.assign({}, n, siteSlot(data, n, added));
+                });
+            }
+        }
+        nodeSite = {};
+        data.nodes.forEach(function (n) { if (n.id.indexOf('dev:') === 0) { nodeSite[n.id] = n.site || ''; } });
         nodeAs = {};
         data.nodes.forEach(function (n) { if (n.asn !== null && n.asn !== undefined) { nodeAs[n.id] = n.asn; } });
+        lastEdges = data.edges;
         var container = document.getElementById('net');
         if (!data.nodes.length) {
             if (network) { network.destroy(); network = null; }
@@ -885,6 +1089,7 @@ function load() {
             if (newFree.length) { startSettling(nodeSet.getIds()); }   // the old nodes stand still, the new ones find a place
             syncSet(nodeSet, items);
             syncSet(edgeSet, toVisEdges(data.edges));
+            if (sitePlaced.length) { savePositions(sitePlaced); }   // a new device put in its site block
             dimMap();   // a selected device keeps its links in focus through a refresh
             if (newFree.length) { network.stabilize(200); }
             if (treeChanged) { setTimeout(fitMap, 100); }
@@ -894,7 +1099,7 @@ function load() {
         var items = toVisNodes(data.nodes);
         var anyFree = false;
         items.forEach(function (it) { if (it.x === undefined) { anyFree = true; } });
-        tidyOnSettle = items.length > 0 && items.every(function (it) { return it.x === undefined; }) && Object.keys(nodeAs).length > 0;
+        tidyOnSettle = layoutMode !== 'site' && items.length > 0 && items.every(function (it) { return it.x === undefined; }) && Object.keys(nodeAs).length > 0;
         // Saved places stand still while physics lays out the new ones. With no new node physics is off, and a
         // fixed node could not be dragged.
         if (anyFree) { items.forEach(function (it) { if (it.x !== undefined) { it.fixed = true; } }); }
@@ -906,12 +1111,15 @@ function load() {
             physics: { enabled: anyFree, solver: 'forceAtlas2Based', stabilization: { iterations: 200 },
                        forceAtlas2Based: { springLength: 220, avoidOverlap: 1, gravitationalConstant: -200, centralGravity: 0.003 } },
             interaction: { hover: true },
-            edges: { arrows: { to: false }, selectionWidth: function (width) { return width + 3; } },
+            // Zoomed out, a label that would be drawn smaller than this many pixels is left out (vis): device names below
+            // about 60 % zoom, link labels below about 70 %. Zoom in and they come back.
+            nodes: { scaling: { label: { drawThreshold: 8 } } },
+            edges: { arrows: { to: false }, selectionWidth: function (width) { return width + 3; }, scaling: { label: { drawThreshold: 7 } } },
         };
         network = new vis.Network(container, { nodes: nodeSet, edges: edgeSet }, options);
         dimMap();
         if (anyFree) { network.once('stabilizationIterationsDone', settled); }
-        else { setTimeout(function () { tuckUnknown(); fitMap(); centerPending(); }, 100); }
+        else { setTimeout(function () { tuckUnknown(); if (sitePlaced.length) { savePositions(sitePlaced); } fitMap(); centerPending(); }, 100); }
         network.on('dragEnd', function (params) {
             if (params.nodes.length) { savePositions(params.nodes); }
         });
@@ -921,14 +1129,15 @@ function load() {
             var oe = params.event.srcEvent || params.event;   // the menu is position: fixed, so it needs window coordinates
             openContextMenu(id === undefined ? null : id, oe.clientX, oe.clientY);
         });
-        network.on('beforeDrawing', drawAsAreas);
+        network.on('beforeDrawing', drawMapAreas);
         network.on('hoverEdge', function (params) { hoveredEdge = params.edge; updateLldpLabels(); });
         network.on('blurEdge', function () { hoveredEdge = null; updateLldpLabels(); });
         network.on('dragStart', ctxMenu.close);
-        network.on('zoom', ctxMenu.close);
+        network.on('zoom', function () { ctxMenu.close(); zoomDetail(); });
         network.on('click', function (params) {
             ctxMenu.close();
             if (params.nodes.length) { showNodePanel(params.nodes[0]); }
+            else if (params.edges.length && String(params.edges[0]).indexOf('bundle|') === 0) { openBundle(String(params.edges[0]).slice(7)); }
             else if (params.edges.length) { showLinkPanel(params.edges[0]); }
             else { closeNodePanel(); closeLinkPanel(); }
             updateLldpLabels();   // the selected LLDP link shows its ports
@@ -967,11 +1176,13 @@ function saveLayers() {
     try { localStorage.setItem(LAYER_KEY, JSON.stringify(shownLayers())); } catch (e) { /* private window: not remembered */ }
 }
 
-// Put the toggles back the way they were left; all on when nothing is saved.
+// Put the toggles back the way they were left; all on when nothing is saved, except on a big map (load() then starts with
+// LLDP and BGP only: layersAuto). That start is not a filter the viewer chose, so it shows no FILTERED marker (layersBig).
+var layersAuto = false, layersBig = false;
 function restoreLayers() {
     var saved = null;
     try { saved = JSON.parse(localStorage.getItem(LAYER_KEY)); } catch (e) { saved = null; }
-    if (!Array.isArray(saved)) { return; }
+    if (!Array.isArray(saved)) { layersAuto = true; return; }
     document.querySelectorAll('.filters button[data-layer]').forEach(function (b) {
         setLayerButton(b, saved.indexOf(b.getAttribute('data-layer')) !== -1);
     });
@@ -979,7 +1190,7 @@ function restoreLayers() {
 
 // The warning over the map: what is hidden right now.
 function updateFilterMarker() {
-    var hidden = Array.prototype.map.call(document.querySelectorAll('.filters button[data-layer]:not(.active)'),
+    var hidden = layersBig ? [] : Array.prototype.map.call(document.querySelectorAll('.filters button[data-layer]:not(.active)'),
         function (b) { return b.getAttribute('data-name'); });
     var nodes = Object.keys(hiddenNodes).length;
     var text = hidden.length === 3 ? 'all connections hidden, devices only' : '';
@@ -998,6 +1209,7 @@ function updateFilterMarker() {
 }
 
 function toggleLayer(btn) {
+    layersBig = false;   // from now on the layers are the viewer's own choice
     setLayerButton(btn, btn.className !== 'active');
     saveLayers();
     updateFilterMarker();
@@ -1233,6 +1445,43 @@ function asBoxes(pos, skip) {
     return boxes;
 }
 
+// By site: one box per site around its devices, drawn under the AS boxes: thin solid line, the site name top left.
+var nodeSite = {};   // device node id -> its site ('' = none)
+var SITE_PAD = 34;
+function drawMapAreas(ctx) {
+    if (!nodeSet) { return; }
+    if (layoutMode === 'site' && !treeOn) { drawSiteAreas(ctx); }
+    drawAsAreas(ctx);
+}
+
+function drawSiteAreas(ctx) {
+    var pos = network.getPositions(), boxes = {};
+    Object.keys(nodeSite).forEach(function (id) {
+        if (!pos[id]) { return; }
+        var b = asRect(pos[id]), k = nodeSite[id];
+        boxes[k] = boxes[k] ? unionRect(boxes[k], b) : b;
+    });
+    ctx.save();
+    Object.keys(boxes).forEach(function (site) {
+        var b = boxes[site], pad = SITE_PAD;
+        var x = b.left - pad, y = b.top - pad - 14, w = b.right - b.left + 2 * pad, h = b.bottom - b.top + 2 * pad + 14;
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, 6);
+        ctx.globalAlpha = 0.35;
+        ctx.fillStyle = themeColor('--bg-muted');
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = themeColor('--border');
+        ctx.stroke();
+        ctx.font = 'bold 16px monospace';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = themeColor('--text');
+        ctx.fillText(site || 'No site', x + 10, y + 8);
+    });
+    ctx.restore();
+}
+
 function drawAsAreas(ctx) {
     if (!asAreasOn() || !nodeSet) { return; }
     var boxes = asBoxes(network.getPositions());
@@ -1375,12 +1624,26 @@ function portSpan(e) {
 function renderDeviceList() {
     var box = document.getElementById('dev-rows');
     var devs = (rawData ? rawData.nodes : []).filter(function (n) { return !n.ghost && n.device_type !== 'subnet'; });
-    devs.sort(function (a, b) { return a.label.toLowerCase() < b.label.toLowerCase() ? -1 : 1; });
+    // A long list is grouped by site (a heading per site, devices without a site last); a short one stays one list by name.
+    var grouped = devs.length > BIG_MAP;
+    devs.sort(function (a, b) {
+        if (grouped && (a.site || '') !== (b.site || '')) { return !a.site ? 1 : (!b.site ? -1 : (a.site < b.site ? -1 : 1)); }
+        return a.label.toLowerCase() < b.label.toLowerCase() ? -1 : 1;
+    });
     var total = devs.length, q = devSearchText();
     if (q) { devs = devs.filter(function (n) { return devMatches(n, q); }); }
     document.getElementById('dev-list-title').textContent = 'Devices (' + (q ? devs.length + ' of ' : '') + total + ')';
     box.textContent = '';
+    var lastSite = null, perSite = {};
+    devs.forEach(function (n) { perSite[n.site || ''] = (perSite[n.site || ''] || 0) + 1; });
     devs.forEach(function (n) {
+        if (grouped && (n.site || '') !== lastSite) {
+            lastSite = n.site || '';
+            var sh = document.createElement('div');
+            sh.className = 'dev-sub';
+            sh.textContent = (lastSite || 'No site') + ' (' + perSite[lastSite] + ')';
+            box.appendChild(sh);
+        }
         var row = document.createElement('div');
         row.className = 'dev-row';
         row.tabIndex = 0;
@@ -1516,6 +1779,8 @@ function edgeOpacity(from, to) {
 
 function dimMap() {
     if (!nodeSet || !rawData) { return; }
+    // The links are drawn again first: what a selection or a "bundle" hides or shows depends on them (toVisEdges).
+    if (edgeSet && lastEdges.length) { syncSet(edgeSet, toVisEdges(lastEdges)); }
     findSearchNear();
     findSelNear();
     var byId = {};
@@ -1888,7 +2153,11 @@ fillLegendIcons();
 restoreLayers();
 try { var savedWidth = localStorage.getItem(LINE_KEY); if (LINE_SCALE[savedWidth]) { document.getElementById('width-sel').value = savedWidth; } } catch (e) { /* medium */ }
 try { setLayerButton(document.getElementById('vendor-btn'), localStorage.getItem(VENDOR_ON_KEY) !== '0'); } catch (e) { /* shown */ }
-try { setLayerButton(document.getElementById('as-btn'), localStorage.getItem(AS_AREAS_KEY) !== '0'); } catch (e) { /* shown */ }
+// No saved choice: AS areas are shown, except in By site (the boxes would sit over the site boxes).
+try {
+    var asSaved = localStorage.getItem(AS_AREAS_KEY);
+    setLayerButton(document.getElementById('as-btn'), asSaved === null ? layoutMode !== 'site' : asSaved !== '0');
+} catch (e) { /* shown */ }
 try { setLayerButton(document.getElementById('icons-btn'), localStorage.getItem(ICONS_ON_KEY) !== '0'); } catch (e) { /* shown */ }
 try { setLayerButton(document.getElementById('unknown-btn'), localStorage.getItem(UNKNOWN_KEY) !== '1'); } catch (e) { /* shown */ }
 try { setLayerButton(document.getElementById('changed-btn'), localStorage.getItem(CHANGED_KEY) === '1'); } catch (e) { /* off */ }

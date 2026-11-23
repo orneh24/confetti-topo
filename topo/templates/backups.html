@@ -33,7 +33,8 @@
         <div class="section-body">
             <div class="hint">Backups are taken by the poller (<code>show running-config</code>, IOS only) and stored only when the config changed.
                 Open a device for its history and diffs.</div>
-            <table data-sortable class="striped compact">
+            <input type="search" data-filter-table="b-table" placeholder="Filter: device, platform, template" aria-label="Filter devices" style="margin-bottom:6px">
+            <table data-sortable class="striped compact" id="b-table">
                 <thead><tr><th>Device</th><th>Platform</th><th>Latest backup</th><th>Age</th><th>Size</th><th>Versions</th><th>Template</th></tr></thead>
                 <tbody id="b-rows"></tbody>
             </table>

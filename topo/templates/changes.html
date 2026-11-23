@@ -24,14 +24,7 @@ td.when { white-space: nowrap; }
 /* Every column is as wide as its content; Notes (the last) takes the rest of the row, so there is no extra space after each column. */
 #table th, #table td { width: 1%; white-space: nowrap; }
 #table th:last-child, #table td:last-child { width: auto; white-space: normal; }
-/* Drag a header's right edge to resize its column (Notes takes the rest). Once resized the table is fixed layout, so a column can
-   be made narrower than its text (cut with "..."); the widths are kept per browser in confetti-topo-changes-columns. */
-#table th { position: relative; box-sizing: border-box; }
-#table.resized { table-layout: fixed; }
-#table.resized th, #table.resized td { overflow: hidden; text-overflow: ellipsis; }
-.col-grip { position: absolute; top: 0; right: 0; width: 7px; height: 100%; cursor: col-resize; }
-.col-grip:hover, body.col-sizing .col-grip { background: var(--border); }
-body.col-sizing, body.col-sizing * { cursor: col-resize !important; user-select: none; }
+/* Column widths: static/colresize.js (kept in confetti-topo-changes-columns, data-col-key). */
 td.notes .pill { margin-right: 4px; }
 /* Before / After: a state word is coloured by what it means - green good, yellow warning, red bad. */
 .st { display: inline-block; padding: 0 7px; border-radius: 10px; border: 1px solid currentColor; font-weight: bold; }
@@ -80,6 +73,8 @@ td.notes .pill { margin-right: 4px; }
                 <label>Change <select id="f-change"><option value="">All</option></select></label>
                 <label>Severity <select id="f-severity"><option value="">All</option></select></label>
                 <label>Search <input type="search" id="f-q" placeholder="device, interface, peer, value"></label>
+                <label title="Leave out the changes marked flapping (see Settings for the rule)"><input type="checkbox" id="f-noflap"> Hide flapping</label>
+                <label title="One row for each flapping item instead of one row per change; click it to see every change"><input type="checkbox" id="f-fold" checked> Fold flapping</label>
                 <button type="button" class="linklike" onclick="resetFilters()">reset filters</button>
                 <button type="button" class="linklike" onclick="exportCsv()" title="Download the events shown now as a CSV file">export CSV</button>
             </div>
@@ -89,7 +84,7 @@ td.notes .pill { margin-right: 4px; }
     <div class="changes-wrap">
         <div class="section">
             <div class="section-body">
-                <table data-sortable id="table">
+                <table data-sortable class="sticky-head" id="table" data-col-key="confetti-topo-changes-columns">
                     <thead><tr><th>Time (since last change)</th><th>Device</th><th>Type</th><th>Change</th>
                         <th>Subject</th><th>Before</th><th>After</th><th>Notes</th></tr></thead>
                     <tbody id="rows"></tbody>
@@ -243,7 +238,9 @@ function fillFilters() {
 function visibleEvents() {
     var dev = val('f-device'), type = val('f-type'), change = val('f-change'), sev = val('f-severity');
     var q = val('f-q').trim().toLowerCase();
+    var noFlap = document.getElementById('f-noflap').checked;
     return events.filter(function (e) {
+        if (noFlap && flaps[e.id]) { return false; }
         if (dev && String(e.device_id) !== dev) { return false; }
         if (type && e.type !== type) { return false; }
         if (change && e.change !== change) { return false; }
@@ -282,6 +279,7 @@ function exportCsv() {
 
 function resetFilters() {
     ['f-device', 'f-type', 'f-change', 'f-severity', 'f-q'].forEach(function (id) { document.getElementById(id).value = ''; });
+    document.getElementById('f-noflap').checked = false;
     if (val('f-hours') !== '24') { document.getElementById('f-hours').value = '24'; load(); } else { render(); }
 }
 
@@ -328,11 +326,44 @@ function renderTiles(list) {
 }
 
 // ---- Table ----------------------------------------------------------------------
+// Fold flapping: every change of a flapping item (device + type + item) becomes one row, at the place of its newest change.
+// Clicking it opens the newest change in the details pane, which then lists them all (fillPane).
+function foldOn() { return document.getElementById('f-fold').checked; }
+function foldKey(e) { return flaps[e.id] && e.item ? e.device_id + '|' + e.type + '|' + e.item : ''; }
+var SEV_ORDER = { info: 0, warning: 1, critical: 2 };
+
+function foldRow(group) {
+    var first = group[0], oldest = group[group.length - 1], sev = first.severity;
+    group.forEach(function (g) { if ((SEV_ORDER[g.severity] || 0) > (SEV_ORDER[sev] || 0)) { sev = g.severity; } });
+    var span = new Date(oldest.at).toLocaleTimeString() + ' to ' + new Date(first.at).toLocaleTimeString();
+    return '<tr class="row fold' + (first.id === selectedId ? ' selected' : '') + '" data-ctx="event" data-id="' + first.id +
+        '" data-dev="' + (first.device_id === null ? '' : first.device_id) + '">' +
+        '<td class="when" data-sort="' + ctxMenu.attr(first.at) + '" title="' + esc(new Date(first.at).toLocaleString()) + '">' + esc(timeCell(first)) + '</td>' +
+        '<td>' + esc(deviceName(first)) + '</td>' +
+        '<td>' + esc(first.type) + '</td>' +
+        '<td><span class="pill running">flapped &times;' + group.length + '</span></td>' +
+        '<td><button type="button" class="linklike" data-id="' + first.id + '">' + esc(subjectText(first)) + '</button></td>' +
+        '<td>' + stateCell(oldest.before) + '</td>' +
+        '<td>' + stateCell(first.after) + '</td>' +
+        '<td class="notes"><span class="pill ' + sevClass(sev) + '">' + esc(sev) + '</span>' + flapPill(first) +
+        esc(group.length + ' changes, ' + span) + '</td></tr>';
+}
+
 function render() {
     var list = visibleEvents();
     var html = '';
+    var groups = {}, folding = foldOn(), rowCount = 0;
+    if (folding) {
+        list.forEach(function (e) { var k = foldKey(e); if (k) { (groups[k] = groups[k] || []).push(e); } });
+    }
     for (var i = 0; i < list.length; i++) {
         var e = list[i];
+        var fk = folding ? foldKey(e) : '';
+        if (fk) {
+            if (groups[fk][0] === e) { html += foldRow(groups[fk]); rowCount++; }
+            continue;
+        }
+        rowCount++;
         var note = noteText(e);
         html += '<tr class="row' + (e.id === selectedId ? ' selected' : '') + '" data-ctx="event" data-id="' + e.id +
             '" data-dev="' + (e.device_id === null ? '' : e.device_id) + '">' +
@@ -347,8 +378,9 @@ function render() {
     }
     document.getElementById('rows').innerHTML = html;
     document.getElementById('empty').style.display = list.length ? 'none' : 'block';
-    document.getElementById('count-note').textContent = list.length === events.length
-        ? events.length + ' changes' : list.length + ' of ' + events.length + ' changes';
+    document.getElementById('count-note').textContent = (list.length === events.length
+        ? events.length + ' changes' : list.length + ' of ' + events.length + ' changes') +
+        (rowCount !== list.length ? ' in ' + rowCount + ' rows' : '');
     renderTiles(list);
     setTimeout(reband, 0);   // after tablesort.js has put the rows back in the chosen order
 }
@@ -441,7 +473,15 @@ function fillPane(e) {
     addRow(info, 'since last', gap === null || gap === undefined ? 'no earlier change for this device' : ago(gap));
     addRow(info, 'kind', e.kind);
     addRow(info, 'event id', e.id);
-    document.getElementById('ep-detail').textContent = e.detail || '(none)';
+    var detail = e.detail || '(none)';
+    var fk = foldOn() ? foldKey(e) : '';
+    if (fk) {   // a folded row: every change of this item, newest first
+        var all = visibleEvents().filter(function (x) { return foldKey(x) === fk; });
+        detail += '\n\nAll ' + all.length + ' changes shown for this item:\n' + all.slice(0, 100).map(function (x) {
+            return new Date(x.at).toLocaleString() + '  ' + (x.before && x.after ? x.before + ' -> ' + x.after : (x.detail || '').split('\n')[0]);
+        }).join('\n') + (all.length > 100 ? '\n... and ' + (all.length - 100) + ' older' : '');
+    }
+    document.getElementById('ep-detail').textContent = detail;
     document.getElementById('ep-device').disabled = e.device_id === null;
     document.getElementById('ep-topo').disabled = e.device_id === null;
     document.getElementById('pane').style.display = 'block';
@@ -469,6 +509,13 @@ document.getElementById('f-hours').addEventListener('change', load);
     document.getElementById(id).addEventListener('change', render);
 });
 document.getElementById('f-q').addEventListener('input', render);
+document.getElementById('f-noflap').addEventListener('change', render);
+try { document.getElementById('f-fold').checked = localStorage.getItem('confetti-topo-changes-fold') !== '0'; } catch (e) { /* default: folded */ }
+document.getElementById('f-fold').addEventListener('change', function () {
+    try { localStorage.setItem('confetti-topo-changes-fold', this.checked ? '1' : '0'); } catch (e) { /* not remembered */ }
+    render();
+    if (selectedId !== null && selectedEvent()) { fillPane(selectedEvent()); }
+});
 document.querySelector('#table thead').addEventListener('click', function () { setTimeout(reband, 0); });
 
 var rowsBody = document.getElementById('rows');
@@ -516,69 +563,5 @@ document.addEventListener('keydown', function (ev) {
 
 load();
 setInterval(load, 15000);
-
-// Column widths: drag the right edge of a header; double-click it to give every column its natural width back.
-(function () {
-    var KEY = 'confetti-topo-changes-columns';
-    var table = document.getElementById('table');
-    var ths = Array.prototype.slice.call(table.tHead.rows[0].cells);
-    var last = ths.length - 1;   // Notes: takes the rest of the row
-    var resizedAt = 0;
-    // Fix every column at its width now (rounded up, so nothing that fits is cut), then drag changes one.
-    function freeze() {
-        if (table.classList.contains('resized')) { return; }
-        ths.forEach(function (th, i) { if (i < last) { th.style.width = Math.ceil(th.getBoundingClientRect().width) + 1 + 'px'; } });
-        table.classList.add('resized');
-    }
-    function store() {
-        var w = {};
-        ths.forEach(function (th, i) { if (i < last) { w[i] = parseInt(th.style.width, 10) || 0; } });
-        try { localStorage.setItem(KEY, JSON.stringify(w)); } catch (e) { /* not remembered */ }
-    }
-    var saved = {};
-    try { saved = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { saved = {}; }
-    if (Object.keys(saved).length) {
-        ths.forEach(function (th, i) { if (i < last && saved[i] > 0) { th.style.width = saved[i] + 'px'; } });
-        table.classList.add('resized');
-    }
-    // The click that ends a drag must not sort the column (tablesort.js listens for clicks on the header).
-    table.tHead.addEventListener('click', function (e) {
-        if (Date.now() - resizedAt < 300) { e.stopPropagation(); e.preventDefault(); }
-    }, true);
-    ths.forEach(function (th, i) {
-        if (i === last) { return; }
-        var grip = document.createElement('span');
-        grip.className = 'col-grip';
-        grip.title = 'Drag to resize this column. Double-click: all columns back to their natural width';
-        th.appendChild(grip);
-        grip.addEventListener('click', function (e) { e.stopPropagation(); });
-        grip.addEventListener('pointerdown', function (e) {
-            if (e.button !== 0) { return; }
-            e.preventDefault();
-            e.stopPropagation();
-            freeze();
-            var x0 = e.clientX, w0 = th.getBoundingClientRect().width;
-            document.body.classList.add('col-sizing');
-            function move(ev) { th.style.width = Math.max(40, Math.round(w0 + ev.clientX - x0)) + 'px'; }
-            function up() {
-                document.removeEventListener('pointermove', move);
-                document.removeEventListener('pointerup', up);
-                document.removeEventListener('pointercancel', up);
-                document.body.classList.remove('col-sizing');
-                resizedAt = Date.now();
-                store();
-            }
-            document.addEventListener('pointermove', move);
-            document.addEventListener('pointerup', up);
-            document.addEventListener('pointercancel', up);
-        });
-        grip.addEventListener('dblclick', function (e) {
-            e.stopPropagation();
-            ths.forEach(function (t) { t.style.width = ''; });
-            table.classList.remove('resized');
-            try { localStorage.removeItem(KEY); } catch (err) { /* nothing saved */ }
-        });
-    });
-})();
 </script>
 {% endblock %}

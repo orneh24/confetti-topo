@@ -182,7 +182,37 @@ table.striped tbody tr:nth-child(even) td { background: var(--stripe); }
 table.striped tbody tr:hover td { background: color-mix(in srgb, var(--stripe), var(--text) 12%); }
 /* Columns hug their content and sit on the left instead of spreading over the full width. */
 table.compact { width: auto; max-width: 100%; }
+/* Column widths (static/colresize.js): drag a header's right edge; once resized the table is fixed layout, so a column can be
+   narrower than its text (cut with "..."). cols-compact = "Resize (compact)": every column as narrow as its widest cell. */
+table.col-sizable th { position: relative; box-sizing: border-box; }
+table.resized { table-layout: fixed; }
+table.resized th, table.resized td { overflow: hidden; text-overflow: ellipsis; }
+table.cols-compact { max-width: none; }
+table.col-measure { table-layout: auto !important; width: auto !important; }
+table.col-measure th, table.col-measure td { width: auto !important; white-space: nowrap !important; }
+.col-grip { position: absolute; top: 0; right: 0; width: 7px; height: 100%; cursor: col-resize; }
+.col-grip:hover, body.col-sizing .col-grip { background: var(--border); }
+table:not(.cols-compact) .col-grip-last { display: none; }
+body.col-sizing, body.col-sizing * { cursor: col-resize !important; user-select: none; }
 table.compact th, table.compact td { padding: 3px 12px 3px 6px; text-align: left; white-space: nowrap; }
+/* A capped table body shows its first 10 rows (after any sort) until its "Show all" button is pressed (dashboard, device page). */
+tbody.capped > tr:nth-child(n+11) { display: none; }
+tbody.capped25 > tr:nth-child(n+26) { display: none; }   /* IPAM: reference lists, so a longer cap */
+/* A long list whose column names stay on screen while the page scrolls (Recent changes, Syslog). The box must not scroll by
+   itself, or the header would stick to the box instead of the page: a wide table then scrolls the page sideways. */
+.section:has(> .section-body > table.sticky-head), .section-body:has(> table.sticky-head) { overflow: visible; }
+table.sticky-head th { position: sticky; top: 0; z-index: 2; background: var(--bg-card); }
+/* Filter chips (Devices page, Recent changes): one button per thing worth narrowing to, with its count. */
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.chip-btn { padding: 2px 10px; font-size: 12px; border: 1px solid var(--border); background: var(--bg-card); color: var(--text); cursor: pointer; }
+.chip-btn:hover { background: var(--bg-hover); }
+.chip-btn.on { border-color: var(--blue); color: var(--blue); font-weight: 600; }
+.chip-btn.bad { border-color: var(--red); }
+.chip-btn .n { color: var(--text-dim); margin-left: 4px; }
+/* A group heading row inside a table body (Devices by site, IPAM by site). Click folds the rows below it. */
+tr.grp > td { background: var(--bg-hover); font-weight: 600; cursor: pointer; user-select: none; border-top: 1px solid var(--border); }
+tr.grp .grp-sum { font-weight: 400; color: var(--text-dim); margin-left: 8px; }
+tr.grp-hidden, tr.filt-off { display: none; }
 .kv { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 12px; }
 .kv .k { color: var(--text-dim); }
 .v.ok { color: var(--green); }

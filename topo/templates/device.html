@@ -8,8 +8,6 @@
 @media (min-width: 760px) { .container { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (min-width: 1100px) { .container { grid-template-columns: repeat(4, minmax(0, 1fr)); } .section.half { grid-column: span 2; } }
 @media (min-width: 1900px) { .container { grid-template-columns: repeat(6, minmax(0, 1fr)); } .section.half { grid-column: span 3; } }
-/* A capped table shows its first 10 rows (after any sort) until Expand. */
-tbody.capped > tr:nth-child(n+11) { display: none; }
 .hint { margin-bottom: 8px; }
 .msg { font-size: 11px; margin-left: 8px; }
 /* The status strip: one chip per thing that can be wrong, each a link to the box that explains it. */
@@ -124,21 +122,23 @@ tbody.capped > tr:nth-child(n+11) { display: none; }
         </div>
     </div>
     <div class="section wide" data-box="lldp">
-        <div class="section-header"><span>LLDP neighbors</span></div>
+        <div class="section-header"><span>LLDP neighbors</span>
+            <span class="hdr-actions"><button type="button" class="btn-small" id="lldp-more" style="display:none" onclick="toggleCap('lldp')"></button></span></div>
         <div class="section-body">
             <table data-sortable>
                 <thead><tr><th>Local port</th><th>Neighbor</th><th>Remote port</th><th>Mgmt IP</th><th>Last seen</th></tr></thead>
-                <tbody id="lldp-rows"></tbody>
+                <tbody id="lldp-rows" class="capped"></tbody>
             </table>
             <div class="empty" id="lldp-empty" style="display:none">no LLDP neighbors (LLDP may be off on this device)</div>
         </div>
     </div>
     <div class="section wide" data-box="sessions">
-        <div class="section-header" id="sessions"><span>BGP / OSPF</span></div>
+        <div class="section-header" id="sessions"><span>BGP / OSPF</span>
+            <span class="hdr-actions"><button type="button" class="btn-small" id="adj-more" style="display:none" onclick="toggleCap('adj')"></button></span></div>
         <div class="section-body">
             <table data-sortable>
                 <thead><tr><th>Proto</th><th>Peer</th><th>State</th><th>Remote AS</th><th>Prefixes</th><th>Uptime</th><th>Interface</th></tr></thead>
-                <tbody id="adj-rows"></tbody>
+                <tbody id="adj-rows" class="capped"></tbody>
             </table>
             <div class="empty" id="adj-empty" style="display:none">no BGP or OSPF sessions</div>
         </div>
@@ -167,7 +167,8 @@ tbody.capped > tr:nth-child(n+11) { display: none; }
         </div>
     </div>
     <div class="section wide" data-box="interfaces">
-        <div class="section-header" id="interfaces"><span>Interfaces</span></div>
+        <div class="section-header" id="interfaces"><span>Interfaces</span>
+            <span class="hdr-actions"><button type="button" class="btn-small" id="interface-more" style="display:none" onclick="toggleCap('interface')"></button></span></div>
         <div class="section-body">
             <div class="hint">
                 Show only:
@@ -179,7 +180,7 @@ tbody.capped > tr:nth-child(n+11) { display: none; }
             <table data-sortable>
                 <thead><tr><th>Name</th><th>Admin</th><th>Oper</th><th>IP</th><th>Speed/Duplex</th>
                     <th>MTU</th><th>Errors (24h)</th><th>Traffic in / out</th><th>Last seen</th></tr></thead>
-                <tbody id="interface-rows"></tbody>
+                <tbody id="interface-rows" class="capped"></tbody>
             </table>
             <div class="empty" id="interface-empty" style="display:none">no interfaces polled yet</div>
         </div>
@@ -200,7 +201,8 @@ tbody.capped > tr:nth-child(n+11) { display: none; }
         </div>
     </div>
     <div class="section wide" data-box="routes" id="routes">
-        <div class="section-header"><span>Routing table</span></div>
+        <div class="section-header"><span>Routing table</span>
+            <span class="hdr-actions"><button type="button" class="btn-small" id="route-more" style="display:none" onclick="toggleCap('route')"></button></span></div>
         <div class="section-body">
             <div class="hint">
                 <label for="rt-vrf">VRF</label> <select id="rt-vrf" onchange="renderRoutes()"></select>
@@ -217,7 +219,7 @@ tbody.capped > tr:nth-child(n+11) { display: none; }
             <table data-sortable>
                 <thead><tr><th>Prefix</th><th>Protocol</th><th>Next hop</th><th>Interface</th>
                     <th>AD/Metric</th><th>Age</th></tr></thead>
-                <tbody id="route-rows"></tbody>
+                <tbody id="route-rows" class="capped"></tbody>
             </table>
             <div class="empty" id="route-empty" style="display:none">no routes polled yet</div>
         </div>
@@ -513,6 +515,7 @@ function renderInterfaces() {
                 '</tr>';
         }
         document.getElementById('interface-rows').innerHTML = rows;
+        showCap('interface');
         var empty = document.getElementById('interface-empty');
         empty.textContent = interfaceList.length ? 'no interfaces match this filter' : 'no interfaces polled yet';
         empty.style.display = list.length ? 'none' : 'block';
@@ -662,6 +665,7 @@ function renderRoutes() {
             '</td><td>' + esc(r.interface) + '</td><td>' + esc(adm) + '</td><td>' + esc(r.age || '') + '</td></tr>';
     });
     document.getElementById('route-rows').innerHTML = rows;
+    showCap('route');
     document.getElementById('rt-count').textContent = routeList.length ? list.length + ' routes' : '';
     var empty = document.getElementById('route-empty');
     empty.textContent = routeList.length ? 'no routes match' : 'no routes polled yet';
@@ -738,6 +742,7 @@ function loadLldp() {
                 '</td><td>' + esc(n.remote_mgmt_ip || '') + '</td><td>' + esc(n.last_seen) + '</td></tr>';
         }
         document.getElementById('lldp-rows').innerHTML = rows;
+        showCap('lldp');
         document.getElementById('lldp-empty').style.display = list.length ? 'none' : 'block';
     });
 }
@@ -817,11 +822,12 @@ function loadAdjacencies() {
                 '<td>' + esc(a.uptime || '') + '</td><td>' + esc(a.local_if || '') + '</td></tr>';
         }
         document.getElementById('adj-rows').innerHTML = rows;
+        showCap('adj');
         document.getElementById('adj-empty').style.display = list.length ? 'none' : 'block';
     });
 }
 
-// Events and Syslog show their newest 10 rows; "Show all" shows the rest (up to the 50 loaded). Kept across refreshes.
+// Events, Syslog, LLDP, BGP / OSPF, Interfaces and Routes show their first 10 rows; "Show all" shows the rest. Kept across refreshes.
 var CAP_ROWS = 10;
 function showCap(name) {
     var body = document.getElementById(name + '-rows'), btn = document.getElementById(name + '-more');

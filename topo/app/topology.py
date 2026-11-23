@@ -207,7 +207,7 @@ def build(conn, layer=None):
     device_as = bgp_as_numbers(conn, owners)
     nodes = {}
     names = {}
-    for d in conn.execute("SELECT id, hostname, role, model, vendor, platform, reachable, mgmt_ip FROM devices"):
+    for d in conn.execute("SELECT id, hostname, role, model, vendor, platform, reachable, mgmt_ip, site FROM devices"):
         nid = "dev:{}".format(d["id"])
         names[d["id"]] = d["hostname"]
         nodes[nid] = {
@@ -216,6 +216,7 @@ def build(conn, layer=None):
             "asn": device_as.get(d["id"]),
             "device_type": device_type(d["role"], d["model"], d["hostname"], d["platform"]),
             "vendor": (d["vendor"] or "").lower(),
+            "site": d["site"] or "",   # the map's "By site" layout groups by it
         }
 
     def ghost_id(kind, key, linux=False):

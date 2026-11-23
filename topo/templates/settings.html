@@ -106,7 +106,8 @@
         <div class="section-header"><span>Device credentials</span></div>
         <div class="section-body">
             <div class="hint">Set the same credentials on several devices, or remove their own credentials so they use the defaults. Nodes imported from Confetti Traffic are never polled and are not listed.</div>
-            <table>
+            <input type="search" data-filter-table="cred-table" placeholder="Filter: hostname, IP" aria-label="Filter devices" style="margin-bottom:6px">
+            <table id="cred-table">
                 <thead>
                     <tr>
                         <th><input type="checkbox" id="sel-all" onchange="selectAll(this.checked)" aria-label="Select all"></th>
@@ -344,11 +345,12 @@ function restoreBackup() {
 }
 
 function selectAll(on) {
-    document.querySelectorAll('#dev-rows input[type=checkbox]').forEach(function (b) { b.checked = on; });
+    // Only the rows the filter shows: a hidden device must never be changed by a bulk apply.
+    document.querySelectorAll('#dev-rows tr:not(.filt-off) input[type=checkbox]').forEach(function (b) { b.checked = on; });
 }
 
 function selectedIds() {
-    return Array.prototype.map.call(document.querySelectorAll('#dev-rows input:checked'),
+    return Array.prototype.map.call(document.querySelectorAll('#dev-rows tr:not(.filt-off) input:checked'),
         function (b) { return parseInt(b.value, 10); });
 }
 

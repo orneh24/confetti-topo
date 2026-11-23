@@ -17,16 +17,19 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
             <div class="bulk-row">
                 <button type="button" id="poll-all-btn" class="primary" onclick="pollAll()">Poll all now</button>
                 <span class="msg" id="poll-msg"></span>
+                <label title="One heading per site, click it to fold the site"><input type="checkbox" id="dev-group" onchange="setGroup()"> Group by site</label>
                 <input type="search" id="dev-filter" placeholder="Filter: name, IP, site, role, vendor" aria-label="Filter devices"
                        oninput="renderDevices()" style="margin-left:auto;min-width:240px">
                 <span class="msg" id="dev-filter-count"></span>
             </div>
+            <div class="chips" id="dev-chips"></div>
+            <div class="hint" style="margin-bottom:6px">Right-click a row for Poll now, Delete and more.</div>
             <table data-sortable class="striped compact" id="dev-table">
                 <thead>
                     <tr>
                         <th>Hostname</th><th>Poll</th><th>Role</th><th>Mgmt IP</th><th>Site</th>
                         <th>Key</th><th>Ping</th><th>Template</th><th>Last seen</th>
-                        <th>Vendor</th><th>Model</th><th>OS version</th><th>Platform</th><th>Serial</th><th></th>
+                        <th>Vendor</th><th>Model</th><th>OS version</th><th>Platform</th><th>Serial</th>
                     </tr>
                 </thead>
                 <tbody id="device-rows"></tbody>
@@ -157,18 +160,105 @@ function driftCell(d) {
     return t;
 }
 
+// Quick filters (chips) and the site grouping. Both are kept in the browser only.
+var chip = 'all';   // all | down | fail | never | drift | role:<name>
+var GROUP_KEY = 'confetti-topo-devices-group', FOLD_KEY = 'confetti-topo-devices-folded';
+var foldedSites = {};
+try { foldedSites = JSON.parse(localStorage.getItem(FOLD_KEY)) || {}; } catch (e) { foldedSites = {}; }
+
+function isDown(d) { return d.reachable === 0 || d.reachable === false; }
+function isFailing(d) { return d.role !== 'node' && d.fail_count > 0; }
+function neverPolled(d) { return d.role !== 'node' && d.enabled && !d.last_poll_ok && !(d.fail_count > 0); }
+function isDrifted(d) { return d.drift_status === 'drifted'; }
+function chipMatch(d) {
+    if (chip === 'all') { return true; }
+    if (chip === 'down') { return isDown(d); }
+    if (chip === 'fail') { return isFailing(d); }
+    if (chip === 'never') { return neverPolled(d); }
+    if (chip === 'drift') { return isDrifted(d); }
+    return chip.indexOf('role:') === 0 && d.role === chip.slice(5);
+}
+function pickChip(c) { chip = chip === c ? 'all' : c; renderDevices(); }
+
+function renderChips() {
+    var defs = [['all', 'All', allDevices.length, false],
+        ['down', 'Down', allDevices.filter(isDown).length, true],
+        ['fail', 'Poll failing', allDevices.filter(isFailing).length, true],
+        ['never', 'Not polled yet', allDevices.filter(neverPolled).length, false],
+        ['drift', 'Template drift', allDevices.filter(isDrifted).length, true]];
+    var roles = {};
+    allDevices.forEach(function (d) { roles[d.role || '-'] = (roles[d.role || '-'] || 0) + 1; });
+    Object.keys(roles).sort().forEach(function (r) { defs.push(['role:' + r, r, roles[r], false]); });
+    var html = '';
+    defs.forEach(function (c) {
+        if (c[0] !== 'all' && !c[2] && chip !== c[0]) { return; }   // nothing to narrow to
+        html += '<button type="button" class="chip-btn' + (chip === c[0] ? ' on' : '') + (c[3] && c[2] ? ' bad' : '') +
+            '" data-chip="' + attr(c[0]) + '">' + esc(c[1]) + '<span class="n">' + c[2] + '</span></button>';
+    });
+    document.getElementById('dev-chips').innerHTML = html;
+}
+document.getElementById('dev-chips').addEventListener('click', function (ev) {
+    var b = ev.target.closest('button[data-chip]');
+    if (b) { pickChip(b.getAttribute('data-chip')); }
+});
+
+function groupOn() {
+    var saved = null;
+    try { saved = localStorage.getItem(GROUP_KEY); } catch (e) { saved = null; }
+    return saved === null ? allDevices.length > 20 : saved === '1';   // a long list starts grouped
+}
+function setGroup() {
+    try { localStorage.setItem(GROUP_KEY, document.getElementById('dev-group').checked ? '1' : '0'); } catch (e) { /* not remembered */ }
+    renderDevices();
+}
+function saveFolded() { try { localStorage.setItem(FOLD_KEY, JSON.stringify(foldedSites)); } catch (e) { /* not remembered */ } }
+document.getElementById('device-rows').addEventListener('click', function (ev) {
+    var h = ev.target.closest('tr.grp');
+    if (!h) { return; }
+    var site = h.getAttribute('data-site');
+    foldedSites[site] = !foldedSites[site];
+    if (!foldedSites[site]) { delete foldedSites[site]; }
+    saveFolded();
+    Array.prototype.forEach.call(document.querySelectorAll('#device-rows tr'), function (tr) {
+        if (tr.getAttribute('data-site') === site && !tr.classList.contains('grp')) { tr.classList.toggle('grp-hidden', !!foldedSites[site]); }
+    });
+    h.querySelector('.grp-arrow').innerHTML = foldedSites[site] ? '&#9656;' : '&#9662;';
+});
+
+function groupHead(site, members) {
+    var down = members.filter(isDown).length, fail = members.filter(isFailing).length;
+    var sum = members.length + (members.length === 1 ? ' device' : ' devices') + (down ? ' · ' + down + ' down' : '') + (fail ? ' · ' + fail + ' poll failing' : '');
+    return '<tr class="grp" data-site="' + attr(site) + '"><td colspan="14"><span class="grp-arrow">' + (foldedSites[site] ? '&#9656;' : '&#9662;') + '</span> ' +
+        esc(site || 'No site') + '<span class="grp-sum">' + esc(sum) + '</span></td></tr>';
+}
+
 function renderDevices(fresh) {
     if (fresh) { allDevices = fresh; }
     var q = document.getElementById('dev-filter').value.trim().toLowerCase();
-    var list = q ? allDevices.filter(function (d) { return deviceMatches(d, q); }) : allDevices;
-    document.getElementById('dev-filter-count').textContent = q ? list.length + ' of ' + allDevices.length : '';
+    var list = allDevices.filter(chipMatch);
+    if (q) { list = list.filter(function (d) { return deviceMatches(d, q); }); }
+    var grouped = groupOn();
+    document.getElementById('dev-group').checked = grouped;
+    renderChips();
+    document.getElementById('dev-filter-count').textContent = (q || chip !== 'all') ? list.length + ' of ' + allDevices.length : '';
     document.getElementById('dev-count').textContent = allDevices.length ? '(' + allDevices.length + ')' : '';
+    if (grouped) {   // sites in name order, devices without a site last
+        var bySite = {};
+        list.forEach(function (d) { (bySite[d.site || ''] = bySite[d.site || ''] || []).push(d); });
+        var names = Object.keys(bySite).sort(function (a, b) { return a === '' ? 1 : (b === '' ? -1 : a.localeCompare(b)); });
+        var ordered = [];
+        names.forEach(function (s) { ordered.push({ head: s, members: bySite[s] }); bySite[s].forEach(function (d) { ordered.push({ d: d }); }); });
+    } else {
+        var ordered = list.map(function (d) { return { d: d }; });
+    }
     var rows = '';
-    for (var i = 0; i < list.length; i++) {
-        var d = list[i];
+    for (var i = 0; i < ordered.length; i++) {
+        if (ordered[i].members) { rows += groupHead(ordered[i].head, ordered[i].members); continue; }
+        var d = ordered[i].d;
         var pollCls = d.poll_state === 'running' ? 'running' : 'idle';
         if (d.role === 'node') { pollCls = 'node'; }
-        rows += '<tr data-ctx="device" data-id="' + ctxMenu.attr(d.id) + '">' +
+        rows += '<tr data-ctx="device" data-id="' + ctxMenu.attr(d.id) + '" data-site="' + attr(d.site || '') + '"' +
+            (grouped && foldedSites[d.site || ''] ? ' class="grp-hidden"' : '') + '>' +
             '<td><a href="/devices/' + d.id + '">' + esc(d.hostname) + '</a></td>' +
             '<td>' + pollResultIcon(d) + '<span class="pill ' + pollCls + '">' + esc(d.role === 'node' ? 'not polled' : d.poll_state) + '</span></td>' +
             '<td>' + esc(d.role) + '</td>' +
@@ -180,9 +270,6 @@ function renderDevices(fresh) {
             '<td data-sort="' + attr(d.last_seen || '') + '">' + timeAgo(d.last_seen) + '</td>' +
             '<td>' + esc(d.vendor || '') + '</td><td>' + esc(d.model || '') + '</td><td>' + esc(d.os_version || '') + '</td>' +
             '<td>' + esc(d.platform || '') + '</td><td>' + esc(d.serial || '') + '</td>' +
-            '<td>' + (d.role === 'node' || !d.enabled ? '' :
-                '<button onclick="pollDevice(' + d.id + ', this)">Poll now</button> ') +
-                '<button onclick="removeDevice(' + d.id + ')">delete</button></td>' +
             '</tr>';
     }
     document.getElementById('device-rows').innerHTML = rows;
