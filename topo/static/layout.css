@@ -137,6 +137,10 @@ body.full-height .page { flex: 1 1 auto; min-height: 0; display: flex; flex-dire
 .form-grid label { color: var(--text-dim); }
 .form-grid input, .form-grid select { width: 100%; }
 .form-grid input[type=checkbox] { width: auto; justify-self: start; }
+/* Conflicts in the menu while some are open (base.html `attn`): yellow in every layout and theme. !important because each
+   layout styles its own nav buttons with stronger selectors. */
+.nav-attn { background: var(--yellow) !important; color: var(--bg) !important; border-color: var(--yellow) !important; font-weight: 700; }
+.nav-attn:hover { filter: brightness(1.1); }
 /* Column chooser (dashboard Devices widget, static/colpick.js). Fixed so the widget's overflow does not clip it. */
 .col-menu { position: fixed; z-index: 500; min-width: 170px; max-height: 70vh; overflow: auto; padding: 6px 8px;
     background: var(--bg-card); border: 1px solid var(--border); box-shadow: 0 6px 18px rgba(0,0,0,.35); font-size: 12px; }
@@ -170,8 +174,8 @@ th { color: var(--text-dim); font-weight: 500; text-transform: uppercase; font-s
 /* Click-to-sort headers (static/tablesort.js, tables with data-sortable). currentColor: every theme works. */
 th[data-sortable-col] { cursor: pointer; user-select: none; }
 th[data-sortable-col]:hover { color: var(--text); }
-th[aria-sort=ascending]::after { content: ' B2'; }
-th[aria-sort=descending]::after { content: ' BC'; }
+th[aria-sort=ascending]::after { content: ' \25B2'; }
+th[aria-sort=descending]::after { content: ' \25BC'; }
 tbody tr:hover td { background: var(--bg-hover); }
 /* Zebra stripes (opt-in: <table class="striped">). --stripe is set by every theme and layout; hover still wins. */
 table.striped tbody tr:nth-child(even) td { background: var(--stripe); }

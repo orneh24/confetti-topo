@@ -55,6 +55,16 @@ def _auth_flag():
     return {"auth_on": bool(config.AUTH_TOKEN)}
 
 
+@app.context_processor
+def _open_conflicts():
+    """Unresolved identity conflicts, for the menu: "Conflicts (N)" highlighted, or moved to the end when there are none."""
+    try:
+        n = db.get_db().execute("SELECT COUNT(*) FROM merge_conflicts WHERE resolved = 0").fetchone()[0]
+    except Exception:
+        n = 0          # the menu must never break a page
+    return {"open_conflicts": n}
+
+
 @app.teardown_appcontext
 def _close_db(exc):
     db.close_db(exc)
@@ -707,6 +717,47 @@ def api_put_lldp_matching():
         )
     conn.commit()
     return jsonify(topology.lldp_matching(conn))
+
+
+# Recent changes marks an item (peer, interface, port) as flapping when it changed `count` times or more within `window_min`
+# minutes. Display only: the page works it out from the events it shows; nothing is stored or alerted.
+FLAP_DISPLAY = {"count": ("flap_display_count", 3, 2, 100), "window_min": ("flap_display_window_min", 60, 1, 1440)}
+
+
+def flap_display(conn):
+    out = {}
+    for name, (key, default, _lo, _hi) in FLAP_DISPLAY.items():
+        try:
+            out[name] = int(db.get_setting(conn, key) or default)
+        except ValueError:
+            out[name] = default
+    return out
+
+
+@app.route("/api/settings/flap-display", methods=["GET"])
+def api_get_flap_display():
+    return jsonify(flap_display(db.get_db()))
+
+
+@app.route("/api/settings/flap-display", methods=["PUT"])
+def api_put_flap_display():
+    """Partial update: body {"count": 2-100, "window_min": 1-1440}; all or nothing."""
+    data = request.get_json(force=True, silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "Body must be a JSON object"}), 400
+    fields = [k for k in FLAP_DISPLAY if k in data]
+    if not fields:
+        return jsonify({"error": "no fields in body", "fields": list(FLAP_DISPLAY)}), 400
+    for k in fields:
+        _key, _default, lo, hi = FLAP_DISPLAY[k]
+        v = data[k]
+        if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi:
+            return jsonify({"error": "{} must be a whole number from {} to {}".format(k, lo, hi)}), 400
+    conn = db.get_db()
+    for k in fields:
+        db.set_setting(conn, FLAP_DISPLAY[k][0], str(data[k]))
+    conn.commit()
+    return jsonify(flap_display(conn))
 
 
 # The other Confetti projects: a header shortcut each (static/confetti-links.js). A link target in the browser; the

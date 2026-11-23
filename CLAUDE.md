@@ -159,7 +159,7 @@ The toolbar is three groups, Show (layers, unknown nodes) / Look / Actions (Fit,
 ### Routing table
 
 The `routes` task stores a device's IPv4 routing table in `routes` (one row per next hop, `vrf`, `kind` = `rib` or
-`fib`); `GET /api/routes?device_id=N` (`vrf`, `kind`, `prefix`) reads it, the device page shows it, and the map's
+`fib`); `GET /api/routes?device_id=N` (`vrf`, `kind`, `prefix`) reads it, the device page shows it (its VRF picker lists `default`, the global table, first and selects it), and the map's
 right-click menu links to it. IOS runs `show ip route vrf *` (the global table, then each VRF; an IOS that answers
 `%` gets `show ip route`). PAN-OS sends the RIB (`<show><routing><route/>`, the virtual router is the vrf) and the
 FIB (`<show><routing><fib/>`); a FIB that cannot be read keeps the RIB. Under `is subnetted` an IOS route line has no
@@ -237,6 +237,16 @@ These came over on 2026-11-21 as the same code, `BUTLER_*` renamed to `TOPO_*`.
 - **Map notes** (`map_notes`, `GET|PUT /api/topology/notes`): free text (2000 characters) on a node or a link (`edge:<edgeKey>`), edited in
   the node and link cards, included in the JSON export. An empty note deletes it.
 - **Device page status strip**: ping, poll, sessions, flapping, template drift, interface errors 24 h and ports down, each a link to its box.
+- **Recent changes, flapping and column widths**: a peer, interface or port (device + type + item) that changed `count` times or more within
+  `window_min` minutes gets a yellow "flapping" pill in Notes and a line in the details pane (`computeFlaps`, display only, from the events
+  loaded; not the BGP flap rule of constraint 22, so a peer cycling Idle/Active counts here). The rule is set on Settings ("Flapping on Recent
+  changes", `GET|PUT /api/settings/flap-display` `{count 2-100, window_min 1-1440}`, settings keys `flap_display_count` / `_window_min`,
+  default 3 within 60). Columns hug their content, Notes takes the rest; a header's right edge drags its width (fixed layout from then on,
+  text cut with "..."), double-click it to reset; kept in `confetti-topo-changes-columns`.
+- **Device page layout** works like the dashboard (dashgrid.js with `page: 'device'`, one layout for every device page in
+  `confetti-topo-device-layout`; every box has a `data-box`, so it also folds): drag, resize, Reset, Auto sort, Lock. The grid has an even
+  number of columns (2 / 4 / 6 by width) so Events and Syslog start half a row each (`.half`). Both show their first 10 rows
+  (`tbody.capped`, so after a sort too) with a "Show all (N more)" button (`toggleCap`) up to the 50 loaded.
 - **Page help**: an empty Syslog page shows the IOS `logging host` lines for this server; Templates has "+ New from example". The Devices page puts the table first (sortable, Columns chooser) and folds "Add or discover devices"
   and "Unknown LLDP neighbors".
 - **Alerting was removed on 2026-11-23** (`alerts.py`, the Alerts page, `/api/alert-rules*`, `TOPO_ALERTS_*`, `TOPO_SMTP_*`). An older
@@ -246,10 +256,12 @@ These came over on 2026-11-21 as the same code, `BUTLER_*` renamed to `TOPO_*`.
 - **vCenter import** (`POST /api/discover/vcenter`, `collectors/vcenter.py`): inventory only, through `identity.ingest`. Never tested
   against a real vCenter; it has no page, only the API.
 
-Menu order (one list in `base.html`, `all_pages`): Dashboard, Topology, Devices, Conflicts, Recent changes, Syslog, IPAM, Templates,
+Menu order (one list in `base.html`, `all_pages`): Dashboard, Topology, Devices, Conflicts (see below), Recent changes, Syslog, IPAM, Templates,
 Backups, Settings (last). On the **Classic** layout IPAM, Templates and Backups are a second row labelled Tools (`.nav-row-tools`, shown only while no
 `data-layout` is set); the other layouts list them with the rest. The MS-DOS Go menu hotkeys are 1-9 for the first nine, 0 for the last
-(Settings) and the label's first letter for the rest.
+(Settings) and the label's first letter for the rest. Conflicts moves with the open count (`app._open_conflicts`, a context processor): with open conflicts it is
+"Conflicts (N)", highlighted yellow (`.nav-attn`, every layout) in its place after Devices; with none it is the last entry, after Settings
+(then it has hotkey 0). R6 checks both.
 
 ### Topology history
 
@@ -427,7 +439,7 @@ topo/
                          base.html's .dos-menubar / .dos-fkeys / .dos-help, a row cursor, and one keydown IIFE at
                          the end of theme.js that does nothing in any other layout; same block as in confetti-traffic). Loaded AFTER theme.css
   static/confetti-links.js — the header shortcut buttons to the other Confetti projects (URLs from the Settings page, `GET /api/settings/links`); opens in a new tab; the SAME file as in confetti-traffic, copy it by hand and keep the two identical
-  static/dashgrid.js   — the dashboard's movable/resizable widgets (`data-box` is the attribute name, kept): drag a `.section[data-box]` by its header (pointer events on `document`, not pointer capture: moving the node in the DOM drops the capture), drag the corner grip to resize (width snaps to grid columns, height free); a widget dropped on the middle band of another (outlined `dg-join`) shares that row with it and the widgets already on it, the columns split between them (`joinRow`, the first is pinned to column 1 via `state.row`); while dragging, a `.dg-ghost` clone follows the pointer and the original stays in the grid as a grid-pattern drop place (`.dg-drag`); a drop in a row's empty space (`emptySpace`: right of its last widget or left of its first) puts the widget beside that row's widgets; "Reset layout" button and, when the page passes `autoSort: true`, an "Auto sort layout" button (`autoSort()`: drops saved sizes, puts the non-full-width widgets in rows of similar height, widens a last short row to fill it, gives each widget at least the columns its content needs (`needColumns`, no sideways scroll), stacks widgets beside the tallest one when that leaves less empty space (it spans their grid rows: `state.rows`, `stackPlan`), lets up to three short `.wide` widgets share a row and stretches every widget to its row height (`state.fill`); best effort); a "Lock layout" button (`state.locked`, saved with the layout) stops moving, resizing, Reset, Auto sort and the re-sort on fold until "Unlock layout"; saved per browser in `confetti-topo-dashboard-layout`. Injects its own CSS; the SAME file as in confetti-traffic, copy it by hand and keep the two identical
+  static/dashgrid.js   — the dashboard's (and device page's, `page: 'device'`; the saved key is `<prefix>-<page>-layout`) movable/resizable widgets (`data-box` is the attribute name, kept): drag a `.section[data-box]` by its header (pointer events on `document`, not pointer capture: moving the node in the DOM drops the capture), drag the corner grip to resize (width snaps to grid columns, height free); a widget dropped on the middle band of another (outlined `dg-join`) shares that row with it and the widgets already on it, the columns split between them (`joinRow`, the first is pinned to column 1 via `state.row`); while dragging, a `.dg-ghost` clone follows the pointer and the original stays in the grid as a grid-pattern drop place (`.dg-drag`); a drop in a row's empty space (`emptySpace`: right of its last widget or left of its first) puts the widget beside that row's widgets; "Reset layout" button and, when the page passes `autoSort: true`, an "Auto sort layout" button (`autoSort()`: drops saved sizes, puts the non-full-width widgets in rows of similar height, widens a last short row to fill it, gives each widget at least the columns its content needs (`needColumns`, no sideways scroll), stacks widgets beside the tallest one when that leaves less empty space (it spans their grid rows: `state.rows`, `stackPlan`), lets up to three short `.wide` widgets share a row and stretches every widget to its row height (`state.fill`); best effort; a widget hidden at the time (display none) is skipped and keeps its default size); a "Lock layout" button (`state.locked`, saved with the layout) stops moving, resizing, Reset, Auto sort and the re-sort on fold until "Unlock layout"; saved per browser in `confetti-topo-dashboard-layout`. Injects its own CSS; the SAME file as in confetti-traffic, copy it by hand and keep the two identical
   static/ctxmenu.js    — right-click menus, loaded once by base.html (menu CSS at the end of layout.css); the SAME file as in confetti-traffic, copy it by hand and keep the two identical. A row carries data-ctx="<type>" and the page calls ctxMenu.register(type, fn(el, ev)); one document-level listener finds the row. Fill data-* attributes with ctxMenu.attr(), never esc(). A destructive item is `danger: true`, goes last and must ask confirm() (R29 fails a page that has one without). Used by every page: rows and a `page` menu for empty space (`document.documentElement.setAttribute('data-ctx', 'page')`; header/nav/footer keep the browser menu) on the dashboard, devices, device (one `row` menu per table body), conflicts, settings and changes pages, and the topology map (ctxMenu.open from vis's `oncontext`). Rows are looked up by id when the menu opens, because the tables are rebuilt on every refresh; a destructive item reuses the page's own confirming function. R29 checks it
   static/fold.js       — Collapse / Expand for `.section[data-fold]` (`data-fold-default="closed"`) and every dashboard widget; the
                          choice per page and box in `confetti-topo-folded`; `fold.open(id)`. topo only (not shared)

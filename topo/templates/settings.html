@@ -66,6 +66,18 @@
             </form>
         </div>
     </div>
+    <div class="section">
+        <div class="section-header"><span>Flapping on Recent changes</span></div>
+        <div class="section-body">
+            <form id="flap-form" class="form-grid" onsubmit="saveFlap(); return false;">
+                <label for="flap-count">changes</label><input id="flap-count" name="count" type="number" min="2" max="100" step="1">
+                <label for="flap-window">within (minutes)</label><input id="flap-window" name="window_min" type="number" min="1" max="1440" step="1">
+            </form>
+            <div class="hint">A peer, interface or port that changed this many times within this many minutes gets a "flapping" mark on the
+                Recent changes page. Display only: nothing is stored or alerted. Default 3 changes within 60 minutes.</div>
+            <button type="button" onclick="saveFlap()">Save</button><span class="msg" id="flap-msg"></span>
+        </div>
+    </div>
     <div class="section" data-fold="backup" data-fold-default="closed">
         <div class="section-header"><span>Backup and restore</span></div>
         <div class="section-body">
@@ -382,6 +394,26 @@ function loadLldp() {
     });
 }
 
+function loadFlap() {
+    fetch('/api/settings/flap-display').then(function (r) { return r.json(); }).then(function (f) {
+        document.getElementById('flap-count').value = f.count;
+        document.getElementById('flap-window').value = f.window_min;
+    });
+}
+
+function saveFlap() {
+    var body = { count: parseInt(document.getElementById('flap-count').value, 10),
+                 window_min: parseInt(document.getElementById('flap-window').value, 10) };
+    fetch('/api/settings/flap-display', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+    }).then(function (res) {
+        say('flap-msg', res.ok, res.ok ? 'saved' : (res.data.error || 'save failed'));
+        loadFlap();
+    });
+}
+
 function saveLldp() {
     var f = document.getElementById('lldp-form');
     fetch('/api/settings/lldp-matching', {
@@ -424,7 +456,7 @@ document.documentElement.setAttribute('data-ctx', 'page');
 ctxMenu.register('page', function (el, ev) {
     if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
     return { title: 'Settings', items: [
-        { label: 'Reload all sections', action: function () { loadDefaults(); loadLinks(); loadSyslogPull(); loadLldp(); loadDevices(); } },
+        { label: 'Reload all sections', action: function () { loadDefaults(); loadLinks(); loadSyslogPull(); loadLldp(); loadFlap(); loadDevices(); } },
         { label: 'Select all devices', action: function () { selectAll(true); } },
         { label: 'Unselect all devices', action: function () { selectAll(false); } },
     ] };
@@ -434,6 +466,7 @@ loadDefaults();
 loadLinks();
 loadSyslogPull();
 loadLldp();
+loadFlap();
 loadDevices();
 loadBackups();
 ctxMenu.register('backup', function (tr) {

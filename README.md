@@ -58,7 +58,7 @@ Classic layout, labelled Tools). The look follows the hub UI of the sibling proj
 - **Reachability.** Every device is pinged every 30 seconds; a router that stops answering is outlined red
   on the graph.
 - **Events.** Neighbor, peer and interface changes, OS changes and devices going unreachable are listed on the
-  dashboard, on each device page and on the Recent changes page (filters, sortable, Before and After states coloured green, yellow or red).
+  dashboard, on each device page and on the Recent changes page (filters, sortable, Before and After states coloured green, yellow or red, a "flapping" mark on anything that changed 3 times within an hour (set on the Settings page), resizable columns).
 - **Device page.** A status strip at the top (ping, poll, sessions, drift, errors, ports down), a Test login button, interfaces, LLDP neighbors, BGP/OSPF sessions and the routing table (filter, "export CSV"). On a switch also VLANs, trunks, the spanning-tree summary and the learned MAC addresses (filter; a MAC that belongs to a known device names it).
 - **Map notes.** A note on any node or link (circuit ID, provider, ticket), shown in its card and in the JSON export.
 - **Metrics.** `GET /metrics` serves Prometheus text.

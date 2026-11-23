@@ -1,6 +1,6 @@
 // Collapse / Expand for page boxes, loaded once by base.html. A box opts in with data-fold="<id>" on its .section
-// (data-fold-default="closed" starts it folded); every dashboard widget (.container > .section[data-box]) is foldable
-// too. A folded box shows only its title bar (class "collapsed", CSS in layout.css); dashgrid.js re-sorts an
+// (data-fold-default="closed" starts it folded); every movable widget (.container > .section[data-box]: the dashboard and the device
+// page) is foldable too. A folded box shows only its title bar (class "collapsed", CSS in layout.css); dashgrid.js re-sorts an
 // auto-sorted dashboard when one folds or opens. The viewer's choice is kept per page in this browser
 // (localStorage confetti-topo-folded, {"<page>:<id>": true|false}); a box with no choice keeps its default.
 (function () {

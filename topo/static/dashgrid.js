@@ -1,4 +1,4 @@
-// Dashboard widgets you can move and resize. Loaded by dashboard.html only.
+// Dashboard widgets you can move and resize. Loaded by the dashboard (and in confetti-topo the device page, with page: 'device').
 //
 // Move: drag a widget by its title bar; the other widgets shift to make room (the grid order changes, nothing floats).
 // Drop it on another widget (that widget gets an outline; on a full-width widget only its middle band counts) and the two, with
@@ -50,7 +50,8 @@ var DashGrid = (function () {
         '.dg-on.dg-locked .section-header { cursor: auto; }' +
         '.dg-on.dg-locked .dg-resize { display: none; }';
 
-    function key() { return cfg.prefix + '-dashboard-layout'; }
+    // One saved layout per page: cfg.page names it ('dashboard' when not given, the key the dashboard has always used).
+    function key() { return cfg.prefix + '-' + (cfg.page || 'dashboard') + '-layout'; }
 
     function load() {
         try {
@@ -315,7 +316,12 @@ var DashGrid = (function () {
         var gap = parseFloat(getComputedStyle(box).rowGap) || 0;
         state.height = {}; state.span = {}; state.row = {}; state.rows = {}; state.fill = false;
         box.classList.remove('dg-fill');   // measure natural heights, not stretched ones
-        var els = boxes();
+        // A widget the page hides for now (display none) cannot be measured: it keeps its own default size and goes after the others.
+        var els = boxes().filter(function (el) {
+            if (getComputedStyle(el).display !== 'none') { return true; }
+            el.style.gridRow = ''; el.style.gridColumn = '';
+            return false;
+        });
         els.forEach(function (el) { el.style.gridRow = ''; el.style.gridColumn = 'span 1'; });
         var items = els.map(function (el, i) {
             return { el: el, id: el.getAttribute('data-box'), i: i, need: cols < 2 ? 1 : needColumns(el, cols), wide: el.classList.contains('wide') };

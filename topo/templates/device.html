@@ -3,6 +3,13 @@
 {% block head %}
 <style>
 .container { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+/* The boxes move and resize (dashgrid.js, as on the dashboard), so the grid has an even number of columns: Events and Syslog
+   start half a row each (.half). Below 760 px one column. */
+@media (min-width: 760px) { .container { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1100px) { .container { grid-template-columns: repeat(4, minmax(0, 1fr)); } .section.half { grid-column: span 2; } }
+@media (min-width: 1900px) { .container { grid-template-columns: repeat(6, minmax(0, 1fr)); } .section.half { grid-column: span 3; } }
+/* A capped table shows its first 10 rows (after any sort) until Expand. */
+tbody.capped > tr:nth-child(n+11) { display: none; }
 .hint { margin-bottom: 8px; }
 .msg { font-size: 11px; margin-left: 8px; }
 /* The status strip: one chip per thing that can be wrong, each a link to the box that explains it. */
@@ -25,7 +32,7 @@
     <div class="section wide" id="status-section">
         <div class="section-body"><div class="status-strip" id="status-strip"><span class="hint">loading</span></div></div>
     </div>
-    <div class="section">
+    <div class="section" data-box="device">
         <div class="section-header"><span>Device</span></div>
         <div class="section-body">
             <div id="device-body"><div class="kv"><span class="k">loading</span></div></div>
@@ -33,21 +40,21 @@
             <span id="poll-msg" style="font-size:11px;margin-left:8px;"></span>
         </div>
     </div>
-    <div class="section">
+    <div class="section" data-box="identifiers">
         <div class="section-header"><span>Identifiers</span></div>
         <div class="section-body">
             <table data-sortable><thead><tr><th>Kind</th><th>Value</th><th>First seen</th></tr></thead>
                 <tbody id="alias-rows"></tbody></table>
         </div>
     </div>
-    <div class="section">
+    <div class="section" data-box="sources">
         <div class="section-header"><span>Sources</span></div>
         <div class="section-body">
             <table data-sortable><thead><tr><th>Source</th><th>Ref</th><th>Last seen</th></tr></thead>
                 <tbody id="source-rows"></tbody></table>
         </div>
     </div>
-    <div class="section">
+    <div class="section" data-box="edit">
         <div class="section-header"><span>Edit</span></div>
         <div class="section-body">
             <div class="hint">Operator edit — overrides polled values. A new mgmt ip, hostname or serial is also recorded as an identifier.</div>
@@ -72,7 +79,7 @@
             </form>
         </div>
     </div>
-    <div class="section">
+    <div class="section" data-box="credentials">
         <div class="section-header"><span>Credentials</span></div>
         <div class="section-body">
             <div class="hint" id="cred-status">loading</div>
@@ -94,27 +101,29 @@
             </form>
         </div>
     </div>
-    <div class="section wide">
-        <div class="section-header" id="events"><span>Events</span></div>
+    <div class="section half" data-box="events">
+        <div class="section-header" id="events"><span>Events</span>
+            <span class="hdr-actions"><button type="button" class="btn-small" id="event-more" style="display:none" onclick="toggleCap('event')"></button></span></div>
         <div class="section-body">
             <table data-sortable>
                 <thead><tr><th>Time</th><th>Sev</th><th>Event</th><th>Detail</th></tr></thead>
-                <tbody id="event-rows"></tbody>
+                <tbody id="event-rows" class="capped"></tbody>
             </table>
             <div class="empty" id="event-empty" style="display:none">no changes recorded yet</div>
         </div>
     </div>
-    <div class="section wide">
-        <div class="section-header"><span>Syslog (last 24 h)</span></div>
+    <div class="section half" data-box="syslog">
+        <div class="section-header"><span>Syslog (last 24 h)</span>
+            <span class="hdr-actions"><button type="button" class="btn-small" id="syslog-more" style="display:none" onclick="toggleCap('syslog')"></button></span></div>
         <div class="section-body">
             <table>
                 <thead><tr><th>Time</th><th>Sev</th><th>Mnemonic</th><th>Message</th></tr></thead>
-                <tbody id="syslog-rows"></tbody>
+                <tbody id="syslog-rows" class="capped"></tbody>
             </table>
             <div class="empty" id="syslog-empty" style="display:none">no syslog from this device (point its logging host at this server)</div>
         </div>
     </div>
-    <div class="section wide">
+    <div class="section wide" data-box="lldp">
         <div class="section-header"><span>LLDP neighbors</span></div>
         <div class="section-body">
             <table data-sortable>
@@ -124,7 +133,7 @@
             <div class="empty" id="lldp-empty" style="display:none">no LLDP neighbors (LLDP may be off on this device)</div>
         </div>
     </div>
-    <div class="section wide">
+    <div class="section wide" data-box="sessions">
         <div class="section-header" id="sessions"><span>BGP / OSPF</span></div>
         <div class="section-body">
             <table data-sortable>
@@ -134,14 +143,14 @@
             <div class="empty" id="adj-empty" style="display:none">no BGP or OSPF sessions</div>
         </div>
     </div>
-    <div class="section wide" id="drift-section" style="display:none">
+    <div class="section wide" data-box="drift" id="drift-section" style="display:none">
         <div class="section-header"><span>Template drift</span></div>
         <div class="section-body">
             <div class="hint">The assigned template, rendered as the device would pull it, compared with the latest config backup. Lines the template does not mention are ignored, and secret lines are not compared.</div>
             <div id="drift-body"></div>
         </div>
     </div>
-    <div class="section wide" id="config-section">
+    <div class="section wide" data-box="config" id="config-section">
         <div class="section-header"><span>Config history</span></div>
         <div class="section-body">
             <div class="hint">Running-config backups, saved when the config changes. Secrets are masked.</div>
@@ -157,7 +166,7 @@
             <pre id="config-view" style="display:none;margin-top:8px;max-height:480px;overflow:auto;background:var(--bg-code);border:1px solid var(--border);padding:8px;font-size:12px;"></pre>
         </div>
     </div>
-    <div class="section wide">
+    <div class="section wide" data-box="interfaces">
         <div class="section-header" id="interfaces"><span>Interfaces</span></div>
         <div class="section-body">
             <div class="hint">
@@ -176,7 +185,7 @@
         </div>
     </div>
     <!-- Opened by an interface's "graph" link. -->
-    <div class="section wide" id="traffic" style="display:none">
+    <div class="section wide" data-box="traffic" id="traffic" style="display:none">
         <div class="section-header"><span>Traffic: <span id="tr-name"></span></span>
             <span class="hdr-actions">
                 <select id="tr-hours" onchange="drawTraffic()" aria-label="Time span">
@@ -190,7 +199,7 @@
                 &mdash; the average rate between two polls, from the interface's byte counters (IOS only). A counter reset leaves a gap.</div>
         </div>
     </div>
-    <div class="section wide" id="routes">
+    <div class="section wide" data-box="routes" id="routes">
         <div class="section-header"><span>Routing table</span></div>
         <div class="section-body">
             <div class="hint">
@@ -214,7 +223,7 @@
         </div>
     </div>
     <!-- Switches only: shown once the device has learned MAC addresses. -->
-    <div class="section wide" id="mac" style="display:none">
+    <div class="section wide" data-box="mac" id="mac" style="display:none">
         <div class="section-header"><span>MAC addresses <span id="mac-count"></span></span></div>
         <div class="section-body">
             <input type="search" id="mac-q" placeholder="filter by MAC, VLAN or port" oninput="macSoon()" aria-label="Filter MAC addresses" style="margin-bottom:6px">
@@ -226,12 +235,12 @@
         </div>
     </div>
     <!-- Switches only: shown once the device has a spanning-tree summary. -->
-    <div class="section wide" id="stp" style="display:none">
+    <div class="section wide" data-box="stp" id="stp" style="display:none">
         <div class="section-header"><span>Spanning tree</span></div>
         <div class="section-body" id="stp-body"></div>
     </div>
     <!-- Switches only: shown once the device has trunk rows. -->
-    <div class="section wide" id="trunks" style="display:none">
+    <div class="section wide" data-box="trunks" id="trunks" style="display:none">
         <div class="section-header"><span>Trunks <span id="trunk-count"></span></span></div>
         <div class="section-body">
             <table data-sortable class="striped compact">
@@ -241,7 +250,7 @@
         </div>
     </div>
     <!-- Switches only: shown once the device has VLAN rows. -->
-    <div class="section wide" id="vlans" style="display:none">
+    <div class="section wide" data-box="vlans" id="vlans" style="display:none">
         <div class="section-header"><span>VLANs <span id="vlan-count"></span></span></div>
         <div class="section-body">
             <table data-sortable class="striped compact">
@@ -253,7 +262,10 @@
 </div>
 {% endblock %}
 {% block scripts %}
+<script src="/static/dashgrid.js"></script>
 <script>
+// Move, resize, Auto sort and Lock as on the dashboard; one layout for every device page (confetti-topo-device-layout).
+DashGrid.init({ container: '.container', prefix: 'confetti-topo', page: 'device', autoSort: true });
 var deviceId = {{ device_id }};
 
 function esc(s) {
@@ -593,10 +605,13 @@ function loadRoutes() {
         routeList = list;
         var vrfs = [];
         list.forEach(function (r) { if (vrfs.indexOf(r.vrf) < 0) { vrfs.push(r.vrf); } });
+        // The global table ('default') first and picked on load; the API sorts by name, which put e.g. MGMT before it.
+        vrfs.sort(function (a, b) { return (b === 'default') - (a === 'default') || a.localeCompare(b); });
         var sel = document.getElementById('rt-vrf');
         var keep = sel.value;
         sel.innerHTML = vrfs.map(function (v) { return '<option>' + esc(v) + '</option>'; }).join('');
         if (vrfs.indexOf(keep) >= 0) { sel.value = keep; }
+        else if (vrfs.length) { sel.value = vrfs[0]; }
         var fibOpt = document.querySelector('#rt-kind option[value=fib]');
         fibOpt.hidden = !list.some(function (r) { return r.kind === 'fib'; });
         if (fibOpt.hidden) { document.getElementById('rt-kind').value = 'rib'; }
@@ -806,6 +821,19 @@ function loadAdjacencies() {
     });
 }
 
+// Events and Syslog show their newest 10 rows; "Show all" shows the rest (up to the 50 loaded). Kept across refreshes.
+var CAP_ROWS = 10;
+function showCap(name) {
+    var body = document.getElementById(name + '-rows'), btn = document.getElementById(name + '-more');
+    var extra = body.rows.length - CAP_ROWS;
+    btn.style.display = extra > 0 ? '' : 'none';
+    btn.textContent = body.classList.contains('capped') ? 'Show all (' + extra + ' more)' : 'Show 10';
+}
+function toggleCap(name) {
+    document.getElementById(name + '-rows').classList.toggle('capped');
+    showCap(name);
+}
+
 function loadEvents() {
     fetch('/api/events?limit=50&device_id=' + deviceId).then(function (r) { return r.json(); }).then(function (list) {
         var rows = '';
@@ -818,6 +846,7 @@ function loadEvents() {
         }
         document.getElementById('event-rows').innerHTML = rows;
         document.getElementById('event-empty').style.display = list.length ? 'none' : 'block';
+        showCap('event');
     });
 }
 
@@ -832,6 +861,7 @@ function loadSyslog() {
         }
         document.getElementById('syslog-rows').innerHTML = rows;
         document.getElementById('syslog-empty').style.display = list.length ? 'none' : 'block';
+        showCap('syslog');
     });
 }
 

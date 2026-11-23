@@ -21,6 +21,17 @@ tr.devstart td { border-top: 2px solid var(--border); }
 tbody tr.selected td { background: var(--yellow-bg); font-weight: bold; box-shadow: inset 0 2px 0 var(--blue), inset 0 -2px 0 var(--blue); }
 tbody tr.selected td:first-child { box-shadow: inset 4px 0 0 var(--blue), inset 0 2px 0 var(--blue), inset 0 -2px 0 var(--blue); }
 td.when { white-space: nowrap; }
+/* Every column is as wide as its content; Notes (the last) takes the rest of the row, so there is no extra space after each column. */
+#table th, #table td { width: 1%; white-space: nowrap; }
+#table th:last-child, #table td:last-child { width: auto; white-space: normal; }
+/* Drag a header's right edge to resize its column (Notes takes the rest). Once resized the table is fixed layout, so a column can
+   be made narrower than its text (cut with "..."); the widths are kept per browser in confetti-topo-changes-columns. */
+#table th { position: relative; box-sizing: border-box; }
+#table.resized { table-layout: fixed; }
+#table.resized th, #table.resized td { overflow: hidden; text-overflow: ellipsis; }
+.col-grip { position: absolute; top: 0; right: 0; width: 7px; height: 100%; cursor: col-resize; }
+.col-grip:hover, body.col-sizing .col-grip { background: var(--border); }
+body.col-sizing, body.col-sizing * { cursor: col-resize !important; user-select: none; }
 td.notes .pill { margin-right: 4px; }
 /* Before / After: a state word is coloured by what it means - green good, yellow warning, red bad. */
 .st { display: inline-block; padding: 0 7px; border-radius: 10px; border: 1px solid currentColor; font-weight: bold; }
@@ -106,6 +117,8 @@ td.notes .pill { margin-right: 4px; }
 var events = [];          // newest first; type/change/item/before/after come from the API (events.describe)
 var gaps = {};            // event id -> ms since the same device's previous change (null = none loaded)
 var selectedId = null;
+var flapRule = { count: 3, window_min: 60 };   // Settings > Flapping on Recent changes
+var flaps = {};           // event id -> how many changes its item had inside the window (only for a flapping one)
 
 function esc(s) {
     var d = document.createElement('div');
@@ -330,7 +343,7 @@ function render() {
             '<td><button type="button" class="linklike" data-id="' + e.id + '">' + esc(subjectText(e)) + '</button></td>' +
             '<td>' + stateCell(e.before) + '</td>' +
             '<td>' + stateCell(e.after) + '</td>' +
-            '<td class="notes"><span class="pill ' + sevClass(e.severity) + '">' + esc(e.severity) + '</span>' + esc(note) + '</td></tr>';
+            '<td class="notes"><span class="pill ' + sevClass(e.severity) + '">' + esc(e.severity) + '</span>' + flapPill(e) + esc(note) + '</td></tr>';
     }
     document.getElementById('rows').innerHTML = html;
     document.getElementById('empty').style.display = list.length ? 'none' : 'block';
@@ -354,11 +367,46 @@ function reband() {
     }
 }
 
+// Flapping: the same item (device + type + item: a peer, interface or port) changed flapRule.count times or more within
+// flapRule.window_min minutes. Every change inside such a window is marked. Display only, from the events loaded.
+function computeFlaps() {
+    flaps = {};
+    var byKey = {}, win = flapRule.window_min * 60000;
+    events.forEach(function (e) {
+        if (!e.item) { return; }
+        var key = e.device_id + '|' + e.type + '|' + e.item;
+        (byKey[key] = byKey[key] || []).push(e);
+    });
+    Object.keys(byKey).forEach(function (key) {
+        var list = byKey[key].slice().sort(function (a, b) { return new Date(a.at) - new Date(b.at); });
+        var lo = 0;
+        for (var hi = 0; hi < list.length; hi++) {
+            while (new Date(list[hi].at) - new Date(list[lo].at) > win) { lo++; }
+            var n = hi - lo + 1;
+            if (n >= flapRule.count) {
+                for (var k = lo; k <= hi; k++) { flaps[list[k].id] = Math.max(flaps[list[k].id] || 0, n); }
+            }
+        }
+    });
+}
+
+function flapPill(e) {
+    if (!flaps[e.id]) { return ''; }
+    return '<span class="pill running" title="' + esc(e.item) + ' changed ' + flaps[e.id] + ' times within ' + flapRule.window_min +
+        ' min (Settings: ' + flapRule.count + ' changes within ' + flapRule.window_min + ' min)">flapping</span>';
+}
+
 function load() {
-    fetch('/api/events?hours=' + encodeURIComponent(val('f-hours')) + '&limit=1000').then(function (r) { return r.json(); }).then(function (list) {
+    Promise.all([
+        fetch('/api/events?hours=' + encodeURIComponent(val('f-hours')) + '&limit=1000').then(function (r) { return r.json(); }),
+        fetch('/api/settings/flap-display').then(function (r) { return r.ok ? r.json() : flapRule; }).catch(function () { return flapRule; }),
+    ]).then(function (res) {
+        var list = res[0];
+        flapRule = res[1];
         // Newest first by time (the API orders by id, which is the same on real data).
         events = list.sort(function (a, b) { return new Date(b.at) - new Date(a.at) || b.id - a.id; });
         computeGaps();
+        computeFlaps();
         fillFilters();
         render();
         if (selectedId !== null) { if (selectedEvent()) { fillPane(selectedEvent()); } else { closePane(); } }
@@ -388,6 +436,7 @@ function fillPane(e) {
     if (e.before) { addRow(info, 'before', e.before); }
     if (e.after) { addRow(info, 'after', e.after); }
     addRow(info, 'severity', e.severity);
+    if (flaps[e.id]) { addRow(info, 'flapping', flaps[e.id] + ' changes within ' + flapRule.window_min + ' min'); }
     var gap = gaps[e.id];
     addRow(info, 'since last', gap === null || gap === undefined ? 'no earlier change for this device' : ago(gap));
     addRow(info, 'kind', e.kind);
@@ -467,5 +516,69 @@ document.addEventListener('keydown', function (ev) {
 
 load();
 setInterval(load, 15000);
+
+// Column widths: drag the right edge of a header; double-click it to give every column its natural width back.
+(function () {
+    var KEY = 'confetti-topo-changes-columns';
+    var table = document.getElementById('table');
+    var ths = Array.prototype.slice.call(table.tHead.rows[0].cells);
+    var last = ths.length - 1;   // Notes: takes the rest of the row
+    var resizedAt = 0;
+    // Fix every column at its width now (rounded up, so nothing that fits is cut), then drag changes one.
+    function freeze() {
+        if (table.classList.contains('resized')) { return; }
+        ths.forEach(function (th, i) { if (i < last) { th.style.width = Math.ceil(th.getBoundingClientRect().width) + 1 + 'px'; } });
+        table.classList.add('resized');
+    }
+    function store() {
+        var w = {};
+        ths.forEach(function (th, i) { if (i < last) { w[i] = parseInt(th.style.width, 10) || 0; } });
+        try { localStorage.setItem(KEY, JSON.stringify(w)); } catch (e) { /* not remembered */ }
+    }
+    var saved = {};
+    try { saved = JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { saved = {}; }
+    if (Object.keys(saved).length) {
+        ths.forEach(function (th, i) { if (i < last && saved[i] > 0) { th.style.width = saved[i] + 'px'; } });
+        table.classList.add('resized');
+    }
+    // The click that ends a drag must not sort the column (tablesort.js listens for clicks on the header).
+    table.tHead.addEventListener('click', function (e) {
+        if (Date.now() - resizedAt < 300) { e.stopPropagation(); e.preventDefault(); }
+    }, true);
+    ths.forEach(function (th, i) {
+        if (i === last) { return; }
+        var grip = document.createElement('span');
+        grip.className = 'col-grip';
+        grip.title = 'Drag to resize this column. Double-click: all columns back to their natural width';
+        th.appendChild(grip);
+        grip.addEventListener('click', function (e) { e.stopPropagation(); });
+        grip.addEventListener('pointerdown', function (e) {
+            if (e.button !== 0) { return; }
+            e.preventDefault();
+            e.stopPropagation();
+            freeze();
+            var x0 = e.clientX, w0 = th.getBoundingClientRect().width;
+            document.body.classList.add('col-sizing');
+            function move(ev) { th.style.width = Math.max(40, Math.round(w0 + ev.clientX - x0)) + 'px'; }
+            function up() {
+                document.removeEventListener('pointermove', move);
+                document.removeEventListener('pointerup', up);
+                document.removeEventListener('pointercancel', up);
+                document.body.classList.remove('col-sizing');
+                resizedAt = Date.now();
+                store();
+            }
+            document.addEventListener('pointermove', move);
+            document.addEventListener('pointerup', up);
+            document.addEventListener('pointercancel', up);
+        });
+        grip.addEventListener('dblclick', function (e) {
+            e.stopPropagation();
+            ths.forEach(function (t) { t.style.width = ''; });
+            table.classList.remove('resized');
+            try { localStorage.removeItem(KEY); } catch (err) { /* nothing saved */ }
+        });
+    });
+})();
 </script>
 {% endblock %}

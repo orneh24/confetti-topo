@@ -264,6 +264,19 @@ def _():
     for url in ("/", "/devices", "/devices/%d" % did, "/conflicts", "/topology", "/settings", "/ipam", "/templates"):
         code = client.get(url).status_code
         need(code == 200, "GET %s -> %s" % (url, code), p)
+    # The menu: no open conflict = "Conflicts" after Settings; an open one = "Conflicts (1)", highlighted, before Settings.
+    html = client.get("/devices").get_data(as_text=True)
+    need(html.find('href="/settings" class="btn-nav"') < html.find('href="/conflicts" class="btn-nav"') and "nav-attn" not in html,
+         "with no open conflict, Conflicts is not last in the menu (or is highlighted)", p)
+    c2 = m["db"].connect()
+    c2.execute("INSERT INTO merge_conflicts (seen_at, source, candidate, device_ids, detail, resolved) "
+               "VALUES ('2026-01-01 00:00:00', 'manual', '{}', '1,2', 'test', 0)")
+    c2.commit()
+    c2.close()
+    html = client.get("/devices").get_data(as_text=True)
+    need('class="btn-nav nav-attn">Conflicts (1)</a>' in html
+         and html.find("Conflicts (1)") < html.find('href="/settings" class="btn-nav"'),
+         "an open conflict is not shown as a highlighted \"Conflicts (1)\" before Settings", p)
     return p
 
 

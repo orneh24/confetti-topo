@@ -45,7 +45,7 @@ those two columns to NULL, so its neighbors become ghosts again.
 - `GET /api/ipam/addresses|prefixes|findings`, `POST /api/ipam/analyze`
 - `GET|POST /api/templates`, `GET|PUT|DELETE /api/templates/<name>`, `/versions`, `POST /preview`
 - `GET /configs/` and `GET /configs/<key>.cfg` — unauthenticated on purpose (constraint 28)
-- `POST /api/discover/vcenter`
+- `POST /api/discover/vcenter`; `GET|PUT /api/settings/flap-display` (`{count, window_min}`, the Recent changes flapping mark)
 
 **Devices:**
 - `GET|POST /api/devices` — POST goes through `identity.ingest`

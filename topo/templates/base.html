@@ -12,11 +12,14 @@
 </head>
 {# The page list lives here once. The current page is picked from the URL, so
    /devices/5 counts as Devices. #}
-{% set main_pages = [('/', 'Dashboard'), ('/topology', 'Topology'), ('/devices', 'Devices'), ('/conflicts', 'Conflicts'), ('/changes', 'Recent changes'), ('/syslog', 'Syslog')] %}
+{# Conflicts: with open conflicts it is "Conflicts (N)", highlighted (nav-attn), in its own place; with none it moves to the very end. #}
+{% set conflicts_page = ('/conflicts', 'Conflicts (%d)' % open_conflicts if open_conflicts else 'Conflicts') %}
+{% set main_pages = [('/', 'Dashboard'), ('/topology', 'Topology'), ('/devices', 'Devices')] + ([conflicts_page] if open_conflicts else []) + [('/changes', 'Recent changes'), ('/syslog', 'Syslog')] %}
 {# IPAM, Templates and Backups: Classic shows them on their own row (Tools) under the first row; every other layout lists
-   them with the rest. Settings is always last (all_pages). #}
+   them with the rest. Settings is last (all_pages), except that Conflicts with nothing open comes after it. #}
 {% set tools_pages = [('/ipam', 'IPAM'), ('/templates', 'Templates'), ('/backups', 'Backups')] %}
-{% set all_pages = main_pages + tools_pages + [('/settings', 'Settings')] %}
+{% set all_pages = main_pages + tools_pages + [('/settings', 'Settings')] + ([] if open_conflicts else [conflicts_page]) %}
+{% set attn = '/conflicts' if open_conflicts else '' %}
 {% set here = '/' if request.path == '/' else '/' + request.path.strip('/').split('/')[0] %}
 <body class="{% block body_class %}{% endblock %}">
 
@@ -24,8 +27,8 @@
 <nav class="side-nav" aria-label="Pages">
     <div class="side-brand"><span class="side-mark"></span>Confetti Topo</div>
     {% for path, label in all_pages %}
-    {% if path == here %}<span class="side-link current">{{ label }}</span>
-    {% else %}<a class="side-link" href="{{ path }}">{{ label }}</a>{% endif %}
+    {% if path == here %}<span class="side-link current{% if path == attn %} nav-attn{% endif %}">{{ label }}</span>
+    {% else %}<a class="side-link{% if path == attn %} nav-attn{% endif %}" href="{{ path }}">{{ label }}</a>{% endif %}
     {% endfor %}
 </nav>
 
@@ -34,8 +37,8 @@
         <h1>CONFETTI TOPO</h1>
         <span class="page-title" id="page-title">{% block page_title %}{{ self.title() }}{% endblock %}</span>
         {% for path, label in all_pages %}{% set tool = (path, label) in tools_pages %}
-        {% if path == here %}<span class="btn-nav-current{% if tool %} tools-nav{% endif %}">{{ label }}</span>
-        {% else %}<a href="{{ path }}" class="btn-nav{% if tool %} tools-nav{% endif %}">{{ label }}</a>{% endif %}
+        {% if path == here %}<span class="btn-nav-current{% if tool %} tools-nav{% endif %}{% if path == attn %} nav-attn{% endif %}">{{ label }}</span>
+        {% else %}<a href="{{ path }}" class="btn-nav{% if tool %} tools-nav{% endif %}{% if path == attn %} nav-attn{% endif %}">{{ label }}</a>{% endif %}
         {% endfor %}
     </div>
     <div class="status">
@@ -81,7 +84,7 @@
         <div class="start-menu">
             <div class="start-band"><b>Topo</b>95</div>
             <div class="start-items">
-                {% for path, label in all_pages %}<a href="{{ path }}">{{ label }}</a>
+                {% for path, label in all_pages %}<a href="{{ path }}"{% if path == attn %} class="nav-attn"{% endif %}>{{ label }}</a>
                 {% endfor %}
                 <hr>
                 <a href="https://isitdns.com/" target="_blank" rel="noopener noreferrer">Is it DNS..?</a>
@@ -89,7 +92,7 @@
             </div>
         </div>
     </details>
-    {% for path, label in all_pages %}{% if path == here %}<span class="btn-nav-current">{{ label }}</span>{% endif %}{% endfor %}
+    {% for path, label in all_pages %}{% if path == here %}<span class="btn-nav-current{% if path == attn %} nav-attn{% endif %}">{{ label }}</span>{% endif %}{% endfor %}
     <span class="tray" id="tray-clock"></span>
 </div>
 
@@ -107,8 +110,8 @@
     <div class="dos-menu" data-menu="g">
         <button type="button" role="menuitem" aria-haspopup="true"><span class="dos-hot">G</span>o</button>
         <div class="dos-drop" role="menu">
-            {# Hotkeys: 1-9 by position, 0 for Settings (always last), the first letter for a page after the ninth. #}
-            {% for path, label in all_pages %}{% set k = loop.index if loop.index < 10 else (0 if loop.last else label[0]|lower) %}<a href="{{ path }}" data-key="{{ k }}"><span class="dos-hot">{{ k }}</span> {{ label }}</a>
+            {# Hotkeys: 1-9 by position, 0 for the last page (Settings, or Conflicts when none are open), the first letter for the others after the ninth. #}
+            {% for path, label in all_pages %}{% set k = loop.index if loop.index < 10 else (0 if loop.last else label[0]|lower) %}<a href="{{ path }}" data-key="{{ k }}"{% if path == attn %} class="nav-attn"{% endif %}><span class="dos-hot">{{ k }}</span> {{ label }}</a>
             {% endfor %}
         </div>
     </div>
