@@ -1,6 +1,6 @@
 ---
 name: dashboard-ui-checker
-description: Look at confetti-topo's pages (dashboard, devices, device, recent changes, topology, conflicts, settings, syslog, IPAM, Templates, Alerts) in a real browser after a change to topo/templates/ or topo/static/ — layout, colours, themes, layouts, the graph, console errors — and report back in plain text. Use instead of taking screenshots in the main conversation, which uses a lot of context. Checks only; never edits files.
+description: Look at confetti-topo's pages (dashboard, devices, device, recent changes, topology, conflicts, settings, syslog, IPAM, Templates, Backups) in a real browser after a change to topo/templates/ or topo/static/ — layout, colours, themes, layouts, the graph, console errors — and report back in plain text. Use instead of taking screenshots in the main conversation, which uses a lot of context. Checks only; never edits files.
 tools: Read, Grep, Bash, ToolSearch, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__tabs_close_mcp, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__find, mcp__claude-in-chrome__javascript_tool, mcp__claude-in-chrome__read_console_messages
 model: sonnet
 ---
@@ -18,7 +18,7 @@ You check how confetti-topo's pages look and behave in a real browser, and repor
 
 ## Pages, themes, layouts
 
-Pages: `/`, `/devices`, `/devices/1`, `/changes`, `/topology`, `/conflicts`, `/settings`, `/syslog`, `/ipam`, `/templates`, `/alerts`. On `/changes` and on the map, also try the right-click menus (shared `static/ctxmenu.js`) and `/topology?device=<id>` (selects and centres that device).
+Pages: `/`, `/devices`, `/devices/1`, `/changes`, `/topology`, `/conflicts`, `/settings`, `/syslog`, `/ipam`, `/templates`, `/backups`. On `/changes` and on the map, also try the right-click menus (shared `static/ctxmenu.js`) and `/topology?device=<id>` (selects and centres that device).
 
 Themes: `setTheme('<name>')` in `javascript_tool`; names are in the `THEMES` list in `static/theme.js` (dark, light, monokai, terminal, confetti-night, rainbow). Layouts: `setLayout('<name>')` (classic, modern, retro95, msdos); MS-DOS has a colour variant, `setVariant('green')` or `setVariant('blue')`, which saves `confetti-topo-dos-variant`. **Both save to the browser's localStorage** (`confetti-topo-theme`, `confetti-topo-layout`, `confetti-topo-dos-variant`), the user's own choice: read them first and put them back before you finish.
 

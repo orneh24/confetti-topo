@@ -38,14 +38,14 @@ those two columns to NULL, so its neighbors become ghosts again.
 
 ## Routes
 
-**Pages:** `/` `/devices` `/devices/<id>` `/topology` `/conflicts` `/settings` `/syslog` `/changes` `/ipam` `/templates` `/alerts`
+**Pages:** `/` `/devices` `/devices/<id>` `/topology` `/conflicts` `/settings` `/syslog` `/changes` `/ipam` `/templates` `/backups` `/find`
 
-**IPAM, templates, config backups, alerts (routes in `app/tools_routes.py`):**
+**IPAM, templates, config backups (routes in `app/tools_routes.py`):**
 - `GET /api/devices/<id>/drift|interface-stats|configs`, `/configs/<vid>`, `/configs/diff` (`?raw=1` unmasks); `GET|PUT /api/devices/<id>/vars`
 - `GET /api/ipam/addresses|prefixes|findings`, `POST /api/ipam/analyze`
 - `GET|POST /api/templates`, `GET|PUT|DELETE /api/templates/<name>`, `/versions`, `POST /preview`
 - `GET /configs/` and `GET /configs/<key>.cfg` — unauthenticated on purpose (constraint 28)
-- `GET|POST /api/alert-rules`, `PUT|DELETE /api/alert-rules/<id>`, `POST /api/alert-rules/<id>/test`; `POST /api/discover/vcenter`
+- `POST /api/discover/vcenter`
 
 **Devices:**
 - `GET|POST /api/devices` — POST goes through `identity.ingest`

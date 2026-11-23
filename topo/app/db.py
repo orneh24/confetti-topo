@@ -335,7 +335,7 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_syslog_source_ip ON syslog(source_ip);
 
         -- IPAM findings, config templates, running-config
-        -- backups, interface error history and alert rules.
+        -- backups and interface error history.
         -- Rebuilt wholesale by each POST /api/ipam/analyze run.
         CREATE TABLE IF NOT EXISTS ipam_findings (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -395,25 +395,6 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_ifstats ON interface_stats(device_id, name, id);
         CREATE INDEX IF NOT EXISTS idx_ifstats_at ON interface_stats(at);
-
-        -- Alert rules (alerts.py). target is 'webhook:<url>' or 'mail:<address>'; the API never returns it in full.
-        CREATE TABLE IF NOT EXISTS alert_rules (
-            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-            name                TEXT NOT NULL,
-            enabled             INTEGER NOT NULL DEFAULT 1,
-            source              TEXT NOT NULL,
-            kinds               TEXT NOT NULL DEFAULT '',
-            min_severity        TEXT NOT NULL DEFAULT 'info',
-            syslog_max_severity INTEGER,
-            pattern             TEXT NOT NULL DEFAULT '',
-            device              TEXT NOT NULL DEFAULT '',
-            target              TEXT NOT NULL,
-            cooldown_s          INTEGER NOT NULL DEFAULT 300,
-            last_fired_at       TEXT,
-            fired_count         INTEGER NOT NULL DEFAULT 0,
-            last_error          TEXT,
-            created_at          TEXT NOT NULL
-        );
     """)
     syslog_core.migrate(db)
     # CREATE TABLE IF NOT EXISTS never adds a column to a table that exists already.
@@ -432,7 +413,7 @@ def init_db():
     # Set by syslog_trigger when a device's syslog says the topology changed: poll it early.
     if "poll_requested_at" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
         db.execute("ALTER TABLE devices ADD COLUMN poll_requested_at TEXT NOT NULL DEFAULT ''")
-    # Columns for templates, drift, SNMP, error history and alerting.
+    # Columns for templates, drift, SNMP and error history.
     if "template_name" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
         db.execute("ALTER TABLE devices ADD COLUMN template_name TEXT REFERENCES templates(name) ON DELETE SET NULL")
     if "drift_status" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
@@ -455,10 +436,6 @@ def init_db():
         if col not in have:
             db.execute("ALTER TABLE interface_stats ADD COLUMN {} INTEGER".format(col))
     db.execute("CREATE INDEX IF NOT EXISTS idx_if_network ON interfaces(network)")
-    # events.alerted: existing rows are history, so mark them done and enabling alerting never replays them.
-    if "alerted" not in [r[1] for r in db.execute("PRAGMA table_info(events)")]:
-        db.execute("ALTER TABLE events ADD COLUMN alerted INTEGER NOT NULL DEFAULT 0")
-        db.execute("UPDATE events SET alerted = 1")
     db.commit()
     db.close()
 

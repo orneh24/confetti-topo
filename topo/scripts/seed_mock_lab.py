@@ -4,7 +4,7 @@ Three routers (documentation-range IPs, fake serials 9SIMLAB000x), their
 interfaces, LLDP/OSPF/BGP neighbours (some resolve, some stay ghosts), one
 unknown LLDP neighbour waiting to be added, one identity conflict, a few
 change events, a config template with two running-config backups per router (one
-drifted), interface error history, an alert rule, an overlapping prefix for IPAM
+drifted), interface error history, an overlapping prefix for IPAM
 and some syslog. No real lab data.
 
     python scripts/seed_mock_lab.py mock-lab.db
@@ -212,19 +212,13 @@ def main():
             conn.execute("INSERT INTO config_versions (device_id, sha256, body, captured_at) VALUES (?,?,?,?)",
                          (dev_id, "mock{}{}".format(idx, ago), body, ts(ago)))
         drift.refresh(conn, dev_id)
-    # An overlapping prefix and an alert rule (its target is never sent anywhere: nothing here polls or alerts).
+    # An overlapping prefix for IPAM.
     conn.execute(
         "INSERT INTO interfaces (device_id, name, description, ip, prefix_len, network, admin_status, oper_status, "
         "speed, duplex, input_errors, crc_errors, mtu, last_seen) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1500,?)",
         (ids[2], "GigabitEthernet6", "lab segment", "10.0.13.254", 24, ios._network("10.0.13.254", 24),
          "up", "up", "1000", "full", 0, 0, now))
-    conn.execute(
-        "INSERT INTO alert_rules (name, source, kinds, min_severity, target, cooldown_s, created_at) "
-        "VALUES (?,?,?,?,?,?,?)",
-        ("BGP trouble", "event", "bgp_state,bgp_flapping", "warning", "webhook:http://192.0.2.99/hook", 300, now))
     ipam.analyze(conn)
-    # Alerting is off for the mock lab's events: they are history, so mark them as handled.
-    conn.execute("UPDATE events SET alerted = 1")
 
     # An identity conflict: lab-rtr-b's IP now reports a different serial.
     try:

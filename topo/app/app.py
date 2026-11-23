@@ -47,7 +47,7 @@ app = Flask(
 
 
 auth.register(app)
-app.register_blueprint(tools_routes.bp)   # IPAM, templates, config backups, drift, alerts, vCenter
+app.register_blueprint(tools_routes.bp)   # IPAM, templates, config backups, drift, vCenter
 
 
 @app.context_processor

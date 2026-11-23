@@ -5,7 +5,7 @@ Ideas only. Nothing here is built until the user picks it.
 ## Near term
 - **Validate on real routers** (`lab-validator`) and on a fresh Alpine VM; then update HANDOFF.
 - **Check the features that came from the former butler on real hardware** (merged 2026-11-21): the `config` task and drift on a real router, SNMP against a
-  real `snmpd`, an alert webhook and mail. The unit and mock-lab checks pass; none of it has run against the lab yet.
+  real `snmpd`. The unit and mock-lab checks pass; none of it has run against the lab yet.
 
 ## Topology
 - **Routing table follow-ups:** IPv6 (checked 2026-11-03: the lab has one IPv6 route on one router and none on another, so there is no real table to build from yet) and a cap on a very large table; validate ECMP against a real router (the

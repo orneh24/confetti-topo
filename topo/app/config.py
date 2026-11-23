@@ -40,19 +40,6 @@ CONFIG_VERSIONS_KEEP = int(os.environ.get("TOPO_CONFIG_VERSIONS_KEEP", "0"))
 STATS_RETENTION_DAYS = int(os.environ.get("TOPO_STATS_RETENTION_DAYS", "7"))
 
 # ---------------------------------------------------------------------------
-# Alerting (alerts.py): rules send a webhook or mail for events and syslog.
-# ---------------------------------------------------------------------------
-ALERTS_ENABLED = _flag("TOPO_ALERTS_ENABLED", "true")
-ALERT_TICK_S = int(os.environ.get("TOPO_ALERT_TICK_S", "10"))
-ALERT_MAX_AGE_S = int(os.environ.get("TOPO_ALERT_MAX_AGE_S", "600"))
-SMTP_HOST = os.environ.get("TOPO_SMTP_HOST", "")
-SMTP_PORT = int(os.environ.get("TOPO_SMTP_PORT", "25"))
-SMTP_USER = os.environ.get("TOPO_SMTP_USER", "")
-SMTP_PASSWORD = os.environ.get("TOPO_SMTP_PASSWORD", "")
-SMTP_FROM = os.environ.get("TOPO_SMTP_FROM", "confetti-topo@localhost")
-SMTP_TLS = _flag("TOPO_SMTP_TLS", "false")
-
-# ---------------------------------------------------------------------------
 # ICMP reachability checker (reach.py)
 # ---------------------------------------------------------------------------
 PING_ENABLED = _flag("TOPO_PING_ENABLED", "true")

@@ -97,10 +97,6 @@ def render(conn):
         o.sample("topo_lldp_neighbors", "LLDP neighbors a device currently reports", "gauge",
                  r["n"], device=r["hostname"])
 
-    o.sample("topo_alert_rules_failing", "alert rules whose last send failed", "gauge",
-             conn.execute("SELECT COUNT(*) FROM alert_rules WHERE last_error IS NOT NULL").fetchone()[0])
-    for r in conn.execute("SELECT name, fired_count FROM alert_rules ORDER BY id"):
-        o.sample("topo_alert_rule_fired", "alerts a rule has sent", "gauge", r["fired_count"], rule=r["name"])
     o.sample("topo_syslog_rows", "syslog messages currently stored", "gauge",
              conn.execute("SELECT COUNT(*) FROM syslog").fetchone()[0])
     o.sample("topo_ipam_findings", "current IPAM overlap/duplicate findings", "gauge",

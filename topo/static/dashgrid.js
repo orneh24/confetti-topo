@@ -15,12 +15,14 @@
 // A page may fold a widget to its title bar by giving it the class "collapsed"; after an Auto sort the layout is sorted
 // again whenever a widget is folded or opened, so the others close up or make room.
 // Remembered in this browser only (localStorage), so a new browser sees the default layout. "Reset layout" clears it.
+// "Lock layout" (state.locked) freezes the arrangement: no moving, no resizing, no re-sort when a widget is folded or opened,
+// and Reset / Auto sort are disabled until "Unlock layout". Folding still works; the other widgets stay where they are.
 //
 // A widget is a `.section` with a `data-box="<id>"` and a `.section-header`; the page's own code only touches the
 // elements inside the widgets, so its refresh never undoes the arrangement. Pointer events, so touch works too.
 // The SAME file is used by confetti-topo and confetti-traffic: keep the two identical.
 var DashGrid = (function () {
-    var box, cfg, state = { order: [], span: {}, height: {}, row: {}, rows: {}, fill: false };
+    var box, cfg, state = { order: [], span: {}, height: {}, row: {}, rows: {}, fill: false, locked: false };
 
     var CSS =
         '.dg-bar { display: flex; justify-content: flex-end; padding: 8px 24px 0; }' +
@@ -44,7 +46,9 @@ var DashGrid = (function () {
         '.dg-on.dg-fill > .section[data-box] { align-self: stretch; }' +
         // A widget the page folded (class "collapsed": only its title bar shows) keeps its own small height and has no grip.
         '.dg-on.dg-fill > .section[data-box].collapsed { align-self: start; }' +
-        '.dg-on .section.collapsed > .dg-resize { display: none; }';
+        '.dg-on .section.collapsed > .dg-resize { display: none; }' +
+        '.dg-on.dg-locked .section-header { cursor: auto; }' +
+        '.dg-on.dg-locked .dg-resize { display: none; }';
 
     function key() { return cfg.prefix + '-dashboard-layout'; }
 
@@ -52,7 +56,7 @@ var DashGrid = (function () {
         try {
             var s = JSON.parse(localStorage.getItem(key()));
             if (s && typeof s === 'object') {
-                state = { order: Array.isArray(s.order) ? s.order : [], span: s.span || {}, height: s.height || {}, row: s.row || {}, rows: s.rows || {}, fill: !!s.fill };
+                state = { order: Array.isArray(s.order) ? s.order : [], span: s.span || {}, height: s.height || {}, row: s.row || {}, rows: s.rows || {}, fill: !!s.fill, locked: !!s.locked };
             }
         } catch (e) { /* not remembered */ }
     }
@@ -257,7 +261,8 @@ var DashGrid = (function () {
     }
 
     function reset() {
-        state = { order: [], span: {}, height: {}, row: {}, rows: {}, fill: false };
+        if (state.locked) { return; }
+        state = { order: [], span: {}, height: {}, row: {}, rows: {}, fill: false, locked: false };
         try { localStorage.removeItem(key()); } catch (e) { /* nothing saved anyway */ }
         box.classList.remove('dg-fill');
         // Back to the page's own order: the order the widgets had when the page was built.
@@ -305,6 +310,7 @@ var DashGrid = (function () {
 
     // Measure every widget, then lay them out in rows that fill the width.
     function autoSort() {
+        if (state.locked) { return; }
         var cols = columns();
         var gap = parseFloat(getComputedStyle(box).rowGap) || 0;
         state.height = {}; state.span = {}; state.row = {}; state.rows = {}; state.fill = false;
@@ -399,18 +405,19 @@ var DashGrid = (function () {
             if (!header) { return; }
             header.title = 'Drag to move this widget';
             header.addEventListener('pointerdown', function (ev) {
-                if (ev.button !== 0 || (ev.target.closest && ev.target.closest('a, button, input, select, textarea'))) { return; }
+                if (state.locked || ev.button !== 0 || (ev.target.closest && ev.target.closest('a, button, input, select, textarea'))) { return; }
                 startMove(ev, el);
             });
             var grip = document.createElement('div');
             grip.className = 'dg-resize';
             grip.title = 'Drag to resize (width in columns, height free). Double-click: original size';
             grip.addEventListener('pointerdown', function (ev) {
-                if (ev.button !== 0) { return; }
+                if (state.locked || ev.button !== 0) { return; }
                 ev.preventDefault();
                 startSize(ev, el, grip);
             });
             grip.addEventListener('dblclick', function () {
+                if (state.locked) { return; }
                 var id = el.getAttribute('data-box');
                 delete state.span[id];
                 delete state.height[id];
@@ -430,8 +437,9 @@ var DashGrid = (function () {
         btn.title = 'Put the widgets back in their original order and size';
         btn.addEventListener('click', reset);
         bar.appendChild(btn);
+        var auto = null;
         if (cfg.autoSort) {
-            var auto = document.createElement('button');
+            auto = document.createElement('button');
             auto.type = 'button';
             auto.textContent = 'Auto sort layout';
             auto.title = 'Rearrange the widgets to leave as little empty space as possible (sizes you set are dropped)';
@@ -439,10 +447,34 @@ var DashGrid = (function () {
             auto.addEventListener('click', autoSort);
             bar.appendChild(auto);
         }
+        var lock = document.createElement('button');
+        lock.type = 'button';
+        lock.style.marginLeft = '6px';
+        lock.addEventListener('click', function () {
+            state.locked = !state.locked;
+            save();
+            showLock();
+        });
+        bar.appendChild(lock);
         box.parentNode.insertBefore(bar, box);
+
+        function showLock() {
+            box.classList.toggle('dg-locked', state.locked);
+            lock.textContent = state.locked ? 'Unlock layout' : 'Lock layout';
+            lock.title = state.locked ? 'Allow moving, resizing and sorting the widgets again'
+                : 'Keep the widgets where they are: no moving, resizing or automatic sorting';
+            lock.setAttribute('aria-pressed', state.locked ? 'true' : 'false');
+            btn.disabled = state.locked;
+            if (auto) { auto.disabled = state.locked; }
+            boxes().forEach(function (el) {
+                var h = el.querySelector('.section-header');
+                if (h) { h.title = state.locked ? '' : 'Drag to move this widget'; }
+            });
+        }
 
         load();
         applyAll();
+        showLock();
         // Folding or opening a widget (the page toggles "collapsed") re-runs Auto sort while its layout is in use.
         if (window.MutationObserver) {
             var folded = {};
@@ -454,7 +486,7 @@ var DashGrid = (function () {
                     var id = m.target.getAttribute('data-box'), now = m.target.classList.contains('collapsed');
                     if (folded[id] !== now) { folded[id] = now; changed = true; }
                 });
-                if (changed && state.fill) { autoSort(); }
+                if (changed && state.fill && !state.locked) { autoSort(); }
             }).observe(box, { attributes: true, attributeFilter: ['class'], subtree: true });
         }
         var timer = null;

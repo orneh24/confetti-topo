@@ -8,8 +8,8 @@ operations), reads LLDP neighbors, BGP sessions and OSPF adjacencies, and shows 
 confetti-topo never writes to a device.
 
 It also keeps the inventory around the map: IPAM, config templates a router can pull, running-config backups
-with drift checks, syslog and alerting. Those came from the former confetti-butler project,
-which was merged into this project; they are the IPAM, Templates and Alerts pages (a second menu row in the
+with drift checks and syslog. Those came from the former confetti-butler project,
+which was merged into this project; they are the IPAM and Templates pages (a second menu row in the
 Classic layout, labelled Tools). The look follows the hub UI of the sibling project
 [confetti-traffic](https://github.com/orneh24/confetti-traffic).
 
@@ -47,8 +47,6 @@ Classic layout, labelled Tools). The look follows the hub UI of the sibling proj
   prefix, or a MAC (which device owns it, and the switch port that learned it).
 - **Config backup search.** The Backups page lists the latest running-config of every device and searches all of them at once
   ("which routers have `ip ssh version 2`?", or the ones without it), secrets masked.
-- **Alerting.** Rules turn events (a BGP peer down, config drift, a device not answering ping) or syslog messages into a
-  webhook or an e-mail, with a cooldown per rule.
 - **Polling.** Every few minutes it logs in once per router and reads version, interfaces (with error counters and their
   24-hour growth, and traffic in / out with a graph), LLDP, BGP, OSPF, routes and the running-config
   (switches also VLANs, trunks, spanning tree and the MAC table). A device can also be polled over SNMP v1/v2c
@@ -60,12 +58,12 @@ Classic layout, labelled Tools). The look follows the hub UI of the sibling proj
 - **Reachability.** Every device is pinged every 30 seconds; a router that stops answering is outlined red
   on the graph.
 - **Events.** Neighbor, peer and interface changes, OS changes and devices going unreachable are listed on the
-  dashboard, on each device page and on the Recent changes page (filters, sortable, Before and After states coloured green, yellow or red). Alerting on them is under Alerts.
+  dashboard, on each device page and on the Recent changes page (filters, sortable, Before and After states coloured green, yellow or red).
 - **Device page.** A status strip at the top (ping, poll, sessions, drift, errors, ports down), a Test login button, interfaces, LLDP neighbors, BGP/OSPF sessions and the routing table (filter, "export CSV"). On a switch also VLANs, trunks, the spanning-tree summary and the learned MAC addresses (filter; a MAC that belongs to a known device names it).
 - **Map notes.** A note on any node or link (circuit ID, provider, ticket), shown in its card and in the JSON export.
 - **Metrics.** `GET /metrics` serves Prometheus text.
 - **Other Confetti projects.** Type the Traffic URL on the Settings page and a small button for it appears at the right of the top menu (opens in a new tab).
-- **Dashboard.** Widgets: System, Services, Activity, Devices, Events, Sessions down, Open conflicts, Unknown LLDP neighbors (with an add button) and Map changes (each row opens that snapshot on the map). Drag a widget by its title to move it (a copy follows the pointer and a grid outline shows where it will land; drop it on the middle of another widget to put them side by side, sharing the row, or into the empty space at the end of a row), drag its corner to resize it; the arrangement is kept in the browser, "Reset layout" undoes it and "Auto sort layout" rearranges the widgets to leave as little empty space as it can. The Devices widget shows IP, vendor, model, OS version, ping and poll state; click a heading to sort and use Columns to add or remove columns (also role, site, platform, serial).
+- **Dashboard.** Widgets: System, Services, Activity, Devices, Events, Sessions down, Open conflicts, Unknown LLDP neighbors (with an add button) and Map changes (each row opens that snapshot on the map). Drag a widget by its title to move it (a copy follows the pointer and a grid outline shows where it will land; drop it on the middle of another widget to put them side by side, sharing the row, or into the empty space at the end of a row), drag its corner to resize it; the arrangement is kept in the browser, "Reset layout" undoes it and "Auto sort layout" rearranges the widgets to leave as little empty space as it can. "Lock layout" keeps them where they are (no moving, resizing or automatic sorting) until it is unlocked. The Devices widget shows IP, vendor, model, OS version, ping and poll state; click a heading to sort and use Columns to add or remove columns (also role, site, platform, serial).
 - **Look.** Seven colour themes (or Shuffle) and four layouts (MS-DOS in two colour variants), picked in the header.
 
 ![The whole dashboard: system, services, activity, devices, events, sessions down, open conflicts, unknown LLDP neighbors and map changes](docs/img/dashboard.png)

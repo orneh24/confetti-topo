@@ -132,17 +132,11 @@ body.full-height .page { flex: 1 1 auto; min-height: 0; display: flex; flex-dire
 .section.collapsed > :not(.section-header) { display: none !important; }
 .section.collapsed > .section-header { border-bottom: none; }
 .hdr-actions { display: flex; gap: 6px; align-items: center; margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
-/* Label + field forms (device Edit, Settings, Alerts). */
+/* Label + field forms (device Edit, Settings). */
 .form-grid { display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px; align-items: center; font-size: 12px; margin-bottom: 10px; }
 .form-grid label { color: var(--text-dim); }
 .form-grid input, .form-grid select { width: 100%; }
 .form-grid input[type=checkbox] { width: auto; justify-self: start; }
-/* A form of fields with a line of help each, two to a row on a wide screen (Alerts). */
-.field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 24px; margin-bottom: 12px; font-size: 12px; }
-.field-grid .field label { display: block; color: var(--text-dim); margin-bottom: 3px; }
-.field-grid .field input, .field-grid .field select { width: 100%; }
-.field-grid .field .hint { margin-top: 3px; }
-@media (max-width: 800px) { .field-grid { grid-template-columns: minmax(0, 1fr); } }
 /* Column chooser (dashboard Devices widget, static/colpick.js). Fixed so the widget's overflow does not clip it. */
 .col-menu { position: fixed; z-index: 500; min-width: 170px; max-height: 70vh; overflow: auto; padding: 6px 8px;
     background: var(--bg-card); border: 1px solid var(--border); box-shadow: 0 6px 18px rgba(0,0,0,.35); font-size: 12px; }
@@ -158,7 +152,7 @@ body.full-height .page { flex: 1 1 auto; min-height: 0; display: flex; flex-dire
 .page-footer .btn-small { margin: 0 3px; }
 .side-nav, .kpi-row, .taskbar { display: none; }
 
-/* Alerts, IPAM and Templates: a second row under the header in Classic (no data-layout), where the header's own
+/* IPAM, Templates and Backups: a second row under the header in Classic (no data-layout), where the header's own
    copies are hidden. Every other layout hides the row and shows them with the rest of its page buttons. */
 .nav-row-tools { display: none; }
 :root:not([data-layout]) .nav-row-tools {
