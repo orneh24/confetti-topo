@@ -6,6 +6,7 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .msg { font-size: 12px; margin-top: 8px; }
 .bulk-row { display: flex; gap: 10px; align-items: center; margin-bottom: 8px; }
 .bulk-row .msg { margin-top: 0; }
+td.poll-err { color: var(--red); }
 </style>
 {% endblock %}
 {% block content %}
@@ -29,7 +30,7 @@ form.inline { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
                     <tr>
                         <th>Hostname</th><th>Poll</th><th>Role</th><th>Mgmt IP</th><th>Site</th>
                         <th>Key</th><th>Ping</th><th>Template</th><th>Last seen</th>
-                        <th>Vendor</th><th>Model</th><th>OS version</th><th>Platform</th><th>Serial</th>
+                        <th>Vendor</th><th>Model</th><th>OS version</th><th>Platform</th><th>Serial</th><th>Poll error</th>
                     </tr>
                 </thead>
                 <tbody id="device-rows"></tbody>
@@ -111,6 +112,7 @@ function pollResultIcon(d) {
     if (d.role === 'node') { return ''; }
     if (d.fail_count > 0) {
         return '<span class="pill bad" title="Last poll failed (' + d.fail_count + ' in a row)' +
+            (d.last_poll_error ? ': ' + ctxMenu.attr(d.last_poll_error) : '') +
             (d.last_poll_ok ? '; last success ' + esc(timeAgo(d.last_poll_ok)) : '') + '">&#10007;</span> ';
     }
     if (d.last_poll_ok) {
@@ -228,7 +230,7 @@ document.getElementById('device-rows').addEventListener('click', function (ev) {
 function groupHead(site, members) {
     var down = members.filter(isDown).length, fail = members.filter(isFailing).length;
     var sum = members.length + (members.length === 1 ? ' device' : ' devices') + (down ? ' · ' + down + ' down' : '') + (fail ? ' · ' + fail + ' poll failing' : '');
-    return '<tr class="grp" data-site="' + attr(site) + '"><td colspan="14"><span class="grp-arrow">' + (foldedSites[site] ? '&#9656;' : '&#9662;') + '</span> ' +
+    return '<tr class="grp" data-site="' + attr(site) + '"><td colspan="15"><span class="grp-arrow">' + (foldedSites[site] ? '&#9656;' : '&#9662;') + '</span> ' +
         esc(site || 'No site') + '<span class="grp-sum">' + esc(sum) + '</span></td></tr>';
 }
 
@@ -270,6 +272,8 @@ function renderDevices(fresh) {
             '<td data-sort="' + attr(d.last_seen || '') + '">' + timeAgo(d.last_seen) + '</td>' +
             '<td>' + esc(d.vendor || '') + '</td><td>' + esc(d.model || '') + '</td><td>' + esc(d.os_version || '') + '</td>' +
             '<td>' + esc(d.platform || '') + '</td><td>' + esc(d.serial || '') + '</td>' +
+            '<td class="poll-err" title="' + ctxMenu.attr(d.fail_count > 0 ? d.last_poll_error || '' : '') + '">' +
+            (d.role !== 'node' && d.fail_count > 0 && d.last_poll_error ? esc(d.last_poll_error.split('. ')[0]) : '') + '</td>' +
             '</tr>';
     }
     document.getElementById('device-rows').innerHTML = rows;
@@ -284,11 +288,11 @@ function loadDevices() {
 
 // Polls run inline on the request, so one device can take several seconds.
 function pollSummary(data) {
-    var failed = [];
+    var failed = [], why = '';
     for (var task in data.results || {}) {
-        if (!data.results[task].ok) { failed.push(task); }
+        if (!data.results[task].ok) { failed.push(task); why = why || data.results[task].error || ''; }
     }
-    return failed.length ? 'failed: ' + failed.join(', ') : 'ok';
+    return failed.length ? 'failed (' + failed.join(', ') + ')' + (why ? ': ' + why : '') : 'ok';
 }
 
 function pollRequest(id) {

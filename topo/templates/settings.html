@@ -17,7 +17,7 @@
                     <label for="d-username">ssh username</label><input id="d-username" name="username" autocomplete="off">
                     <label for="d-password">ssh password</label><input id="d-password" name="password" type="password" autocomplete="new-password">
                     <label for="d-enable_secret">enable secret</label><input id="d-enable_secret" name="enable_secret" type="password" autocomplete="new-password">
-                    <label for="d-snmp_community">snmp community</label><input id="d-snmp_community" name="snmp_community" type="password" autocomplete="new-password">
+                    <label for="d-snmp_community">snmp community</label><input id="d-snmp_community" name="snmp_community" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
                     <label for="d-snmp_version">snmp version</label>
                     <select id="d-snmp_version" name="snmp_version"><option value="">(environment, else 2c)</option><option value="2c">2c</option><option value="1">1</option></select>
                 </div>
@@ -36,7 +36,7 @@
                 <div id="sp-rows"></div>
                 <div class="hint">Lets a device log to one Confetti server only. This server then reads the other one's own messages every few seconds
                     (nothing it pulled itself is passed on) and skips a message it already has. Switching a server on starts from its newest message; its
-                    history is not copied. Set its URL in the section above first. A pulled message from a device here also asks for an early poll.</div>
+                    history is not copied. Set its URL in the section below first. A pulled message from a device here also asks for an early poll.</div>
                 <span class="msg" id="sp-msg"></span>
             </form>
         </div>
@@ -155,7 +155,7 @@ function loadDefaults() {
         f.username.placeholder = c.username_env ? 'environment: ' + c.username_env : '';
         f.snmp_version.value = c.snmp_version || '';
         ['password', 'enable_secret', 'snmp_community'].forEach(function (k) {
-            f[k].value = '';
+            f[k].value = k === 'snmp_community' ? (c.snmp_community || '') : '';
             f[k].placeholder = c[k + '_source'] === 'settings' ? 'stored'
                 : (c[k + '_source'] === 'env' ? 'from the environment' : 'not set');
         });
@@ -197,7 +197,7 @@ function loadSyslogPull() {
             cb.disabled = !sv.url && !sv.pull;
             cb.onchange = function () { saveSyslogPull(name, cb.checked); };
             label.appendChild(cb);
-            label.appendChild(document.createTextNode(' Pull syslog from ' + SP_NAMES[name] + (sv.url ? '' : ' (set its URL above first)')));
+            label.appendChild(document.createTextNode(' Pull syslog from ' + SP_NAMES[name] + (sv.url ? '' : ' (set its URL below first)')));
             row.appendChild(label);
             var info = document.createElement('div');
             info.className = 'hint';

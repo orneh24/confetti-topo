@@ -2062,9 +2062,10 @@ function pollFromMenu(deviceId, name) {
     }).then(function (res) {
         if (!res.ok) { toast(name + ': ' + (res.data.error || 'poll failed')); return; }
         var failed = Object.keys(res.data.results || {}).filter(function (t) { return !res.data.results[t].ok; });
-        toast(name + ': ' + (failed.length ? 'failed: ' + failed.join(', ') : 'poll ok'));
+        var why = failed.length ? (res.data.results[failed[0]].error || '') : '';
+        toast(name + ': ' + (failed.length ? 'poll failed' + (why ? ': ' + why : ' (' + failed.join(', ') + ')') : 'poll ok'));
         load();
-    }).catch(function () { toast(name + ': poll failed'); });
+    }).catch(function () { toast(name + ': could not reach this server to poll'); });
 }
 
 function openContextMenu(id, x, y) {

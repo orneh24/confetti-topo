@@ -416,6 +416,9 @@ def init_db():
     # Columns for templates, drift, SNMP and error history.
     if "template_name" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
         db.execute("ALTER TABLE devices ADD COLUMN template_name TEXT REFERENCES templates(name) ON DELETE SET NULL")
+    # Why the last poll failed (pollerr.py); empty after a good poll.
+    if "last_poll_error" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
+        db.execute("ALTER TABLE devices ADD COLUMN last_poll_error TEXT NOT NULL DEFAULT ''")
     if "drift_status" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
         db.execute("ALTER TABLE devices ADD COLUMN drift_status TEXT")
     if "snmp_community" not in [r[1] for r in db.execute("PRAGMA table_info(credentials)")]:

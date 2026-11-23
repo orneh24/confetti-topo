@@ -37,7 +37,7 @@ PORT = free_port()
 BASE = "http://127.0.0.1:{}".format(PORT)
 SIZE = {"width": 1280, "height": 1000}
 
-THEMES = ["light", "monokai", "confetti-night", "rainbow"]      # themes.png, in order
+THEMES = ["light", "monokai", "dark", "rainbow"]      # themes.png, in order
 LAYOUTS = ["classic", "modern", "retro95", "msdos", "msdos:green"]        # layouts.png, in order ("layout:variant")
 TOUR = ["/", "/devices", "/devices/1", "/changes", "/topology", "/conflicts"]
 
@@ -52,7 +52,7 @@ def wait_for_server():
     sys.exit("server did not start")
 
 
-def shot(browser, path, theme="confetti-night", layout="classic", wait_ms=900, size=SIZE):
+def shot(browser, path, theme="dark", layout="classic", wait_ms=900, size=SIZE):
     """One screenshot as a PIL image, in a fresh browser context that is closed again
     (open contexts keep polling /api/health and starve the server). Saved theme and
     layout are set in localStorage first. A layout may carry a variant: "msdos:green"."""

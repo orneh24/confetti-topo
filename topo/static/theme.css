@@ -101,31 +101,6 @@
     --blue:      #00e676;
     --cyan:      #7dffb0;
 }
-/* Confetti Night — navy with a gold accent */
-:root[data-theme="confetti-night"] {
-    --bg:        #0f1222;
-    --bg-card:   #171c34;
-    --bg-hover:  #1e2442;
-    --bg-muted:  #20264a;
-    --bg-code:   #0a0d1a;
-    --stripe:    #272e50;
-    --border:    #2b3256;
-    --border-soft: #20264a;
-    --badge-bg:  #1d2346;
-    --badge-border: #333b6b;
-    --text:      #e8eaf6;
-    --text-dim:  #a3a9cf;
-    --green:     #2fbf71;
-    --green-bg:  #0f2d20;
-    --red:       #ff5d73;
-    --red-bg:    #3a1420;
-    --yellow:    #ffb347;
-    --purple:    #c77dff;
-    --yellow-bg: #33240f;
-    --gray:      #3a4170;
-    --blue:      #4cc9f0;
-    --cyan:      #ffd166;
-}
 /* Rainbow — pale lavender page, white boxes with bold dark borders, a navy header with a rainbow strip,
    a different colour on each table column header. The structure rules below skip Retro 95 and the CRT
    layouts, which bring their own colours. */

@@ -19,6 +19,7 @@ import re
 import subprocess
 
 from .. import config
+from .. import pollerr
 from ..parsers import ios
 
 SYS_DESCR = ".1.3.6.1.2.1.1.1.0"
@@ -160,7 +161,7 @@ def run_tasks(device, creds):
         text = _run("snmpget", community, version, host, SYS_DESCR, SYS_NAME)
         yield "version", True, text, None, parse_version(parse_pairs(text))
     except SnmpError as exc:
-        yield "version", False, None, str(exc), None
+        yield "version", False, None, pollerr.explain(exc, "snmp"), None
 
     try:
         raw = []
@@ -172,4 +173,4 @@ def run_tasks(device, creds):
             walks[col] = parse_pairs(text)
         yield "interfaces", True, "".join(raw), None, parse_interfaces(walks)
     except SnmpError as exc:
-        yield "interfaces", False, None, str(exc), None
+        yield "interfaces", False, None, pollerr.explain(exc, "snmp"), None

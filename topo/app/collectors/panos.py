@@ -17,6 +17,7 @@ import urllib3
 
 from .. import config
 from .. import platforms
+from .. import pollerr
 from ..parsers import panos as parser
 
 _HOST_OK = re.compile(r"[A-Za-z0-9.-]+")   # a management address or hostname, nothing that could change the URL
@@ -27,15 +28,7 @@ class ApiError(Exception):
 
 
 def _error_text(exc):
-    if isinstance(exc, requests.exceptions.SSLError):
-        return "TLS error (self-signed certificate? see TOPO_PANOS_VERIFY_TLS)"
-    if isinstance(exc, requests.exceptions.Timeout):
-        return "connection timed out"
-    if isinstance(exc, requests.exceptions.ConnectionError):
-        return "connection failed"
-    if isinstance(exc, ApiError):
-        return str(exc)
-    return "{}: {}".format(type(exc).__name__, exc)
+    return pollerr.explain(exc, "https", None, config.PANOS_TIMEOUT_S)
 
 
 def _call(session, host, data, key=None):

@@ -68,7 +68,7 @@ Classic layout, labelled Tools). The look follows the hub UI of the sibling proj
 
 ![The whole dashboard: system, services, activity, devices, events, sessions down, open conflicts, unknown LLDP neighbors and map changes](docs/img/dashboard.png)
 
-![The dashboard in four themes: Light, Monokai, Confetti Night and Rainbow](docs/img/themes.png)
+![The dashboard in four themes: Light, Monokai, Dark and Rainbow](docs/img/themes.png)
 
 ![The dashboard in four layouts: Classic, Modern, Retro 95 and MS-DOS (blue, and the Neon Green variant)](docs/img/layouts.png)
 

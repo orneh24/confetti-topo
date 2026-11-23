@@ -291,7 +291,7 @@ function loadDevice() {
             kv('site', d.site || '') + kv('key', d.key) + kv('enabled', d.enabled ? 'yes' : 'no') +
             kv('ping', d.reachable === null || d.reachable === undefined ? 'not checked' : (d.reachable ? 'up' : 'down')) +
             kv('poll interval', d.poll_interval_s + 's') + kv('poll state', d.poll_state) +
-            kv('fail count', d.fail_count) + kv('first seen', d.first_seen) + kv('last seen', d.last_seen);
+            kv('fail count', d.fail_count) + (d.last_poll_error ? kv('last poll error', d.last_poll_error) : '') + kv('first seen', d.first_seen) + kv('last seen', d.last_seen);
         document.getElementById('device-body').innerHTML = body;
         fillEditForm(d);
 
@@ -781,7 +781,7 @@ function loadStatus(d) {
         if (d.role === 'node' || !d.enabled) {
             html += chip('#device-body', 'Poll', 'not polled', 'idle');
         } else if (d.fail_count > 0) {
-            html += chip('#device-body', 'Poll', 'failing (' + d.fail_count + ')', 'bad', d.last_poll_ok ? 'last good poll ' + d.last_poll_ok : 'never polled ok');
+            html += chip('#device-body', 'Poll', 'failing (' + d.fail_count + ')', 'bad', (d.last_poll_error ? d.last_poll_error + ' - ' : '') + (d.last_poll_ok ? 'last good poll ' + d.last_poll_ok : 'never polled ok'));
         } else {
             html += chip('#device-body', 'Poll', d.last_poll_ok ? 'ok' : 'waiting', d.last_poll_ok ? 'ok' : 'idle', d.last_poll_ok || '');
         }
@@ -882,7 +882,8 @@ function pollNow() {
         var summary = [];
         for (var task in data.results) {
             if (data.results.hasOwnProperty(task)) {
-                summary.push(task + (data.results[task].ok ? ':ok' : ':fail'));
+                var r = data.results[task];
+                summary.push(task + (r.ok ? ':ok' : ':fail' + (r.error ? ' (' + r.error + ')' : '')));
             }
         }
         msg.textContent = summary.join(' ');
@@ -901,7 +902,7 @@ function pollNow() {
         loadConfigs();
         loadDrift();
     }).catch(function () {
-        msg.textContent = 'poll failed';
+        msg.textContent = 'could not reach this server to poll';
         btn.disabled = false;
     });
 }

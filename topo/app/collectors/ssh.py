@@ -14,7 +14,6 @@ import hashlib
 import time
 
 from netmiko import ConnectHandler
-from netmiko.exceptions import NetmikoAuthenticationException, NetmikoTimeoutException
 
 from .. import config
 from .. import db
@@ -23,6 +22,7 @@ from .. import events
 from .. import flap
 from .. import identity
 from .. import lldp_crawl
+from .. import pollerr
 from .. import platforms
 from .. import topology
 from . import snmp
@@ -53,12 +53,11 @@ def resolve_credentials(conn, device_id):
     }
 
 
-def _error_text(exc):
-    if isinstance(exc, NetmikoAuthenticationException):
-        return "authentication failed"
-    if isinstance(exc, NetmikoTimeoutException):
-        return "connection timed out"
-    return "{}: {}".format(type(exc).__name__, exc)
+CONNECT_TIMEOUT_S = 15
+
+
+def _error_text(exc, task=None):
+    return pollerr.explain(exc, "ssh", task, CONNECT_TIMEOUT_S)
 
 
 def _run_command(conn, task, plat):
@@ -130,7 +129,7 @@ def run_tasks(device, creds, tasks=None):
         "username": creds["username"],
         "password": creds["password"],
         "secret": creds["secret"] or "",
-        "timeout": 15,
+        "timeout": CONNECT_TIMEOUT_S,
     }
 
     try:
@@ -147,7 +146,7 @@ def run_tasks(device, creds, tasks=None):
             try:
                 output, parsed = _run_command(conn, task, plat)
             except Exception as exc:
-                yield task, False, None, _error_text(exc), None
+                yield task, False, None, _error_text(exc, task), None
             else:
                 yield task, True, output, None, parsed
     finally:

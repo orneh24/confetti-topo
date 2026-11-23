@@ -373,7 +373,7 @@ def api_list_devices():
     rows = conn.execute(
         """SELECT id, key, hostname, mgmt_ip, vendor, platform, model, serial,
                   os_version, role, site, enabled, poll_interval_s, next_poll_at,
-                  poll_state, fail_count, first_seen, last_seen, last_poll_ok,
+                  poll_state, fail_count, last_poll_error, first_seen, last_seen, last_poll_ok,
                   reachable, last_ping_at, template_name, drift_status
            FROM devices ORDER BY role, hostname"""
     ).fetchall()
@@ -643,8 +643,10 @@ ENV_DEFAULTS = {"username": "DEFAULT_SSH_USERNAME", "password": "DEFAULT_SSH_PAS
 
 @app.route("/api/settings/credentials", methods=["GET"])
 def api_get_default_credentials():
-    """The server-wide default credentials. Never returns a secret, only
-    whether each is set and where the value in use comes from."""
+    """The server-wide default credentials. Never returns a password or enable
+    secret, only whether each is set and where the value in use comes from. The
+    SNMP community saved on the Settings page is returned as text (the operator
+    asked to see it); one from the environment is not."""
     conn = db.get_db()
     saved = {r["key"]: r for r in conn.execute("SELECT key, value, updated_at FROM settings")}
     out = {"updated_at": None}
@@ -660,6 +662,7 @@ def api_get_default_credentials():
     out["username_env"] = config.DEFAULT_SSH_USERNAME
     out["snmp_version"] = (saved.get("snmp_version") or {"value": None})["value"]
     out["snmp_version_env"] = config.DEFAULT_SNMP_VERSION
+    out["snmp_community"] = (saved.get("snmp_community") or {"value": ""})["value"] or ""
     for k in CREDENTIAL_SECRETS:
         out[k + "_set"] = out[k + "_source"] != "none"
     return jsonify(out)

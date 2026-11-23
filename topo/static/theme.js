@@ -9,7 +9,6 @@ var THEMES = [
     ['light', 'Light'],
     ['monokai', 'Monokai'],
     ['terminal', 'Terminal green'],
-    ['confetti-night', 'Confetti Night'],
     ['rainbow', 'Rainbow'],
 ];
 

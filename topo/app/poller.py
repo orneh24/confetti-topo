@@ -20,6 +20,7 @@ from . import flap
 from . import history
 from . import identity
 from . import platforms
+from . import pollerr
 from .collectors import panos as panos_collector
 from .collectors import ssh as ssh_collector
 
@@ -143,6 +144,7 @@ def poll_now(device_id):
 def _poll_device(device_id):
     conn = db.connect()
     any_ok = False
+    errors = {}
     try:
         device = conn.execute("SELECT * FROM devices WHERE id = ?", (device_id,)).fetchone()
         if device is None:
@@ -178,6 +180,8 @@ def _poll_device(device_id):
             )
             conn.commit()
             results[task] = {"ok": ok, "error": error}
+            if not ok:
+                errors[task] = error or "failed"
             started = received
         return results
     finally:
@@ -185,12 +189,23 @@ def _poll_device(device_id):
         # — otherwise the device stays 'running' and is never claimed again.
         try:
             conn.rollback()
-            _finish(conn, device_id, any_ok)
+            _finish(conn, device_id, any_ok, errors)
         finally:
             conn.close()
 
 
-def _finish(conn, device_id, any_ok):
+def _reason(errors):
+    """One text for a failed poll from {task: error}: the shared text once, or the first with a count of the others."""
+    if not errors:
+        return "no result from the device"
+    texts = list(errors.values())
+    first = texts[0]
+    if all(t == first for t in texts):
+        return first
+    return "{} (and {} other task error(s))".format(first, len(set(texts)) - 1)
+
+
+def _finish(conn, device_id, any_ok, errors=None):
     now = db.sqlite_now()
     row = conn.execute(
         "SELECT poll_interval_s, fail_count FROM devices WHERE id = ?", (device_id,)
@@ -202,8 +217,9 @@ def _finish(conn, device_id, any_ok):
     if row:
         name = conn.execute("SELECT hostname FROM devices WHERE id = ?", (device_id,)).fetchone()["hostname"]
         if not any_ok and row["fail_count"] == 0:
+            reason = _reason(errors)
             events.emit(conn, device_id, "device_unreachable", "warning",
-                        "{}: polling failed".format(name))
+                        "{}: polling failed: {}".format(name, pollerr.short(reason)), reason)
         elif any_ok and row["fail_count"] > 0:
             events.emit(conn, device_id, "device_recovered", "info",
                         "{}: polling recovered".format(name),
@@ -211,7 +227,7 @@ def _finish(conn, device_id, any_ok):
 
     if any_ok:
         conn.execute(
-            """UPDATE devices SET poll_state = 'idle', fail_count = 0,
+            """UPDATE devices SET poll_state = 'idle', fail_count = 0, last_poll_error = '',
                    last_poll_ok = ?, next_poll_at = datetime(?, ? || ' seconds')
                WHERE id = ?""",
             (now, now, interval, device_id),
@@ -220,9 +236,9 @@ def _finish(conn, device_id, any_ok):
         fail_count = (row["fail_count"] if row else 0) + 1
         backoff = min(interval * (2 ** fail_count), config.POLL_MAX_BACKOFF_S)
         conn.execute(
-            """UPDATE devices SET poll_state = 'idle', fail_count = ?,
+            """UPDATE devices SET poll_state = 'idle', fail_count = ?, last_poll_error = ?,
                    next_poll_at = datetime(?, ? || ' seconds')
                WHERE id = ?""",
-            (fail_count, now, backoff, device_id),
+            (fail_count, _reason(errors) if errors else "no result from the device", now, backoff, device_id),
         )
     conn.commit()

@@ -911,7 +911,7 @@ def _():
     need(r.status_code == 200 and creds(a)["username"] == creds(b)["username"] == "bulk", "bulk apply did not reach both devices", p)
     client.post("/api/credentials/clear", json={"device_ids": [a, b]})
     need(creds(a)["username"] == "setuser" and creds(a)["password"] == "setpw", "clearing own credentials should fall back to Settings: %r" % creds(a), p)
-    # SNMP community and version follow the same order and are never returned by a GET.
+    # SNMP community and version follow the same order; only the Settings page GET returns its saved community.
     snmp = ("snmp_community", "snmp_version")
     config.DEFAULT_SNMP_COMMUNITY, config.DEFAULT_SNMP_VERSION = "envcomm", "1"
     need(creds(a, snmp) == {"snmp_community": "envcomm", "snmp_version": "1"}, "env SNMP defaults not used: %r" % creds(a, snmp), p)
@@ -920,7 +920,10 @@ def _():
     client.put("/api/devices/%d/credentials" % a, json={"snmp_community": "DEVCOMM"})
     need(creds(a, snmp)["snmp_community"] == "DEVCOMM", "device SNMP community does not beat Settings: %r" % creds(a, snmp), p)
     need(creds(b, snmp)["snmp_community"] == "SETCOMM", "another device must keep the Settings SNMP community: %r" % creds(b, snmp), p)
-    for url in ("/api/settings/credentials", "/api/credentials", "/api/devices/%d/credentials" % a):
+    # The Settings page shows its own saved community as text (asked for by the operator); nothing else returns one.
+    need(client.get("/api/settings/credentials").get_json().get("snmp_community") == "SETCOMM", "Settings does not return its saved SNMP community", p)
+    need("envcomm" not in client.get("/api/settings/credentials").get_data(as_text=True), "an environment SNMP community was returned", p)
+    for url in ("/api/credentials", "/api/devices/%d/credentials" % a):
         body = client.get(url).get_data(as_text=True)
         for secret in ("DEVCOMM", "SETCOMM"):
             need(secret not in body, "GET %s returns an SNMP community" % url, p)
@@ -1677,6 +1680,66 @@ def _():
 
 
 # ============================================================ live tier
+
+@check("R55", "a failed poll says why: plain one-line reasons per cause, no secret in any of them, the event and devices.last_poll_error carry the reason, one event per failure, success clears it")
+def _():
+    p = []
+    m, conn = fresh_db()
+    app_modules()
+    from app import pollerr
+    from app.collectors import snmp
+    import socket
+    import requests
+    from netmiko.exceptions import NetmikoAuthenticationException, NetmikoTimeoutException, ReadTimeout
+    secret = "Sup3rS3cret!"
+
+    def chained(outer, inner):
+        try:
+            try:
+                raise inner
+            except Exception:
+                raise outer
+        except Exception as e:
+            return e
+    cases = {
+        "login": NetmikoAuthenticationException("Authentication failed for user admin password " + secret),
+        "refused": chained(NetmikoTimeoutException("TCP connection to device failed.\n\nCommon causes ..."), ConnectionRefusedError(111, "refused")),
+        "timeout": chained(NetmikoTimeoutException("TCP connection to device failed."), socket.timeout("timed out")),
+        "dns": chained(NetmikoTimeoutException("DNS failure"), socket.gaierror(-2, "Name or service not known")),
+        "command": ReadTimeout("Pattern not detected: '#' in output"),
+        "negotiate": NetmikoTimeoutException("A paramiko SSHException occurred during connection creation:\n\nIncompatible ssh peer (no acceptable kex algorithm)"),
+        "enable": ValueError("Failed to enter enable mode. Please ensure you pass the 'secret' argument"),
+        "https": requests.exceptions.ConnectionError("x"),
+        "snmp": snmp.SnmpError("Timeout: No Response from 192.0.2.1"),
+    }
+    texts = {}
+    for name, exc in cases.items():
+        via = "https" if name == "https" else "snmp" if name == "snmp" else "ssh"
+        t = pollerr.explain(exc, via, "lldp", 15)
+        texts[name] = t
+        need(len(t.splitlines()) == 1 and 0 < len(t) < 300, "%s: not one short line: %r" % (name, t), p)
+        need(secret not in t, "%s: the message carries a secret" % name, p)
+    need(len(set(texts.values())) == len(texts), "two different causes gave the same text: %r" % texts, p)
+    need("rejected" in texts["login"] and "refused" in texts["refused"] and "no answer" in texts["timeout"]
+         and "resolve" in texts["dns"] and "lldp" in texts["command"] and "connection" not in texts["command"].lower()
+         and "negotiation" in texts["negotiate"] and "enable" in texts["enable"], "reasons do not name their cause: %r" % texts, p)
+
+    did = add_device(conn, "192.0.2.1", "rtr-x")
+    poller = m["poller"]
+    conn.execute("INSERT INTO poll_history (device_id, transport, task, ok, started_at, received_at) VALUES (?, 'ssh', 'version', 1, '', '')", (did,))
+    conn.commit()
+    poller._finish(conn, did, False, {"version": texts["timeout"], "lldp": texts["timeout"]})
+    ev = conn.execute("SELECT subject, detail FROM events WHERE kind = 'device_unreachable'").fetchall()
+    need(len(ev) == 1 and "no answer" in ev[0]["subject"] and "no answer" in ev[0]["detail"], "unreachable event lacks the reason: %r" % [tuple(r) for r in ev], p)
+    poller._finish(conn, did, False, {"version": texts["login"]})
+    need(conn.execute("SELECT COUNT(*) FROM events WHERE kind = 'device_unreachable'").fetchone()[0] == 1, "a second failure wrote a second event", p)
+    last = conn.execute("SELECT last_poll_error FROM devices WHERE id = ?", (did,)).fetchone()[0]
+    need("rejected" in last, "last_poll_error was not updated by the second failure: %r" % last, p)
+    poller._finish(conn, did, True, {})
+    need(conn.execute("SELECT last_poll_error FROM devices WHERE id = ?", (did,)).fetchone()[0] == "", "a good poll did not clear last_poll_error", p)
+    conn.close()
+    return p
+
 
 @check("R32", "routes: real-output fixtures parse, an empty table deletes nothing, one summary event per changed poll, none on baseline")
 def _():

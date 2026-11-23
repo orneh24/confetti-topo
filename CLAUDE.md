@@ -267,7 +267,7 @@ These came over on 2026-11-21 as the same code, `BUTLER_*` renamed to `TOPO_*`.
 - **Alerting was removed on 2026-11-23** (`alerts.py`, the Alerts page, `/api/alert-rules*`, `TOPO_ALERTS_*`, `TOPO_SMTP_*`). An older
   database keeps its unused `alert_rules` table and `events.alerted` column (constraint 34: nothing is dropped).
 - **SNMP** (`collectors/snmp.py`): see Architecture. Device and Settings credentials carry `snmp_community` and `snmp_version`
-  (same order as the SSH ones, never returned by a GET, constraint 31).
+  (same order as the SSH ones; only the Settings page shows its own saved community, as plain text, constraint 31).
 - **vCenter import** (`POST /api/discover/vcenter`, `collectors/vcenter.py`): inventory only, through `identity.ingest`. Never tested
   against a real vCenter; it has no page, only the API.
 
@@ -449,7 +449,7 @@ topo/
   templates/           — base.html (head, header/nav, theme + layout pickers, footer, Retro taskbar)
                          + dashboard (widgets: system, services, activity, devices, events, sessions down, open conflicts, unknown LLDP neighbors, map changes; the Devices widget has click-to-sort headings and a Columns chooser, kept in `confetti-topo-dashboard-devices`; every widget has a Collapse / Expand button (fold.js), and dashgrid.js re-runs Auto sort when one is folded or opened), devices, device, changes (Recent changes: filter bar, summary tiles, sortable events table with type/change/before/after from `events.describe()`, banded per device, details pane, right-click menu), topology, syslog, conflicts, settings, ipam, alerts, templates_editor (CodeMirror in static/vendor/codemirror), find, backups, each `{% extends "base.html" %}`
   static/theme.css     — the ONE place colours live (Dark, Light, Monokai,
-                         Terminal green, Confetti Night, Rainbow). Pages must not define their own :root colours
+                         Terminal green, Rainbow). Pages must not define their own :root colours
   static/layout.css    — Classic, Modern, Retro 95, MS-DOS (MS-DOS has two colour variants, DOS Blue and Neon Green: `data-variant="green"` on `:root`, a header dropdown shown only in MS-DOS, saved in `confetti-topo-dos-variant`; it also has a keyboard layer:
                          base.html's .dos-menubar / .dos-fkeys / .dos-help, a row cursor, and one keydown IIFE at
                          the end of theme.js that does nothing in any other layout; same block as in confetti-traffic). Loaded AFTER theme.css
@@ -506,6 +506,8 @@ Keep the two in step; `confetti-interop-checker` reports drift.
 - Keep output minimalistic and use simple English.
 - Do not output large code snippets. Point at `file:line` and say what changed; the file itself is the record.
 - Do not display code changes in output unless asked to.
+- Always check a UI change in a real browser (Claude in Chrome, or the `dashboard-ui-checker` agent) before saying it is done:
+  load the page, use the changed control, and read the console for errors. A regression run or a code read is not enough.
 - Always restart the dev server when a change needs it to take effect (the app
   reads templates and Python code only at start), and check that the running
   copy serves the change, before telling the user to look at it.
@@ -629,7 +631,7 @@ Keep the two in step; `confetti-interop-checker` reports drift.
 30. *(Removed 2026-11-23 with the alerting feature; the number is kept so the others keep theirs. R46 and R47 are retired.)*
 31. **SNMP is read-only and refuses what it cannot do safely.** `snmpget` / `snmpwalk` only, v1 and v2c (v3 fails with a clear message), the host
     must be an IP address before it reaches a subprocess, a missing tool names the apk package. The community is a credential: per device, then Settings,
-    then `TOPO_SNMP_COMMUNITY`, and never in a GET. Checked by R48 (and R28 for the order).
+    then `TOPO_SNMP_COMMUNITY`. It is returned by one GET only: `/api/settings/credentials` gives the community saved on the Settings page (a plain text field, not a password field, by the operator's choice), never an environment one, never a device's own. Checked by R48 (and R28 for the order).
 32. **Drift is containment by parent chain, not text equality.** Every line the rendered template produces must be in the latest backup under the
     same parent; extra lines in the running config are not drift, secret lines are skipped, and a template `no X` is met when `X` is absent.
     `config_drift` / `config_compliant` are events only on a change between the two, not on the first evaluation. Checked by R49.
@@ -647,6 +649,7 @@ Keep the two in step; `confetti-interop-checker` reports drift.
     `topo-pre-restore-<time>.db` before copying in. The `topo.env` export blanks every key with PASS, SECRET, TOKEN, COMMUNITY or KEY. Checked by R53.
 37. **Find and Test login only read.** Neither writes a row, an alias, an event or a poll state; Find resolves an owner at query time only
     (constraint 12), Test login runs the `version` task alone and never on `role='node'`. Checked by R54.
+38. **A failed poll says why, and never leaks a secret.** `app/pollerr.py` `explain()` is the one place that turns a caught error (Netmiko, paramiko, requests, net-snmp) into a one-line reason plus advice: login rejected, port refused, no answer within N s, no route, DNS, command did not finish (a `ReadTimeout` is not a connection problem), SSH negotiation, enable secret, TLS, API login, SNMP. Login errors are fixed texts; the library's own text is used only for negotiation and unknown errors, cut to one line. `poller._finish(conn, id, any_ok, errors)` writes the reason into the one `device_unreachable` event (subject carries the first sentence, detail the whole text; still once, constraint 11) and into `devices.last_poll_error` on every failed poll; a good poll clears it. The Devices tooltip, device page and topology toast show it. Checked by R55.
 
 ## Regression gate
 
@@ -659,8 +662,8 @@ container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R
 (not Dropbear) setup; `R28` the credential order (device > Settings > env), that no GET returns a secret and
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
 the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti project's URL; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll; `R39` is the ruff `F` lint over `topo/` and `dev/` (not a constraint check); `R40` (constraint 24) the shared syslog parser and insert rule, `R40-sync` that `syslog_core.py`, `syslog_pull.py` and `syslog_cases.json` are byte-identical in both repos (`NOT RUN` if confetti-traffic is not next to this repo); `R41` (constraint 25) the syslog poll trigger; `R42` (constraint 26) the syslog pull; `R43`..`R50` (constraints 27..33) the checks that came with the former butler's features: template sandbox, the open `/configs/` pull, config backups,
-SNMP, drift and interface error history; `R51` (constraint 34) the in-place upgrade of an old database; `R52`..`R54` (constraints 35..37) traffic rates, database backup/restore,
-and Find / Test login storing nothing; the next constraint (38) takes `R55`. Output is one line per check
+SNMP, drift and interface error history; `R51` (constraint 34) the in-place upgrade of an old database; `R52`..`R55` (constraints 35..38) traffic rates, database backup/restore,
+Find / Test login storing nothing, and failed-poll reasons (R55); the next constraint (39) takes `R56`. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

@@ -88,7 +88,7 @@ EVENTS = [
     (3, 1, "bgp_state", "info", "lab-rtr-b BGP peer 198.51.100.7: Established", "Active -> Established"),
     (11, 2, "bgp_peer_added", "info", "lab-rtr-c BGP peer 198.51.100.8: Idle (Admin)", ""),
     (24, 0, "lldp_neighbor_added", "info", "lab-rtr-a GigabitEthernet3: neighbor lab-rtr-c", "remote port GigabitEthernet3"),
-    (47, 2, "device_unreachable", "warning", "lab-rtr-c: polling failed", ""),
+    (47, 2, "device_unreachable", "warning", "lab-rtr-c: polling failed: no answer on SSH (port 22) within 15 s", "no answer on SSH (port 22) within 15 s. The device may be down, the IP wrong, or a firewall drops the traffic"),
     (95, 1, "ospf_state", "warning", "lab-rtr-b OSPF peer 10.255.0.1: EXSTART", "FULL -> EXSTART"),
     (6, 1, "bgp_reset", "warning", "lab-rtr-b BGP peer 198.51.100.7: session reset", "07:10:02 -> 00:40:12"),
     (4, 1, "bgp_flapping", "warning", "lab-rtr-b BGP peer 198.51.100.7: flapping", "3 changes in 60 min"),
@@ -141,8 +141,9 @@ def main():
         failing = idx == 2
         conn.execute(
             "UPDATE devices SET poll_state='idle', next_poll_at='2099-01-01 00:00:00', "
-            "fail_count=?, last_poll_ok=?, reachable=? WHERE id=?",
-            (3 if failing else 0, ts(180) if failing else now, 0 if failing else 1, dev_id))
+            "fail_count=?, last_poll_ok=?, reachable=?, last_poll_error=? WHERE id=?",
+            (3 if failing else 0, ts(180) if failing else now, 0 if failing else 1,
+             "no answer on SSH (port 22) within 15 s. The device may be down, the IP wrong, or a firewall drops the traffic" if failing else "", dev_id))
         for name, desc, ip, plen in INTERFACES[idx]:
             conn.execute(
                 "INSERT INTO interfaces (device_id, name, description, ip, prefix_len, network, "
