@@ -76,21 +76,86 @@ def run_once():
     return summary
 
 
+_traffic_status = {"last_run": None, "last_error": None, "devices": 0, "new": 0, "conflicts": 0}
+TRAFFIC_INTERVAL_KEY = "traffic_import_interval_min"
+
+
+def traffic_status():
+    return dict(_traffic_status)
+
+
+def traffic_interval_min(conn):
+    """Minutes between automatic imports from the saved Confetti Traffic URL; 0 = off."""
+    v = db.get_setting(conn, TRAFFIC_INTERVAL_KEY)
+    return int(v) if v and v.isdigit() else 0
+
+
+def import_traffic(conn):
+    """Import the node fleet of the hub saved on the Settings page (settings key url_traffic).
+    Raises ValueError when no URL is saved. Does not commit. Returns (device_ids, conflicts)."""
+    url = db.get_setting(conn, "url_traffic")
+    if not url:
+        raise ValueError("no Confetti Traffic URL is saved on the Settings page")
+    before = _known_ids(conn)
+    device_ids, conflicts = confetti.discover(conn, url)
+    _announce_new(conn, before, device_ids, "confetti")
+    _traffic_status.update(devices=len(device_ids), new=len(set(device_ids) - before), conflicts=len(conflicts),
+                           last_run=db.iso(db.sqlite_now()), last_error=None)
+    return device_ids, conflicts
+
+
+def _traffic_tick():
+    """The timer's import: own connection and transaction, status kept for the Settings page."""
+    conn = db.connect()
+    try:
+        env_same = config.DISCOVERY_CONFETTI_URL and config.DISCOVERY_CONFETTI_URL.rstrip("/") == (db.get_setting(conn, "url_traffic") or "").rstrip("/")
+        if env_same:
+            return   # the env source already imports this hub
+        import_traffic(conn)
+        conn.commit()
+        _traffic_status["last_error"] = None
+    except Exception as exc:
+        conn.rollback()
+        _traffic_status["last_error"] = str(exc)
+    finally:
+        _traffic_status["last_run"] = db.iso(db.sqlite_now())
+        conn.close()
+
+
 def _loop():
     time.sleep(20)   # let the server finish starting before the first run
+    last_env = 0.0
+    last_traffic = 0.0
     while True:
+        now = time.time()
         try:
-            run_once()
+            if config.DISCOVERY_INTERVAL_S > 0 and now - last_env >= max(60, config.DISCOVERY_INTERVAL_S):
+                last_env = now
+                run_once()
+            conn = db.connect()
+            try:
+                minutes = traffic_interval_min(conn)
+                has_url = bool(db.get_setting(conn, "url_traffic"))
+            finally:
+                conn.close()
+            if minutes > 0 and has_url and now - last_traffic >= minutes * 60:
+                last_traffic = now
+                _traffic_tick()
         except Exception as exc:
             _status["last_error"] = str(exc)
-        time.sleep(max(60, config.DISCOVERY_INTERVAL_S))
+        time.sleep(60)
 
 
 def start():
-    """Idempotent; does nothing unless an interval is configured."""
+    """Idempotent; does nothing unless an env interval or the saved import interval is set (the Settings PUT calls this again)."""
     global _thread
     if config.DISCOVERY_INTERVAL_S <= 0:
-        return
+        conn = db.connect()
+        try:
+            if traffic_interval_min(conn) <= 0:
+                return
+        finally:
+            conn.close()
     with _start_lock:
         if _thread is not None and _thread.is_alive():
             return

@@ -1271,6 +1271,46 @@ def api_discover_confetti():
     return jsonify({"status": "ok", "device_ids": device_ids, "conflicts": conflicts})
 
 
+@app.route("/api/discover/traffic", methods=["POST"])
+def api_discover_traffic():
+    """Import the node fleet from the Confetti Traffic URL saved on the Settings page (no body)."""
+    conn = db.get_db()
+    try:
+        device_ids, conflicts = discovery.import_traffic(conn)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        conn.rollback()
+        return jsonify({"error": "confetti-traffic hub request failed: {}".format(exc)}), 502
+    conn.commit()
+    return jsonify({"status": "ok", "device_ids": device_ids, "conflicts": conflicts})
+
+
+def traffic_import_state(conn):
+    return {"url": db.get_setting(conn, "url_traffic") or "",
+            "interval_min": discovery.traffic_interval_min(conn),
+            "status": discovery.traffic_status()}
+
+
+@app.route("/api/settings/traffic-import", methods=["GET"])
+def api_get_traffic_import():
+    return jsonify(traffic_import_state(db.get_db()))
+
+
+@app.route("/api/settings/traffic-import", methods=["PUT"])
+def api_put_traffic_import():
+    """Body {"interval_min": 0 or 5..1440}. 0 = no automatic import. A bad value changes nothing."""
+    data = request.get_json(force=True, silent=True)
+    v = data.get("interval_min") if isinstance(data, dict) else None
+    if isinstance(v, bool) or not isinstance(v, int) or not (v == 0 or 5 <= v <= 1440):
+        return jsonify({"error": "interval_min must be 0 (off) or 5 to 1440 minutes"}), 400
+    conn = db.get_db()
+    db.set_setting(conn, discovery.TRAFFIC_INTERVAL_KEY, str(v))
+    conn.commit()
+    discovery.start()   # idempotent; starts the timer thread when the interval is now above 0
+    return jsonify(traffic_import_state(conn))
+
+
 @app.route("/api/events", methods=["GET"])
 def api_events():
     """Change events from the poller (events.py), newest first.

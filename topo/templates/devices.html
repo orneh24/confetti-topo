@@ -58,6 +58,7 @@ td.poll-err { color: var(--red); }
             <form class="inline" id="confetti-form" style="margin-bottom:8px">
                 <input type="text" name="hub_url" placeholder="Confetti Traffic IP or URL" style="width:220px">
                 <button type="submit">Import Confetti Traffic nodes</button>
+                <button type="button" id="confetti-saved-btn" style="display:none"></button>
             </form>
             <form class="inline" id="seedfile-form">
                 <input type="text" name="path" placeholder="seed/devices.yaml" style="width:220px">
@@ -415,6 +416,15 @@ document.getElementById('confetti-form').addEventListener('submit', function (ev
     var hubUrl = ev.target.hub_url.value.trim();
     if (!hubUrl) { return; }
     runDiscover('/api/discover/confetti', { hub_url: hubUrl }, 'Confetti Traffic import');
+});
+
+// The URL saved on the Settings page: one click imports from it.
+fetch('/api/settings/links').then(function (r) { return r.json(); }).then(function (l) {
+    if (!l.traffic) { return; }
+    var b = document.getElementById('confetti-saved-btn');
+    b.textContent = 'Import from saved URL (' + l.traffic + ')';
+    b.style.display = '';
+    b.onclick = function () { runDiscover('/api/discover/traffic', {}, 'Confetti Traffic import'); };
 });
 
 document.getElementById('seedfile-form').addEventListener('submit', function (ev) {

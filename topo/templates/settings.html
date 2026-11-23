@@ -36,9 +36,18 @@ h3.sub-head { font-size: 13px; margin: 14px 0 6px; padding-top: 10px; border-top
                 <div class="form-grid">
                     <label for="l-traffic" data-ctx="link" data-field="traffic">Confetti Traffic URL</label><input id="l-traffic" name="traffic" placeholder="http://confetti-hub.example">
                 </div>
-                <div class="hint">A small button for the URL appears at the right of the top menu on every page and opens Confetti Traffic in a new tab. Only http:// or https://. Leave the field empty to remove the button. The server connects to this address only for the syslog pull below, and only if you switch that on.</div>
+                <div class="hint">A small button for the URL appears at the right of the top menu on every page and opens Confetti Traffic in a new tab. Only http:// or https://. Leave the field empty to remove the button. The server connects to this address only for the node import and the syslog pull below, and only when you click Import or switch one on.</div>
                 <button type="submit" class="primary">Save</button>
                 <span class="msg" id="links-msg"></span>
+            </form>
+            <h3 class="sub-head">Import nodes from Confetti Traffic</h3>
+            <div class="hint" id="ti-status">loading</div>
+            <form id="ti-form" onsubmit="saveTrafficImport(); return false;" autocomplete="off">
+                <button type="button" id="ti-now" onclick="importTrafficNow()">Import nodes now</button>
+                <label>Re-import every <input name="interval_min" type="number" min="0" max="1440" value="0" style="width:80px"> minutes (0 = off, otherwise 5 to 1440)</label>
+                <button type="submit" class="primary">Save</button>
+                <span class="msg" id="ti-msg"></span>
+                <div class="hint">Adds the hub's nodes as inventory (role node), the same as the Import on the Devices page, from the URL above. Nodes already known are updated, not duplicated.</div>
             </form>
             <h3 class="sub-head">Syslog from Confetti Traffic</h3>
             <div class="hint" id="sp-status">loading</div>
@@ -238,7 +247,45 @@ function saveLinks() {
         return r.json().then(function (data) { return { ok: r.ok, data: data }; });
     }).then(function (res) {
         say('links-msg', res.ok, res.ok ? 'saved' : (res.data.error || 'save failed'));
-        if (res.ok) { loadLinks(); ConfettiLinks.refresh(); }
+        if (res.ok) { loadLinks(); loadTrafficImport(); ConfettiLinks.refresh(); }
+    });
+}
+
+function loadTrafficImport() {
+    fetch('/api/settings/traffic-import').then(function (r) { return r.json(); }).then(function (s) {
+        var f = document.getElementById('ti-form');
+        f.interval_min.value = s.interval_min;
+        document.getElementById('ti-now').disabled = !s.url;
+        var st = s.status, t = document.getElementById('ti-status');
+        t.textContent = !s.url ? 'Set the URL above first.' :
+            st.last_error ? 'Last automatic import failed: ' + st.last_error :
+            st.last_run ? 'Last import ' + new Date(st.last_run).toLocaleString() + ': ' + st.devices + ' node(s), ' + st.new + ' new, ' + st.conflicts + ' conflict(s).' :
+            'No import since the server started.';
+    });
+}
+
+function importTrafficNow() {
+    var btn = document.getElementById('ti-now');
+    btn.disabled = true;
+    fetch('/api/discover/traffic', { method: 'POST' }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+    }).then(function (res) {
+        var d = res.data;
+        say('ti-msg', res.ok, res.ok ? 'imported ' + (d.device_ids || []).length + ' node(s)' + ((d.conflicts || []).length ? ', ' + d.conflicts.length + ' conflict(s), see Conflicts' : '') : (d.error || 'import failed'));
+        loadTrafficImport();
+    });
+}
+
+function saveTrafficImport() {
+    var f = document.getElementById('ti-form');
+    fetch('/api/settings/traffic-import', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interval_min: parseInt(f.interval_min.value, 10) }),
+    }).then(function (r) {
+        return r.json().then(function (data) { return { ok: r.ok, data: data }; });
+    }).then(function (res) {
+        say('ti-msg', res.ok, res.ok ? 'saved' : (res.data.error || 'save failed'));
+        loadTrafficImport();
     });
 }
 
@@ -455,7 +502,7 @@ document.documentElement.setAttribute('data-ctx', 'page');
 ctxMenu.register('page', function (el, ev) {
     if (ev.target.closest('.header, .side-nav, .taskbar, .dos-menubar, .dos-fkeys, .dos-help, .page-footer')) { return null; }
     return { title: 'Settings', items: [
-        { label: 'Reload all sections', action: function () { loadDefaults(); loadLinks(); loadSyslogPull(); loadLldp(); loadFlap(); loadDevices(); } },
+        { label: 'Reload all sections', action: function () { loadDefaults(); loadLinks(); loadTrafficImport(); loadSyslogPull(); loadLldp(); loadFlap(); loadDevices(); } },
         { label: 'Select all devices', action: function () { selectAll(true); } },
         { label: 'Unselect all devices', action: function () { selectAll(false); } },
     ] };
@@ -463,6 +510,7 @@ ctxMenu.register('page', function (el, ev) {
 
 loadDefaults();
 loadLinks();
+loadTrafficImport();
 loadSyslogPull();
 loadLldp();
 loadFlap();

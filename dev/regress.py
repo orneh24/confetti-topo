@@ -2176,6 +2176,31 @@ def _():
     js = open("topo/static/confetti-links.js", encoding="utf-8").read()
     need("innerHTML" not in js and "document.write" not in js, "confetti-links.js must not build HTML from the URL", p)
     need("noopener" in js and "_blank" in js and "https?" in js, "confetti-links.js must open in a new tab with noopener and re-check http(s)", p)
+    # Node import from the saved URL: only on a click or an opt-in interval, only from that URL, a bad value changes nothing.
+    ti = "/api/settings/traffic-import"
+    from app import discovery as disc
+    calls = []
+    real, real_start = disc.confetti.discover, disc.start
+    disc.confetti.discover = lambda c, u: (calls.append(u) or ([], []))
+    disc.start = lambda: None   # saving an interval would start the real timer thread
+    try:
+        r = client.post("/api/discover/traffic")
+        need(r.status_code == 400 and not calls, "an import with no saved URL must be refused (400) and not connect: %s %r" % (r.status_code, calls), p)
+        need(client.get(ti).get_json()["interval_min"] == 0, "the automatic import must be off by default", p)
+        for v in (-1, 3, 2000, "x", None, True, 5.5):
+            r = client.put(ti, json={"interval_min": v})
+            need(r.status_code == 400 and client.get(ti).get_json()["interval_min"] == 0, "interval %r must be refused and change nothing" % (v,), p)
+        need(client.put(ti, json={"interval_min": 10}).get_json()["interval_min"] == 10, "interval 10 must be saved", p)
+        client.put(ti, json={"interval_min": 0})
+        client.put(url, json={"traffic": "http://hub.example:8080"})
+        r = client.post("/api/discover/traffic")
+        need(r.status_code == 200 and calls == ["http://hub.example:8080"], "the import must use exactly the saved URL: %s %r" % (r.status_code, calls), p)
+        calls.clear()
+        disc._traffic_tick()   # what the timer runs; the loop itself skips it while the interval is 0
+        src = open("topo/app/discovery.py", encoding="utf-8").read()
+        need("minutes > 0 and has_url" in src, "the timer must import only when the interval is above 0 and a URL is saved", p)
+    finally:
+        disc.confetti.discover, disc.start = real, real_start
     return p
 
 

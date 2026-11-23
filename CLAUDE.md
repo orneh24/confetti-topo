@@ -410,7 +410,7 @@ There is no Packer template: topo is installed once per environment, so the buil
 | Manual | `POST /api/devices` | Operator-entered, from the Devices page |
 | Subnet sweep | `POST /api/discover/sweep` | TCP connect to port 22 only (a firewall with SSH off must be added by hand or seed file) — coarse on purpose; the poller's own `version` task does real identification next cycle |
 | YAML seed file | `POST /api/discover/seedfile` | `seed/devices.yaml.sample` shows the shape |
-| confetti-traffic import | `POST /api/discover/confetti` | `GET <hub_url>/endpoints`, imported as `role='node'`, `vendor='alpine'`, `platform='confetti_node'` — managed through the hub, never SSH-polled. `site` is the endpoint's `group_name`, which is confetti-traffic's *effective* group: a group set on its dashboard overrides what the node registers, so an override changes `site` on the next import |
+| confetti-traffic import | `POST /api/discover/confetti` (typed URL) or `POST /api/discover/traffic` (the URL saved in Settings; Settings can also re-import on a timer, `GET\|PUT /api/settings/traffic-import`) | `GET <hub_url>/endpoints`, imported as `role='node'`, `vendor='alpine'`, `platform='confetti_node'` — managed through the hub, never SSH-polled. `site` is the endpoint's `group_name`, which is confetti-traffic's *effective* group: a group set on its dashboard overrides what the node registers, so an override changes `site` on the next import |
 | LLDP crawl | `POST /api/lldp/adopt` | A neighbor with an unknown management IP, added inventory-only (polling off) |
 
 ## Project Structure
@@ -590,7 +590,7 @@ Keep the two in step; `confetti-interop-checker` reports drift.
     keeps the Traffic URL (`settings` key `url_traffic`, `GET|PUT /api/settings/links`); a value that is not
     http:// or https:// with a host, or has a user:password, whitespace or markup characters, is a 400 and changes nothing (all or nothing); an empty
     value clears. `static/confetti-links.js` (the same file as in confetti-traffic) turns it into a small header button that
-    open in a new tab with `noopener`, re-checks http(s) and never builds HTML from the URL. The server connects to one only for the syslog pull (constraint 26), opt-in per server, and never otherwise. Checked by R36.
+    open in a new tab with `noopener`, re-checks http(s) and never builds HTML from the URL. The server connects to one only for the syslog pull (constraint 26, opt-in per server) and the node import (`POST /api/discover/traffic`, a click, or the opt-in `traffic_import_interval_min` timer, 0 = off, `discovery.import_traffic`), and never otherwise. Checked by R36.
 22. **BGP flap detection works only from what a poll already read, counts only changes to or from Established or a timer reset of an
     Established peer, and is silent on a first poll.** A peer cycling Idle/Active/Connect never flaps. Flapping = `TOPO_FLAP_COUNT`
     changes inside `TOPO_FLAP_WINDOW_S`; one `bgp_flapping` event at the start and one `bgp_flap_stopped` at the end, never one per
