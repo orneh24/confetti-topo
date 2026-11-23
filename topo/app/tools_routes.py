@@ -202,11 +202,11 @@ def api_device_config_diff(device_id):
 def api_ipam_addresses():
     conn = db.get_db()
     rows = conn.execute(
-        """SELECT d.id AS device_id, d.hostname, i.name AS interface, i.ip, i.prefix_len,
-                  i.network, i.vrf, i.admin_status, i.oper_status, i.last_seen
+        """SELECT d.id AS device_id, d.hostname, d.site, i.name AS interface, i.ip, i.prefix_len,
+                  i.network, {} AS vrf, i.admin_status, i.oper_status, i.last_seen
            FROM interfaces i JOIN devices d ON d.id = i.device_id
            WHERE i.ip IS NOT NULL
-           ORDER BY i.network, i.ip"""
+           ORDER BY i.network, i.ip""".format(ipam.VRF_SQL)
     ).fetchall()
     out = []
     for r in rows:
@@ -218,22 +218,30 @@ def api_ipam_addresses():
 
 @bp.route("/api/ipam/prefixes", methods=["GET"])
 def api_ipam_prefixes():
-    """Distinct networks in use, with how many interfaces/devices sit on each, and how many host addresses are
-    left: size (usable hosts), used (distinct interface addresses seen in it), free = size - used."""
+    """One row per (VRF, network) in use: how many interfaces / devices sit on it, size (usable hosts), used (distinct
+    interface addresses seen in it), free = size - used, util = used / size in percent, how many interfaces are up,
+    the sites of its devices, and two marks: dup (an address held by more than one interface in it, live) and overlap
+    (named by the last analysis' overlap findings). The VRF is the one of the interface's connected route (ipam.VRF_SQL)."""
     conn = db.get_db()
     rows = conn.execute(
-        """SELECT i.network, COUNT(*) AS interfaces, COUNT(DISTINCT i.device_id) AS devices,
-                  COUNT(DISTINCT i.ip) AS used
-           FROM interfaces i
-           WHERE i.network IS NOT NULL
-           GROUP BY i.network
-           ORDER BY i.network"""
+        """SELECT vrf, network, COUNT(*) AS interfaces, COUNT(DISTINCT device_id) AS devices, COUNT(DISTINCT ip) AS used,
+                  SUM(oper_status = 'up') AS up, GROUP_CONCAT(DISTINCT NULLIF(site, '')) AS sites
+           FROM (SELECT {} AS vrf, i.network, i.device_id, i.ip, i.oper_status, d.site
+                 FROM interfaces i JOIN devices d ON d.id = i.device_id WHERE i.network IS NOT NULL) x
+           GROUP BY vrf, network
+           ORDER BY network, vrf""".format(ipam.VRF_SQL)
     ).fetchall()
+    overlapping = ipam.overlapping_networks(conn)
     out = []
     for r in rows:
         d = dict(r)
+        d["sites"] = sorted(d["sites"].split(",")) if d["sites"] else []
+        d["up"] = d["up"] or 0
         d["size"] = ipam.usable_hosts(d["network"])
         d["free"] = None if d["size"] is None else max(0, d["size"] - d["used"])
+        d["util"] = None if not d["size"] else min(100, round(100.0 * d["used"] / d["size"]))
+        d["dup"] = d["interfaces"] > d["used"]
+        d["overlap"] = d["network"] in overlapping
         out.append(d)
     return jsonify(out)
 

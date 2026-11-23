@@ -1836,6 +1836,53 @@ def _():
     return p
 
 
+@check("R57", "IPAM prefixes: the VRF comes from the interface's connected route, the same address in two VRFs is no duplicate, rows carry use %, status, sites and the duplicate / overlap marks")
+def _():
+    p = []
+    m, conn = fresh_db()
+    a = add_device(conn, "192.0.2.1", "rt-a")
+    b = add_device(conn, "192.0.2.2", "rt-b")
+    conn.execute("UPDATE devices SET site = 'north' WHERE id = ?", (a,))
+    now = m["db"].sqlite_now()
+    for dev in (a, b):
+        conn.execute("INSERT INTO interfaces (device_id, name, ip, prefix_len, network, oper_status, last_seen) "
+                     "VALUES (?, 'Gi1', '10.9.0.1', 24, '10.9.0.0/24', 'up', ?)", (dev, now))
+    conn.execute("INSERT INTO interfaces (device_id, name, ip, prefix_len, network, oper_status, last_seen) "
+                 "VALUES (?, 'Gi2', '10.9.0.129', 25, '10.9.0.128/25', 'down', ?)", (b, now))
+
+    def route(dev, vrf):
+        conn.execute("INSERT INTO routes (device_id, vrf, kind, prefix, protocol, interface, last_seen) "
+                     "VALUES (?, ?, 'rib', '10.9.0.0/24', 'connected', 'Gi1', ?)", (dev, vrf, now))
+    route(a, "blue")
+    route(b, "red")
+    conn.commit()
+    client = m["appmod"].app.test_client()
+
+    def findings():
+        client.post("/api/ipam/analyze")
+        return client.get("/api/ipam/findings").get_json()
+    kinds = [f["kind"] for f in findings()]
+    need("duplicate_ip" not in kinds, "the same address in two VRFs was reported as a duplicate: %r" % kinds, p)
+    rows = client.get("/api/ipam/prefixes").get_json()
+    byk = {(r["vrf"], r["network"]): r for r in rows}
+    need(("blue", "10.9.0.0/24") in byk and ("red", "10.9.0.0/24") in byk, "one row per VRF expected: %r" % list(byk), p)
+    r = byk.get(("blue", "10.9.0.0/24"), {})
+    need(r.get("sites") == ["north"] and r.get("util") == 0 and r.get("size") == 254 and r.get("up") == 1 and not r.get("dup"),
+         "blue row fields: %r" % r, p)
+    low = byk.get(("default", "10.9.0.128/25"), {})
+    need(low.get("up") == 0 and low.get("interfaces") == 1 and low.get("util") == 1, "a shut interface with no connected route is in the global table: %r" % low, p)
+    # both interfaces in the same VRF: now it is a duplicate, and the row says so
+    conn.execute("UPDATE routes SET vrf = 'blue' WHERE device_id = ?", (b,))
+    conn.commit()
+    kinds = [f["kind"] for f in findings()]
+    need("duplicate_ip" in kinds, "the same address twice in one VRF was not reported: %r" % kinds, p)
+    rows = client.get("/api/ipam/prefixes").get_json()
+    need([x for x in rows if x["vrf"] == "blue" and x["network"] == "10.9.0.0/24"][0]["dup"] is True, "the duplicate mark is missing", p)
+    need(client.get("/api/ipam/addresses").get_json()[0].get("vrf") in ("blue", "default"), "addresses carry no vrf", p)
+    conn.close()
+    return p
+
+
 @check("R32", "routes: real-output fixtures parse, an empty table deletes nothing, one summary event per changed poll, none on baseline")
 def _():
     p = []

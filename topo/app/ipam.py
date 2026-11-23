@@ -9,8 +9,15 @@ off structured data rather than re-parsing anything.
 """
 
 import ipaddress
+import re
 
 from . import db
+
+# The VRF an interface is in is not read from the device (interfaces.vrf is never filled); it is the VRF of the connected
+# route the device lists for that interface (`show ip route vrf *`, the routes task). No such route (not polled yet,
+# shut port): the global table.
+VRF_SQL = ("COALESCE((SELECT r.vrf FROM routes r WHERE r.device_id = i.device_id AND r.kind = 'rib' "
+           "AND r.protocol = 'connected' AND r.interface = i.name LIMIT 1), 'default')")
 
 
 def analyze(conn):
@@ -22,9 +29,9 @@ def analyze(conn):
     """
     now = db.sqlite_now()
     rows = conn.execute(
-        """SELECT i.device_id, i.name, i.ip, i.prefix_len, i.network, d.hostname
+        """SELECT i.device_id, i.name, i.ip, i.prefix_len, i.network, d.hostname, {} AS vrf
            FROM interfaces i JOIN devices d ON d.id = i.device_id
-           WHERE i.ip IS NOT NULL"""
+           WHERE i.ip IS NOT NULL""".format(VRF_SQL)
     ).fetchall()
 
     findings = []
@@ -78,6 +85,8 @@ def _find_overlaps(rows, now):
         for net_b, row_b in networks[i + 1:]:
             if row_a["device_id"] == row_b["device_id"]:
                 continue
+            if row_a["vrf"] != row_b["vrf"]:   # the same addresses in two VRFs are not a clash
+                continue
             if net_a == net_b:
                 continue
             if net_a.overlaps(net_b):
@@ -94,11 +103,25 @@ def _find_duplicate_ips(rows, now):
     by_ip = {}
     for row in rows:
         if row["ip"]:
-            by_ip.setdefault(row["ip"], []).append(row)
+            by_ip.setdefault((row["vrf"], row["ip"]), []).append(row)
 
     out = []
-    for ip, group in by_ip.items():
+    for (vrf, ip), group in by_ip.items():
         if len(group) > 1:
             labels = ", ".join(_label(g) for g in group)
-            out.append((now, "duplicate_ip", ip, None, "{} assigned to: {}".format(ip, labels)))
+            out.append((now, "duplicate_ip", ip, None, "{} assigned to: {}{}".format(
+                ip, labels, "" if vrf == "default" else " (vrf {})".format(vrf))))
+    return out
+
+
+_OVERLAP_RE = re.compile(r"^(\S+) and (\S+) overlap")
+
+
+def overlapping_networks(conn):
+    """The networks named by the last analysis' overlap findings, for the Prefixes table's warning mark."""
+    out = set()
+    for r in conn.execute("SELECT detail FROM ipam_findings WHERE kind = 'overlap'"):
+        m = _OVERLAP_RE.match(r["detail"] or "")
+        if m:
+            out.update(m.groups())
     return out

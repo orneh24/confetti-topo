@@ -1,5 +1,13 @@
 {% extends "base.html" %}
 {% block title %}IPAM{% endblock %}
+{% block head %}
+<style>
+.ubar { display: inline-block; width: 64px; height: 8px; background: var(--bg-muted); border: 1px solid var(--border); vertical-align: middle; margin-right: 6px; }
+.ubar i { display: block; height: 100%; background: var(--green); }
+.ubar.warn i { background: var(--yellow); }
+.ubar.bad i { background: var(--red); }
+</style>
+{% endblock %}
 {% block content %}
 <div class="container two">
     <div class="section wide">
@@ -9,6 +17,7 @@
             <button type="button" class="btn-small" id="dev-pick-btn" aria-haspopup="true" aria-expanded="false"
                     title="Choose which devices IPAM shows (tick any number of them)">Devices: all</button>
             <div class="col-menu" id="dev-pick-menu" hidden></div>
+            <select id="site-pick" aria-label="Show one site only" title="Show one site only" onchange="setSite(this.value)"><option value="">All sites</option></select>
             <span class="hint" id="ipam-count"></span>
             <span class="hint" style="margin-left:auto">Free = host addresses in the prefix that no polled interface uses (other hosts may still use them).</span>
         </div>
@@ -21,15 +30,16 @@
             <div class="empty" id="finding-empty" style="display:none">no findings — run an analysis, or nothing is wrong</div>
         </div>
     </div>
-    <div class="section">
+    <div class="section wide">
         <div class="section-header"><span>Prefixes in use</span>
-            <span class="hdr-actions"><button type="button" class="btn-small" id="prefix-more" style="display:none" onclick="toggleCap('prefix')"></button></span></div>
+            <span class="hdr-actions"><button type="button" class="btn-small" onclick="exportPrefixes()" title="Download the prefixes shown as a CSV file">Export CSV</button>
+            <button type="button" class="btn-small" id="prefix-more" style="display:none" onclick="toggleCap('prefix')"></button></span></div>
         <div class="section-body">
-            <table data-sortable><thead><tr><th>Network</th><th>Interfaces</th><th>Devices</th><th>Used</th><th>Free</th></tr></thead>
+            <table data-sortable><thead><tr><th>Network</th><th>VRF</th><th>Site</th><th>Interfaces</th><th>Devices</th><th>Used</th><th>Free</th><th>Use</th><th>Status</th><th>Warning</th></tr></thead>
                 <tbody id="prefix-rows" class="capped25"></tbody></table>
         </div>
     </div>
-    <div class="section">
+    <div class="section wide">
         <div class="section-header"><span>Addresses</span>
             <span class="hdr-actions"><button type="button" class="btn-small" id="address-more" style="display:none" onclick="toggleCap('address')"></button></span></div>
         <div class="section-body">
@@ -51,12 +61,30 @@ function esc(s) {
 // only; a device that shows up later is not in a saved choice until it is ticked. A finding is shown when it names a ticked device.
 var DEV_SEL_KEY = 'confetti-topo-ipam-devices';
 var picked = null;
+var SITE_KEY = 'confetti-topo-ipam-site', site = '';   // one site only ('' = all); per browser
+try { site = localStorage.getItem(SITE_KEY) || ''; } catch (e) { site = ''; }
 try {
     var savedSel = JSON.parse(localStorage.getItem(DEV_SEL_KEY));
     if (Array.isArray(savedSel)) { picked = {}; savedSel.forEach(function (id) { picked[id] = true; }); }
 } catch (e) { picked = null; }
 
 function deviceOn(id) { return picked === null || !!picked[id]; }
+
+function setSite(value) {
+    site = value;
+    try { if (site) { localStorage.setItem(SITE_KEY, site); } else { localStorage.removeItem(SITE_KEY); } } catch (e) { /* not remembered */ }
+    renderAll();
+}
+function fillSites() {   // the site list is every site of a device with an address
+    var seen = {}, names = [];
+    addresses.forEach(function (a) { if (a.site && !seen[a.site]) { seen[a.site] = true; names.push(a.site); } });
+    names.sort(function (a, b) { return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }); });
+    if (site && !seen[site]) { site = ''; }
+    var sel = document.getElementById('site-pick');
+    sel.innerHTML = '<option value="">All sites</option>' + names.map(function (n) { return '<option value="' + ctxMenu.attr(n) + '">' + esc(n) + '</option>'; }).join('');
+    sel.value = site;
+    sel.style.display = names.length ? '' : 'none';
+}
 
 function pickableDevices() {   // devices that have an address, by name
     var seen = {}, list = [];
@@ -176,8 +204,22 @@ function inNet(ip, net) {
 }
 function query() { return document.getElementById('ipam-q').value.trim().toLowerCase(); }
 
+function prefixKey(p) { return (p.vrf || 'default') + '|' + p.network; }
+var shownPrefixes = [];   // the rows on screen, for the CSV file
+
+function prefixStatus(p) {
+    return !p.interfaces || p.up >= p.interfaces ? ['up', 'ok'] : (p.up > 0 ? ['partly down', 'running'] : ['down', 'bad']);
+}
+function prefixWarnings(p) {
+    var w = [];
+    if (p.overlap) { w.push('overlaps another prefix'); }
+    if (p.dup) { w.push('duplicate address'); }
+    return w;
+}
+
 function renderPrefixes() {
     var q = query(), rows = '', shown = 0;
+    shownPrefixes = [];
     // With devices picked, a prefix is listed when a picked device has an address in it, and Interfaces / Devices count the
     // picked devices only. Used and Free still count every device (they say how full the prefix is).
     var mine = null;
@@ -185,22 +227,51 @@ function renderPrefixes() {
         mine = {};
         addresses.forEach(function (a) {
             if (!deviceOn(a.device_id)) { return; }
-            var m = mine[a.network] = mine[a.network] || { interfaces: 0, devs: {} };
+            var m = mine[prefixKey(a)] = mine[prefixKey(a)] || { interfaces: 0, devs: {} };
             m.interfaces++;
             m.devs[a.device_id] = true;
         });
     }
     prefixes.forEach(function (p) {
-        if (mine && !mine[p.network]) { return; }
-        if (q && p.network.toLowerCase().indexOf(q) < 0 && !inNet(q, p.network)) { return; }
+        if (mine && !mine[prefixKey(p)]) { return; }
+        if (site && p.sites.indexOf(site) < 0) { return; }
+        if (q && p.network.toLowerCase().indexOf(q) < 0 && (p.vrf || '').toLowerCase().indexOf(q) < 0 && !inNet(q, p.network)) { return; }
         shown++;
+        shownPrefixes.push(p);
         var free = p.free === null ? '' : p.free + ' of ' + p.size;
-        var nIf = mine ? mine[p.network].interfaces : p.interfaces, nDev = mine ? Object.keys(mine[p.network].devs).length : p.devices;
-        rows += '<tr data-ctx="prefix" data-net="' + ctxMenu.attr(p.network) + '"><td>' + esc(p.network) + '</td><td>' + nIf +
-            '</td><td>' + nDev + '</td><td>' + p.used + '</td><td data-sort="' + (p.free === null ? '' : p.free) + '">' + esc(free) + '</td></tr>';
+        var m = mine ? mine[prefixKey(p)] : null;
+        var nIf = m ? m.interfaces : p.interfaces, nDev = m ? Object.keys(m.devs).length : p.devices;
+        var st = prefixStatus(p), warn = prefixWarnings(p);
+        var util = p.util === null ? '' : '<span class="ubar ' + (p.util >= 90 ? 'bad' : p.util >= 75 ? 'warn' : '') + '" title="' + p.used + ' of ' + p.size + ' addresses used"><i style="width:' + p.util + '%"></i></span>' + p.util + '%';
+        rows += '<tr data-ctx="prefix" data-net="' + ctxMenu.attr(p.network) + '"><td>' + esc(p.network) + '</td><td>' + esc(p.vrf || 'default') + '</td><td>' + esc(p.sites.join(', ')) +
+            '</td><td>' + nIf + '</td><td>' + nDev + '</td><td>' + p.used + '</td><td data-sort="' + (p.free === null ? '' : p.free) + '">' + esc(free) +
+            '</td><td data-sort="' + (p.util === null ? '' : p.util) + '">' + util + '</td><td><span class="pill ' + st[1] + '">' + st[0] + '</span></td>' +
+            '<td>' + (warn.length ? '<span class="pill bad" title="' + ctxMenu.attr(warn.join('; ')) + '">' + esc(warn.join(', ')) + '</span>' : '') + '</td></tr>';
     });
-    document.getElementById('prefix-rows').innerHTML = rows || '<tr><td colspan="5" class="empty">' + (prefixes.length ? 'no prefix matches' : 'none yet') + '</td></tr>';
+    document.getElementById('prefix-rows').innerHTML = rows || '<tr><td colspan="10" class="empty">' + (prefixes.length ? 'no prefix matches' : 'none yet') + '</td></tr>';
     return shown;
+}
+
+// CSV of the prefixes on screen (search, site and device choices applied). A cell that starts with = + - or @ gets a leading
+// quote so a spreadsheet does not run it as a formula.
+function csvCell(v) {
+    v = v === null || v === undefined ? '' : String(v);
+    if (/^[=+\-@]/.test(v)) { v = "'" + v; }
+    return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+function exportPrefixes() {
+    var lines = [['network', 'vrf', 'sites', 'interfaces', 'devices', 'used', 'size', 'free', 'use_percent', 'status', 'warnings'].join(',')];
+    shownPrefixes.forEach(function (p) {
+        lines.push([p.network, p.vrf || 'default', p.sites.join('; '), p.interfaces, p.devices, p.used, p.size, p.free, p.util, prefixStatus(p)[0], prefixWarnings(p).join('; ')].map(csvCell).join(','));
+    });
+    var url = URL.createObjectURL(new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/csv' }));
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'ipam-prefixes.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
 }
 
 function loadPrefixes() {
@@ -216,7 +287,7 @@ function showCap(name) {
     var body = document.getElementById(name + '-rows'), btn = document.getElementById(name + '-more');
     var extra = body.rows.length - CAP25;
     btn.style.display = extra > 0 ? '' : 'none';
-    btn.textContent = body.classList.contains('capped25') ? 'Show all (' + extra + ' more)' : 'Show 25';
+    if (extra > 0) { btn.textContent = body.classList.contains('capped25') ? 'Show all (' + extra + ' more)' : 'Show 25'; }
 }
 function toggleCap(name) {
     document.getElementById(name + '-rows').classList.toggle('capped25');
@@ -224,13 +295,14 @@ function toggleCap(name) {
 }
 
 function renderAll() {
+    fillSites();
     var a = renderPrefixes(), b = renderAddresses(), q = query();
     renderFindings();
     showCap('prefix');
     showCap('address');
     var total = pickableDevices().length, n = pickableDevices().filter(function (d) { return deviceOn(d.id); }).length;
     document.getElementById('dev-pick-btn').textContent = picked === null ? 'Devices: all' : 'Devices: ' + n + ' of ' + total;
-    document.getElementById('ipam-count').textContent = q || picked !== null ? a + ' prefix(es), ' + b + ' address(es)' + (picked !== null ? ' (Used and Free count every device)' : '') : '';
+    document.getElementById('ipam-count').textContent = q || picked !== null || site ? a + ' prefix(es), ' + b + ' address(es)' + (picked !== null ? ' (Used and Free count every device)' : '') : '';
 }
 
 function loadAddresses() {
@@ -244,6 +316,7 @@ function renderAddresses() {
     var q = query(), shown = 0, rows = '';
     addresses.forEach(function (a) {
         if (!deviceOn(a.device_id)) { return; }
+        if (site && a.site !== site) { return; }
         if (q && [a.ip + '/' + a.prefix_len, a.hostname, a.interface].join(' ').toLowerCase().indexOf(q) < 0) { return; }
         shown++;
         var cls = a.oper_status === 'up' ? 'ok' : 'bad';

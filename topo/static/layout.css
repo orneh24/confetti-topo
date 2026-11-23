@@ -171,6 +171,8 @@ body.full-height .page { flex: 1 1 auto; min-height: 0; display: flex; flex-dire
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
 th { color: var(--text-dim); font-weight: 500; text-transform: uppercase; font-size: 10px; }
+/* A slight line where one column ends and the next begins. */
+th + th, td + td { border-left: 1px solid var(--border-soft); }
 /* Click-to-sort headers (static/tablesort.js, tables with data-sortable). currentColor: every theme works. */
 th[data-sortable-col] { cursor: pointer; user-select: none; }
 th[data-sortable-col]:hover { color: var(--text); }

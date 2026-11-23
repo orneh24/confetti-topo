@@ -43,7 +43,8 @@ Classic layout, labelled Tools). The look follows the hub UI of the sibling proj
   changed running-config is kept as a version (secrets masked in the UI and API) with a diff, and the Template drift
   box and the Devices list show whether the router still contains its template.
 - **IPAM.** Every interface address in one list, with overlapping prefixes and duplicate addresses flagged, used and free
-  addresses per prefix, and one search box.
+  addresses per prefix, and one search box. The prefix table is one row per VRF and network, with the sites, a use bar,
+  up / down status, an overlap / duplicate mark, a site filter and a CSV export.
 - **Find.** The search box in the header finds a device, an IP (which interface holds it, and the route each router would use), a
   prefix, or a MAC (which device owns it, and the switch port that learned it).
 - **Config backup search.** The Backups page lists the latest running-config of every device and searches all of them at once
