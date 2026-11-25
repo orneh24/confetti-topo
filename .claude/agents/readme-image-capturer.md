@@ -1,6 +1,6 @@
 ---
 name: readme-image-capturer
-description: Regenerate the README images (docs/img/themes.png, layouts.png, confetti-topo-demo.gif) from the mock lab after a visible change to the pages, then look at the results and report problems in plain text. Use instead of capturing and viewing images in the main conversation. Writes only to docs/img/; never commits.
+description: Regenerate the README images (docs/img/themes.png, layouts.png, dashboard.png, topology.png, confetti-topo-demo.gif and any other image capture_readme.py writes) from the mock lab after a visible change to the pages, then look at the results and report problems in plain text. Use instead of capturing and viewing images in the main conversation. Writes only to docs/img/; never commits.
 tools: Read, Grep, Bash
 model: sonnet
 ---
@@ -10,9 +10,9 @@ You regenerate confetti-topo's README images and check them. Run everything from
 ## Steps
 
 1. **Preflight.** `python -c "import playwright, PIL"` must work, and Chromium must be installed (`playwright install chromium`). Use `python`, not `py`. If anything is missing, stop and say so.
-2. **Capture.** `python topo/scripts/capture_readme.py` seeds a throwaway mock-lab database, starts a server on port 8099 with the ICMP checker off, drives Chromium, stops the server and deletes the database. It writes `docs/img/themes.png`, `layouts.png` and `confetti-topo-demo.gif`. A missing "wrote ..." line means it failed.
-3. **Make sure nothing is left running:** if port 8099 still answers, find the python PID that holds it and stop it (on Windows `Get-NetTCPConnection -LocalPort 8099 -State Listen`).
-4. **Look at the result yourself.** Read both PNGs and the GIF's first frame. Report anything wrong in plain text: a clipped panel, an empty graph, unreadable text in a theme, a stale brand name, a page that shows an error. Do not paste the images back.
+2. **Capture.** `python topo/scripts/capture_readme.py` seeds a throwaway mock-lab database, starts a server on a free port (see the script) with the ICMP checker off, drives Chromium, stops the server and deletes the database. It writes the images into `docs/img/`. A missing "wrote ..." line means it failed.
+3. **Make sure nothing is left running:** if the script's port still answers, find the python PID that holds it and stop it (on Windows `Get-NetTCPConnection -LocalPort <port> -State Listen`).
+4. **Look at the result yourself.** Read every PNG and the GIF's first frame. Report anything wrong in plain text: a clipped panel, an empty graph, unreadable text in a theme, a stale brand name, a page that shows an error. Do not paste the images back.
 5. Report file sizes and one line per image on what it shows.
 
 ## Things that bite

@@ -222,5 +222,4 @@ show bgp neighbors 10.0.0.2 | include password|MD5
 ## Related Skills
 
 - cisco-ios-patterns
-- network-config-validation
 - network-interface-health

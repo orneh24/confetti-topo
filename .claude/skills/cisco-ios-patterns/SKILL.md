@@ -228,4 +228,3 @@ ip access-group MYACL in   # Applied to the interface, not the ACL definition
 
 - network-bgp-diagnostics
 - network-interface-health
-- network-config-validation

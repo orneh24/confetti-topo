@@ -38,6 +38,8 @@ Anything else is from memory of the PAN-OS docs: check it on the device before r
 | bgp | `<show><routing><protocol><bgp><peer/></bgp></protocol></routing></show>` | `result/entry[@peer][@vr]` |
 | bgp (own AS) | `<show><routing><protocol><bgp><summary/></bgp></protocol></routing></show>` | `result/entry[@virtual-router]/local-as` |
 | ospf | `<show><routing><protocol><ospf><neighbor/></ospf></protocol></routing></show>` | `result/entry`: `neighbor-address`, `status`, `area-id` |
+| routes | see `platforms.PANOS` (RIB and FIB) | |
+| vpn | six `<show><vpn>` operations | see the `ipsec-vpn` skill |
 
 The bgp task makes both calls. The peer list has no local AS; the summary does, per virtual router. A failed summary
 still returns the peers, with `local_as` empty. `<virtual-router>name</virtual-router>` inside `summary`, `peer` and

@@ -245,4 +245,3 @@ clear counters GigabitEthernet0/0   # loses historical data
 
 - cisco-ios-patterns
 - network-bgp-diagnostics
-- network-config-validation

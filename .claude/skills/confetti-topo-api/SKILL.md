@@ -52,6 +52,12 @@ those two columns to NULL, so its neighbors become ghosts again.
 - `GET|PUT|DELETE /api/devices/<id>` — PUT is an authoritative operator edit (bypasses the ladder, records new
   `serial`/`mgmt_ip`/`hostname` as aliases; a value another device owns comes back in `alias_warnings`)
 - `POST /api/devices/<id>/poll` — synchronous, inline on the request thread
+- `GET /api/vpn[?device_id=N]` — IPsec tunnels (`vpn_tunnels`); `peer_device_id` / `peer_hostname` are looked up at query time
+- `GET /api/find?q=` — IP, prefix, MAC or text over the stored tables (read-only); `GET /api/backups`, `/api/backups/search?q=&regex=1&invert=1` (masked)
+- `GET /api/backup` (list), `POST /api/backup/download {name?}`, `GET /api/backup/env` (secrets blanked), `POST /api/backup/restore` (multipart `file`)
+- `POST /api/devices/<id>/credentials/test` — log in and run `version` only, stores nothing
+- `GET|PUT /api/settings/links` (the Traffic URL), `GET|PUT /api/settings/syslog-pull`, `GET /api/syslog[?after_id=N&origin=local]`, `GET /api/syslog/sources`
+- `GET|PUT /api/topology/notes` — map notes per node or link
 - `GET /api/routes|vlans|stp|trunks|mac?device_id=N` — one device's routing table (`vrf`, `kind`, `prefix`), VLANs, spanning-tree summary,
   trunk ports, learned MACs (`q` filters; a MAC owned by one other device carries `device`/`interface`)
 - `GET /api/topology/snapshots[?limit=]` and `/api/topology/snapshots/<id>` — read-only topology history (`TOPO_SNAPSHOT_*`)
@@ -73,7 +79,7 @@ those two columns to NULL, so its neighbors become ghosts again.
 `POST /api/discover/run` runs the `TOPO_DISCOVERY_*` sources now; `GET /api/discover/status` (neither covers the saved-URL timer).
 `GET /api/lldp/unknown`; `POST /api/lldp/adopt {ip, hostname?}` adds one with polling OFF (`enabled=0`).
 
-**Topology:** `GET /api/topology?layer=lldp|bgp|ospf[,..]` (vis.js `{nodes, edges}`; each edge has `details`, one report per end that saw it, default overlays all three),
+**Topology:** `GET /api/topology?layer=lldp|bgp|ospf|ipsec|default|connected[,..]` (`topology.LAYERS`; vis.js `{nodes, edges}`; each edge has `details`, one report per end that saw it; no `layer` = all six),
 `PUT` / `DELETE /api/topology/positions` (saved node places; nodes carry `x`/`y` when saved, and the response
 also has `positions` {node_id: {x, y}}, including the page-only `group:dev:<id>`),
 `GET /api/adjacencies[?device_id=]`, `GET /api/lldp-neighbors[?device_id=]`. The last two return the
@@ -91,11 +97,13 @@ load/memory/disk/uptime) — both never 500; every check degrades to `null`/`"un
 ## Poller scheduling
 
 `devices.poll_state` (`idle`/`running`) is the per-device lock; `next_poll_at` is the schedule. Each tick
-claims due devices, marks them `running`, and runs eleven tasks per device — `version`, `interfaces`, `lldp`,
-`bgp`, `ospf`, `routes`, `config`, and on IOS switches `vlans`, `trunks`, `stp`, `mac` — over one SSH session (PAN-OS: six over the XML API; SNMP: two), each committing its own transaction. Rows a *successful* task no longer
-sees are deleted; a failed task changes nothing. `running` is released in a `finally` and reset at startup.
-`role='node'` devices are excluded from the claim query. Success: `fail_count=0`,
-`next_poll_at = now + poll_interval_s`. Failure: `fail_count += 1`,
+claims due devices, marks them `running`, and runs the platform's tasks, each committing its own transaction.
+IOS over one SSH session: `version`, `interfaces`, `lldp`, `bgp`, `ospf`, `routes`, `vpn`, `config`, and on
+switches `vlans`, `trunks`, `stp`, `mac`. PAN-OS over the XML API: the first seven. SNMP: `version`,
+`interfaces`. A `confetti_node` (`hub_api`, asked through its hub): `version`, `interfaces`, `lldp`. Rows a
+*successful* task no longer sees are deleted; a failed task changes nothing. `running` is released in a
+`finally` and reset at startup. The claim query takes `role != 'node' OR platform = 'confetti_node'`. Success:
+`fail_count=0`, `next_poll_at = now + poll_interval_s`. Failure: `fail_count += 1`,
 `next_poll_at = now + min(interval * 2**fail_count, POLL_MAX_BACKOFF_S)`.
 
 ## Topology and peer resolution
@@ -132,4 +140,6 @@ conn.execute("INSERT INTO devices (...) VALUES (...)")
 - netmiko-ssh-automation (the collector's connection and error handling)
 - network-bgp-diagnostics (BGP state names, `Idle (Admin)`)
 - cisco-ios-patterns (command syntax)
+- ipsec-vpn (the `vpn` task, both platforms)
+- panos-xml-api
 - confetti-topo-ui (authoring the pages)

@@ -6,6 +6,11 @@ origin: ECC
 
 # Netmiko SSH Automation
 
+> **In confetti-topo** this is background reading only. Do not copy two things from it: sending configuration
+> (`send_config_set`, enable for config changes) is forbidden, device access is read-only (R19); and
+> `use_textfsm=True` is not used, parsers are plain regex (constraint 3). The app's own collector is
+> `topo/app/collectors/ssh.py`.
+
 Patterns for automating network device interaction via SSH using Netmiko. Covers single-device connections, batch operations, enable mode, error handling, and output parsing.
 
 ## When to Activate
@@ -266,4 +271,3 @@ conn.save_config()
 
 - cisco-ios-patterns
 - network-bgp-diagnostics
-- network-config-validation

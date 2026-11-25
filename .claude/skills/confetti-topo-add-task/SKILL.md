@@ -9,8 +9,8 @@ origin: confetti-topo
 Model: the `stp` task (commit "Spanning tree summary on switches"). Read `_apply_stp` in `topo/app/collectors/ssh.py` first. Names below are
 the ones to grep for, not line numbers.
 
-1. **Real output first** (constraint 3). Capture the command from a real device into `dev/samples/<platform>_<task>.txt`, placeholders only
-   (`dev/samples/README.md`). Do not write a parser from documentation.
+1. **Real output first** (constraint 3). Capture it with `dev/capture_output.py` (writes outside the repo), then sanitise it into
+   `dev/samples/<platform>_<task>.txt`, placeholders only (`dev/samples/README.md`). Do not write a parser from documentation.
 2. **Registry** `topo/app/platforms.py`: the command in `IOS["commands"]`, the parser in `IOS["parsers"]`. A switch-only task also goes in
    `SWITCH_TASKS` (the same file); then `ssh.run_tasks` skips it for a router. `ssh.TASKS` follows from the registry. PAN-OS and SNMP keep
    their own task lists; do not add the task there unless the platform has it.
@@ -30,10 +30,10 @@ the ones to grep for, not line numbers.
 7. **Mock lab**: add rows to `topo/scripts/seed_mock_lab.py` or the new box has no data in the README images.
 8. **Regression** `dev/regress.py`:
    - **R15** compares CLAUDE.md's "Per device, N tasks" and "All N tasks" sentences to `len(ssh.TASKS)` and wants each task name in backticks in
-     the per-device sentence. Its number-word table (`words`) stops at "twelve": a 13th task needs "thirteen" added there, or R15 fails for no
-     obvious reason.
-   - **R19** and **R34** hard-code the IOS task list and the switch-only list; extend them. R34 is the place for fixture parsing, "empty answer
-     deletes nothing" and "a `%` answer fails the task".
+     the per-device sentence. Its number-word table (`words`) goes to twenty.
+   - **R19** reads the task list from the registry; a helper command must sit in a key ending `_command` or in a `*_commands` dict, or it
+     is not checked. **R30** needs an answer for a new PAN-OS command. **R34** hard-codes the switch-only list. A new task usually gets
+     its own check (R58 is the model): fixture parsing, "not understood deletes nothing", "a real empty answer clears", events.
    - Prove each new assertion red (agent `check-red-prover`).
 9. **Docs**: CLAUDE.md (the poller section's count and list, plus a short section like "VLANs, trunks and spanning tree"), README, the
    `confetti-topo-api` skill (route list, task list), `docs/TOPOLOGY-MAPPING.md`, and `dev/samples/README.md` for the fixture. Then agent

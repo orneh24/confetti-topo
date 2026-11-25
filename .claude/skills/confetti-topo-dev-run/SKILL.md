@@ -33,8 +33,9 @@ python scripts/seed_mock_lab.py /tmp/mock.db        # refuses an existing file
 TOPO_DB_PATH=/tmp/mock.db TOPO_PORT=8080 TOPO_PING_ENABLED=false python serve.py
 ```
 
-Three routers, LLDP links, BGP/OSPF sessions (some resolve by interface IP, some stay ghosts), an unknown
-LLDP neighbor and a few events. `next_poll_at` is far in the future, so nothing dials the fake addresses.
+Three routers and a Palo Alto firewall: LLDP links, BGP/OSPF sessions and IPsec tunnels (some resolve by
+interface IP, some stay ghosts, one tunnel is down), an unknown LLDP neighbor, a few events and an older
+topology snapshot for Compare. `next_poll_at` is far in the future, so nothing dials the fake addresses.
 **Set `TOPO_PING_ENABLED=false`**: Windows `ping` exits 0 on some "unreachable" replies, which would flip the
 mock devices to "answering ping".
 
@@ -45,10 +46,14 @@ mock devices to "answering ping".
 2. Credentials: `PUT /api/devices/<id>/credentials` with username/password/enable_secret. Write the JSON to
    a temp file and send it with `--data @file` (passwords often contain `!` or `$`). Delete the file after.
 3. Poll now: `POST /api/devices/<id>/poll` (synchronous, up to about a minute). Returns ok/error per task
-   (version, interfaces, lldp, bgp, ospf).
+   (the tasks of its platform, see `confetti-topo-api`).
 4. Look: `GET /api/devices/<id>`, `/api/lldp-neighbors?device_id=<id>`, `/api/adjacencies?device_id=<id>`,
    then the `/topology` page.
 
 Real lab addresses and hostnames are in the auto-memory file `reference_lab_routers.md` (kept in this
 project's memory folder); never commit them. Credentials come from the user in chat, every
 session. A router with LLDP off and no BGP/OSPF succeeds with empty results: that is expected, not a bug.
+
+New command to look at first? Capture it with `python dev/capture_output.py --db topo/topo.db --device <id>
+--out <folder outside the repo> --cmd "show ..."` (show commands only, credentials never printed). Back up the
+database (`app/backup.py` `make()`) before new schema code first runs on the real `topo.db`.
