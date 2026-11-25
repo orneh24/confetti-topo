@@ -2,7 +2,7 @@
 
 A device's `platform` column picks its entry here. The poller itself does not
 care: every platform produces the same parsed shapes for the same task names
-(version, interfaces, lldp, bgp, ospf, routes, and vlans, trunks, stp, mac on IOS switches), so the apply steps, events and
+(version, interfaces, lldp, bgp, ospf, routes, vpn, and vlans, trunks, stp, mac on IOS switches), so the apply steps, events and
 topology work unchanged for all of them. Adding a vendor means adding an entry
 here plus its parsers (Junos is planned, see docs/ROADMAP.md).
 
@@ -34,6 +34,8 @@ IOS = {
         "trunks": "show interfaces trunk",
         "stp": "show spanning-tree summary",
         "mac": "show mac address-table",
+        # IPsec sessions. The algorithms are in vpn_transform_command. Neither prints a key.
+        "vpn": "show crypto session detail",
         # Last, so a slow config read never delays the other tasks.
         "config": "show running-config",
     },
@@ -48,11 +50,13 @@ IOS = {
         "trunks": ios.parse_trunks,
         "stp": ios.parse_stp,
         "mac": ios.parse_mac,
+        "vpn": ios.parse_vpn,
         "config": ios.parse_running_config,
     },
     # Older IOS leaves "Local Intf" out of the detail output; this table has it.
     "lldp_brief_command": "show lldp neighbors",
     "routes_fallback_command": "show ip route",
+    "vpn_transform_command": "show crypto ipsec sa",
 }
 
 # Palo Alto PAN-OS over the XML API (collectors/panos.py): the commands are XML operations, read-only
@@ -66,6 +70,8 @@ PANOS = {
         "bgp": "<show><routing><protocol><bgp><peer/></bgp></protocol></routing></show>",
         "ospf": "<show><routing><protocol><ospf><neighbor/></ospf></protocol></routing></show>",
         "routes": "<show><routing><route/></routing></show>",   # the RIB; the FIB is fib_command
+        # The configured IPsec tunnels and their state; vpn_commands and vpn_flow_command add the detail.
+        "vpn": "<show><vpn><flow></flow></vpn></show>",
     },
     "parsers": {
         "version": panos.parse_version,
@@ -74,9 +80,18 @@ PANOS = {
         "bgp": panos.parse_bgp_peers,
         "ospf": panos.parse_ospf_neighbors,
         "routes": panos.parse_routes,
+        "vpn": panos.parse_vpn_flow,
     },
     "bgp_summary_command": "<show><routing><protocol><bgp><summary/></bgp></protocol></routing></show>",
     "fib_command": "<show><routing><fib/></routing></show>",
+    # Detail for the VPN tunnels, asked only when there is a tunnel. None of these returns a pre-shared key.
+    "vpn_commands": {
+        "ike_sa": "<show><vpn><ike-sa></ike-sa></vpn></show>",
+        "gateway": "<show><vpn><gateway></gateway></vpn></show>",
+        "ipsec_sa": "<show><vpn><ipsec-sa></ipsec-sa></vpn></show>",
+        "tunnel": "<show><vpn><tunnel></tunnel></vpn></show>",
+    },
+    "vpn_flow_command": "<show><vpn><flow><tunnel-id>%d</tunnel-id></flow></vpn></show>",
 }
 
 # SNMP v1/v2c via net-snmp (collectors/snmp.py): version + interfaces only.

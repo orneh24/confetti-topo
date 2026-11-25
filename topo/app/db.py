@@ -279,6 +279,31 @@ def init_db():
             last_seen      TEXT NOT NULL
         );
 
+        -- IPsec VPN tunnels (the vpn task), one row per tunnel and peer. status is up / down; state is the
+        -- device's own word (UP-ACTIVE, active ...). The peer's device is not stored: it is looked up when asked.
+        CREATE TABLE IF NOT EXISTS vpn_tunnels (
+            device_id   INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+            name        TEXT NOT NULL,
+            peer_ip     TEXT NOT NULL,
+            interface   TEXT NOT NULL DEFAULT '',
+            local_ip    TEXT NOT NULL DEFAULT '',
+            vrf         TEXT NOT NULL DEFAULT '',
+            ike_version TEXT NOT NULL DEFAULT '',
+            ike_state   TEXT NOT NULL DEFAULT '',
+            ipsec_state TEXT NOT NULL DEFAULT '',
+            status      TEXT NOT NULL DEFAULT '',
+            state       TEXT NOT NULL DEFAULT '',
+            encryption  TEXT NOT NULL DEFAULT '',
+            selectors   TEXT NOT NULL DEFAULT '',
+            packets_in  INTEGER,
+            packets_out INTEGER,
+            bytes_in    INTEGER,
+            bytes_out   INTEGER,
+            uptime      TEXT NOT NULL DEFAULT '',
+            last_seen   TEXT NOT NULL,
+            UNIQUE (device_id, name, peer_ip)
+        );
+
         -- Whole-map snapshots (history.py), one per change of shape. data is the /api/topology answer.
         CREATE TABLE IF NOT EXISTS topology_snapshots (
             id       INTEGER PRIMARY KEY AUTOINCREMENT,

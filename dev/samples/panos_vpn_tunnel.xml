@@ -1,0 +1,25 @@
+<response status="success"><result>
+  <entries>
+    <entry>
+      <id>2</id>
+      <name>TO-RTR-A</name>
+      <gw>GW-TO-RTR-A</gw>
+      <TSi_ip>0.0.0.0</TSi_ip>
+      <TSi_prefix>0</TSi_prefix>
+      <TSi_proto>0</TSi_proto>
+      <TSi_port>0</TSi_port>
+      <TSr_ip>0.0.0.0</TSr_ip>
+      <TSr_prefix>0</TSr_prefix>
+      <TSr_proto>0</TSr_proto>
+      <TSr_port>0</TSr_port>
+      <proto>ESP</proto>
+      <mode>tunl</mode>
+      <dh>DH14</dh>
+      <enc>AES256</enc>
+      <hash>SHA1</hash>
+      <life>3600</life>
+      <kb>0</kb>
+    </entry>
+  </entries>
+  <ntun>1</ntun>
+</result></response>

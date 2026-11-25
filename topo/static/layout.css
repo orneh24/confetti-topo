@@ -402,6 +402,7 @@ button.primary:hover { color: var(--bg); filter: brightness(1.15); }
     --yellow:    #806000;
     --purple:    #800080;
     --orange:    #c05000;
+    --pink:      #c0007a;
     --yellow-bg: #fff4b0;
     --gray:      #a0a0a0;
     --blue:      #0000cc;
@@ -649,6 +650,7 @@ button.primary:hover { color: var(--bg); filter: brightness(1.15); }
     --yellow:    var(--crt-slow);
     --purple:    var(--crt-hi);   /* one hue only: eBGP is told from iBGP by its width as well */
     --orange:    #ffaa33;
+    --pink:      #ff66cc;
     --yellow-bg: var(--crt-slow-bg);
     --gray:      var(--crt-gray);
     --blue:      var(--crt-accent);

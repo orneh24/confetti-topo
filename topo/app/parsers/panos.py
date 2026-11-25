@@ -311,3 +311,91 @@ def parse_fib(text):
                 "distance": None, "metric": None, "age": None, "flags": _text(e, "flags") or "",
             })
     return out
+
+
+# ---------------------------------------------------------------------------
+# <show><vpn>...: IPsec tunnels
+# ---------------------------------------------------------------------------
+
+def _entries(result, *paths):
+    return [e for path in paths for e in result.findall(path)]
+
+
+def parse_vpn_flow(text):
+    """Configured IPsec tunnels from <show><vpn><flow>. None means "not an answer to this command": the task then
+    fails and deletes nothing. A firewall with no tunnel answers with a result that has counts and no entry."""
+    result = _root(text)
+    if result is None or not any(result.find(tag) is not None for tag in ("IPSec", "num_ipsec", "total")):
+        return None
+    out = []
+    for e in result.findall("IPSec/entry"):
+        name, peer, state = _text(e, "name"), _text(e, "peerip"), _text(e, "state").lower()
+        if not name or not peer:
+            continue
+        monitor = _text(e, "mon").lower()
+        up = state == "active" and monitor != "down"   # a tunnel monitor that says down: no traffic gets through
+        tunnel_id = _text(e, "id")
+        out.append({
+            "name": name, "interface": _text(e, "inner-if"), "peer_ip": peer, "local_ip": _text(e, "localip"),
+            "tunnel_id": int(tunnel_id) if tunnel_id.isdigit() else None, "gateway_id": _text(e, "gwid"),
+            "vrf": "", "ike_version": "", "ike_state": "", "ipsec_state": "up" if state == "active" else "down",
+            "status": "up" if up else "down",
+            "state": state + (" (monitor down)" if monitor == "down" else ""),
+            "encryption": "", "selectors": "", "packets_in": None, "packets_out": None,
+            "bytes_in": None, "bytes_out": None, "uptime": "",
+        })
+    return out
+
+
+def parse_vpn_ike_sa(text):
+    """The gateway ids that have an IKE SA now, or None when the answer was not understood."""
+    result = _root(text)
+    if result is None:
+        return None
+    return {_text(e, "gwid") for e in _entries(result, "entry", "entries/entry")}
+
+
+def parse_vpn_gateways(text):
+    """{gateway id: IKE version "1" or "2"}."""
+    result = _root(text)
+    if result is None:
+        return {}
+    return {_text(e, "id"): "2" if e.find("v2") is not None else "1"
+            for e in result.findall("entries/entry") if e.find("v1") is not None or e.find("v2") is not None}
+
+
+def parse_vpn_ipsec_sa(text):
+    """{tunnel id: "A256 / SHA1"} for the tunnels that have an IPsec SA."""
+    result = _root(text)
+    if result is None:
+        return {}
+    return {_text(e, "tid"): " / ".join(x for x in (_text(e, "enc"), _text(e, "hash")) if x)
+            for e in result.findall("entries/entry")}
+
+
+def parse_vpn_selectors(text):
+    """{tunnel id: "local - remote" traffic selectors} from <show><vpn><tunnel>."""
+    result = _root(text)
+    if result is None:
+        return {}
+    out = {}
+    for e in result.findall("entries/entry"):
+        sides = [(_text(e, s + "_ip"), _text(e, s + "_prefix")) for s in ("TSi", "TSr")]
+        if all(ip for ip, _ in sides):
+            out[_text(e, "id")] = " ".join("{}/{}".format(ip, plen) for ip, plen in sides)
+    return out
+
+
+def parse_vpn_flow_detail(text):
+    """Packet and byte counters of one tunnel, from <show><vpn><flow><tunnel-id>."""
+    result = _root(text)
+    entry = result.find("IPSec/entry") if result is not None else None
+    if entry is None:
+        return {}
+    out = {}
+    for field, tag in (("packets_in", "pkt-decap"), ("packets_out", "pkt-encap"),
+                       ("bytes_in", "byte-decap"), ("bytes_out", "byte-encap")):
+        value = _text(entry, tag)
+        if value.isdigit():
+            out[field] = int(value)
+    return out

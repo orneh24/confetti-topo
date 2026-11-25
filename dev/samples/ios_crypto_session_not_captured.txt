@@ -1,0 +1,35 @@
+Crypto session current status
+
+Code: C - IKE Configuration mode, D - Dead Peer Detection
+K - Keepalives, N - NAT-traversal, T - cTCP encapsulation
+X - IKE Extended Authentication, F - IKE Fragmentation
+
+Interface: Tunnel200
+Session status: DOWN-NEGOTIATING
+Peer: 198.51.100.20 port 500 fvrf: (none) ivrf: (none)
+      Desc: (none)
+  Session ID: 0
+  IKEv2 SA: local 198.51.100.171/500 remote 198.51.100.20/500 Inactive
+          Capabilities:(none) connid:0 lifetime:0
+  IPSEC FLOW: permit ip 0.0.0.0/0.0.0.0 0.0.0.0/0.0.0.0
+        Active SAs: 0, origin: crypto map
+        Inbound:  #pkts dec'ed 0 drop 0 life (KB/Sec) 0/0
+        Outbound: #pkts enc'ed 0 drop 0 life (KB/Sec) 0/0
+
+Interface: GigabitEthernet2
+Uptime: 00:12:08
+Session status: UP-IDLE
+Peer: 198.51.100.30 port 4500 fvrf: (none) ivrf: BLUE
+      Phase1_id: 198.51.100.30
+      Desc: (none)
+  Session ID: 3
+  IKE SA: local 198.51.100.171/4500 remote 198.51.100.30/4500 Active
+          Capabilities:N connid:2001 lifetime:23:47:52
+  IPSEC FLOW: permit ip 192.0.2.0/255.255.255.0 203.0.113.0/255.255.255.0
+        Active SAs: 0, origin: crypto map
+        Inbound:  #pkts dec'ed 0 drop 0 life (KB/Sec) 0/0
+        Outbound: #pkts enc'ed 0 drop 0 life (KB/Sec) 0/0
+  IPSEC FLOW: permit ip 192.0.2.0/255.255.255.0 198.51.100.0/255.255.255.0
+        Active SAs: 0, origin: crypto map
+        Inbound:  #pkts dec'ed 7 drop 0 life (KB/Sec) 0/0
+        Outbound: #pkts enc'ed 9 drop 0 life (KB/Sec) 0/0

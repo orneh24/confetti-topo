@@ -1,0 +1,21 @@
+<response status="success"><result>
+  <dp>dp0</dp>
+  <num_ipsec>1</num_ipsec>
+  <num_sslvpn>1</num_sslvpn>
+  <IPSec>
+    <entry>
+      <name>TO-RTR-A</name>
+      <id>2</id>
+      <gwid>1</gwid>
+      <inner-if>tunnel.100</inner-if>
+      <outer-if>loopback.1</outer-if>
+      <ipsec-mode>tunnel</ipsec-mode>
+      <localip>192.0.2.87</localip>
+      <peerip>198.51.100.171</peerip>
+      <state>active</state>
+      <mon>up</mon>
+      <owner>1</owner>
+    </entry>
+  </IPSec>
+  <total>2</total>
+</result></response>

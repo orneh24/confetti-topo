@@ -1,7 +1,7 @@
 """Fill a NEW scratch database with a fake lab, for README screenshots and demos.
 
-Three routers (documentation-range IPs, fake serials 9SIMLAB000x), their
-interfaces, LLDP/OSPF/BGP neighbours (some resolve, some stay ghosts), one
+Three routers and a Palo Alto firewall (documentation-range IPs, fake serials 9SIMLAB000x), their
+interfaces, IPsec tunnels, LLDP/OSPF/BGP neighbours (some resolve, some stay ghosts), one
 unknown LLDP neighbour waiting to be added, one identity conflict, a few
 change events, a config template with two running-config backups per router (one
 drifted), interface error history, an overlapping prefix for IPAM
@@ -42,6 +42,7 @@ INTERFACES = {
         ("GigabitEthernet2", "to lab-rtr-b", "10.0.12.1", 24),
         ("GigabitEthernet3", "to lab-rtr-c", "10.0.13.1", 30),
         ("GigabitEthernet4", "shared LAN", "10.50.0.1", 24),
+        ("GigabitEthernet5", "to lab-fw-1", "10.0.14.2", 24),
         ("Loopback0", "router id", "10.255.0.1", 32)],
     1: [("GigabitEthernet1", "mgmt", "192.0.2.171", 24),
         ("GigabitEthernet2", "to lab-rtr-a", "10.0.12.2", 24),
@@ -55,6 +56,21 @@ INTERFACES = {
         ("Loopback0", "router id", "10.255.0.3", 32)],
 }
 
+# The firewall (index 3 in ids) has no config backup or template: those are IOS features.
+FIREWALL = ("lab-fw-1", "192.0.2.20", "9SIMLAB0005", "11.1.4")
+FIREWALL_INTERFACES = [("ethernet1/1", "to lab-rtr-a", "10.0.14.1", 24), ("loopback.1", "VPN address", "10.255.0.4", 32),
+                       ("tunnel.100", "to lab-rtr-b", "10.99.0.1", 30)]
+
+# device index, tunnel, interface, local ip, peer ip, status, the device's word, IKE version, algorithms, packets in/out
+VPN = [
+    (3, "TO-RTR-B", "tunnel.100", "10.255.0.4", "10.255.0.2", "up", "active", "2", "A256GCM16", 482113, 479002),
+    (1, "Tunnel100", "Tunnel100", "10.255.0.2", "10.255.0.4", "up", "UP-ACTIVE", "2", "esp-gcm 256", 479002, 482113),
+    (0, "Tunnel13", "Tunnel13", "10.255.0.1", "10.255.0.3", "down", "DOWN-NEGOTIATING", "2", "", 0, 0),
+    (2, "Tunnel13", "Tunnel13", "10.255.0.3", "10.255.0.1", "down", "DOWN-NEGOTIATING", "2", "", 0, 0),
+    (3, "TO-BRANCH", "tunnel.200", "10.255.0.4", "203.0.113.44", "up", "active", "1", "A256 / SHA256", 91877, 88410),
+    (3, "TO-PARTNER", "tunnel.300", "10.255.0.4", "203.0.113.80", "down", "init", "1", "", None, None),
+]
+
 # device index -> next hop of its default route: a goes out to an outside address (a ghost), b via a, c via b
 DEFAULT_ROUTES = {0: "203.0.113.1", 1: "10.0.12.1", 2: "10.0.23.1"}
 
@@ -65,6 +81,8 @@ LLDP = [
     (1, "GigabitEthernet3", "lab-rtr-c", "GigabitEthernet2", 2, "192.0.2.167"),
     (2, "GigabitEthernet2", "lab-rtr-b", "GigabitEthernet3", 1, "192.0.2.171"),
     (2, "GigabitEthernet4", "sw-access-1", "Fa0/24", None, "192.0.2.50"),
+    (0, "GigabitEthernet5", "lab-fw-1", "ethernet1/1", 3, "192.0.2.20"),
+    (3, "ethernet1/1", "lab-rtr-a", "GigabitEthernet5", 0, "192.0.2.10"),
 ]
 
 LAB_AS = 65000   # all three routers: the 65000 peers are iBGP, the 64500 / 64501 ones eBGP
@@ -91,12 +109,18 @@ EVENTS = [
     (47, 2, "device_unreachable", "warning", "lab-rtr-c: polling failed: no answer on SSH (port 22) within 15 s", "no answer on SSH (port 22) within 15 s. The device may be down, the IP wrong, or a firewall drops the traffic"),
     (95, 1, "ospf_state", "warning", "lab-rtr-b OSPF peer 10.255.0.1: EXSTART", "FULL -> EXSTART"),
     (6, 1, "bgp_reset", "warning", "lab-rtr-b BGP peer 198.51.100.7: session reset", "07:10:02 -> 00:40:12"),
+    (8, 0, "vpn_state", "warning", "lab-rtr-a: VPN tunnel Tunnel13 to 10.255.0.3: down", "up -> down"),
+    (180, 3, "vpn_added", "info", "lab-fw-1: VPN tunnel TO-BRANCH to 203.0.113.44: up", ""),
     (4, 1, "bgp_flapping", "warning", "lab-rtr-b BGP peer 198.51.100.7: flapping", "3 changes in 60 min"),
 ]
 
 # The BGP peer that flaps (device index, peer_ip) and when its changes were seen (minutes ago), see flap.py.
 FLAPPING = (1, "198.51.100.7", [(40, "reset"), (22, "state"), (9, "state")])
 
+
+# Where the nodes sit on the map, so the screenshots are readable. The page places the unknown nodes itself.
+PLACES = {"lab-fw-1": (0, -300), "lab-rtr-a": (-340, -40), "lab-rtr-b": (340, -40), "lab-rtr-c": (0, 270),
+          "subnet:10.50.0.0/24": (0, 70)}
 
 # minutes ago, router index, severity, mnemonic, message
 SYSLOG = [
@@ -130,10 +154,12 @@ def older_snapshot(conn, ids, taken_at):
     """Store the map as it "was": one more router (since removed), lab-rtr-c still answering ping, one BGP
     session still up and sw-access-1 not plugged in yet. Then put today's rows back."""
     c = ids[2]
+    vpn = "UPDATE vpn_tunnels SET status = ?, state = ? WHERE name = 'Tunnel13'"
+    conn.execute(vpn, ("up", "UP-ACTIVE"))
     old = identity.ingest(conn, [("serial", "9SIMLAB0004"), ("hostname", "lab-rtr-old")],
                           {"serial": "9SIMLAB0004", "hostname": "lab-rtr-old", "site": "lab"}, "manual")
     conn.execute("INSERT INTO lldp_neighbors (device_id, local_if, remote_sysname, remote_port, remote_device_id, "
-                 "last_seen) VALUES (?, 'GigabitEthernet5', 'lab-rtr-old', 'GigabitEthernet1', ?, ?)",
+                 "last_seen) VALUES (?, 'GigabitEthernet7', 'lab-rtr-old', 'GigabitEthernet1', ?, ?)",
                  (ids[0], old, ts()))
     switch = conn.execute("SELECT * FROM lldp_neighbors WHERE device_id = ? AND remote_sysname = 'sw-access-1'",
                           (c,)).fetchone()
@@ -153,6 +179,7 @@ def older_snapshot(conn, ids, taken_at):
     conn.execute("INSERT INTO lldp_neighbors ({}) VALUES ({})".format(",".join(keys), ",".join("?" * len(keys))),
                  tuple(switch))
     conn.execute(peer, ("Idle (Admin)", "never", c))
+    conn.execute(vpn, ("down", "DOWN-NEGOTIATING"))
     conn.execute("UPDATE devices SET reachable = 0 WHERE id = ?", (c,))
 
 
@@ -166,6 +193,24 @@ def main():
                   "model": "CSR1000V", "site": "lab"}
         ids.append(identity.ingest(
             conn, [("serial", serial), ("mgmt_ip", ip), ("hostname", host)], fields, "manual"))
+
+    host, ip, serial, ver = FIREWALL
+    fw = identity.ingest(conn, [("serial", serial), ("mgmt_ip", ip), ("hostname", host)],
+                         {"hostname": host, "mgmt_ip": ip, "serial": serial, "os_version": ver, "model": "PA-VM",
+                          "site": "lab", "role": "firewall", "vendor": "paloalto", "platform": "paloalto_panos"}, "manual")
+    conn.execute("UPDATE devices SET poll_state='idle', next_poll_at='2099-01-01 00:00:00', last_poll_ok=?, reachable=1 "
+                 "WHERE id=?", (now, fw))
+    for name, desc, ip, plen in FIREWALL_INTERFACES:
+        conn.execute("INSERT INTO interfaces (device_id, name, description, ip, prefix_len, network, oper_status, last_seen) "
+                     "VALUES (?,?,?,?,?,?, 'up', ?)", (fw, name, desc, ip, plen, ios._network(ip, plen), now))
+    every = ids + [fw]
+    for idx, name, ifname, local, peer, status, state, ike, enc, pkts_in, pkts_out in VPN:
+        conn.execute(
+            "INSERT INTO vpn_tunnels (device_id, name, interface, local_ip, peer_ip, ike_version, ike_state, ipsec_state, "
+            "status, state, encryption, selectors, packets_in, packets_out, uptime, last_seen) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (every[idx], name, ifname, local, peer, ike, status, status, status, state, enc, "0.0.0.0/0 0.0.0.0/0",
+             pkts_in, pkts_out, "3d04h" if status == "up" and name.startswith("Tunnel") else "", now))
 
     for idx, dev_id in enumerate(ids):
         failing = idx == 2
@@ -196,8 +241,8 @@ def main():
         conn.execute(
             "INSERT INTO lldp_neighbors (device_id, local_if, remote_sysname, remote_port, "
             "remote_mgmt_ip, remote_device_id, last_seen) VALUES (?,?,?,?,?,?,?)",
-            (ids[idx], local_if, sysname, port, rip,
-             ids[remote_idx] if remote_idx is not None else None, now))
+            (every[idx], local_if, sysname, port, rip,
+             every[remote_idx] if remote_idx is not None else None, now))
     for idx, proto, peer, asn, area, state, up, pfx, lif in ADJACENCIES:
         conn.execute(
             "INSERT INTO adjacencies (device_id, proto, peer_ip, remote_as, local_as, area, state, uptime, "
@@ -210,10 +255,10 @@ def main():
         conn.execute("INSERT INTO bgp_changes (device_id, peer_ip, at, kind) VALUES (?,?,?,?)",
                      (ids[fidx], fpeer, ts(ago), kind))
 
-    for ago, idx, kind, sev, subject, detail in EVENTS:
+    for ago, idx, kind, sev, subject, detail in sorted(EVENTS, reverse=True):   # oldest first, as a server writes them
         conn.execute(
             "INSERT INTO events (at, device_id, kind, severity, subject, detail) VALUES (?,?,?,?,?,?)",
-            (ts(ago), ids[idx], kind, sev, subject, detail))
+            (ts(ago), every[idx], kind, sev, subject, detail))
 
     for ago, idx, sev, mnem, msg in SYSLOG:
         host, ip = ROUTERS[idx][0], ROUTERS[idx][1]
@@ -227,7 +272,7 @@ def main():
                  ("base-router", TEMPLATE, "Mock lab template", now))
     conn.execute("INSERT INTO template_versions (name, version, body, saved_at) VALUES (?,1,?,?)",
                  ("base-router", TEMPLATE, now))
-    conn.execute("UPDATE devices SET template_name = 'base-router'")
+    conn.execute("UPDATE devices SET template_name = 'base-router' WHERE id != ?", (fw,))
     for dev_id in ids:
         conn.execute("INSERT INTO template_vars (device_id, key, value) VALUES (?,?,?)",
                      (dev_id, "enable_secret", "CHANGE-ME"))
@@ -258,13 +303,18 @@ def main():
     except identity.Conflict:
         pass
 
+    for name, (x, y) in PLACES.items():
+        if not name.startswith("subnet:"):
+            name = "dev:{}".format(conn.execute("SELECT id FROM devices WHERE hostname = ?", (name,)).fetchone()[0])
+        conn.execute("INSERT INTO node_positions (node_id, x, y, updated_at) VALUES (?,?,?,?)", (name, x, y, now))
+
     # Two topology snapshots, for the dashboard's Map changes widget and the topology page's Compare.
     older_snapshot(conn, ids, ts(180))
     history.maybe_snapshot(conn, force=True)
 
     conn.commit()
     conn.close()
-    print("seeded {} with {} devices".format(sys.argv[1], len(ids)))
+    print("seeded {} with {} devices".format(sys.argv[1], len(every)))
 
 
 main()

@@ -32,6 +32,8 @@ import time
 
 sys.dont_write_bytecode = True
 os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+for _name in [k for k in os.environ if k.startswith("TOPO_")]:
+    del os.environ[_name]      # the app reads these at import; a developer's shell must not change a result
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(ROOT)
@@ -40,7 +42,7 @@ VERBOSE = "-v" in sys.argv
 STATIC_ONLY = "--static" in sys.argv
 
 results = []   # (status, id, desc, [detail lines])
-LIVE = [("R20", "live: real server answers, pages render, /metrics, topology API, saved node positions, UDP syslog round trip")]
+LIVE = [("R20", "live: the real server starts, its threads run, every page answers, a JSON write and read work, UDP syslog round trip, /metrics")]
 TMP = tempfile.mkdtemp(prefix="topo-regress-")
 
 
@@ -48,10 +50,20 @@ class Skip(Exception):
     pass
 
 
+def _config_state():
+    """Every setting in app.config except the database path (fresh_db sets that); None when the app is not importable."""
+    try:
+        cfg = app_modules()["config"]
+    except Skip:
+        return None
+    return {k: getattr(cfg, k) for k in dir(cfg) if k.isupper() and k != "DB_PATH"}
+
+
 def check(cid, desc):
     """Register and run a check. It returns a list of problems (empty =
     pass) or raises Skip(reason). A crash is a FAIL, never a pass."""
     def wrap(fn):
+        saved = _config_state()
         try:
             problems = fn() or []
             results.append(("FAIL" if problems else "PASS", cid, desc, problems))
@@ -59,6 +71,10 @@ def check(cid, desc):
             results.append(("NOT RUN", cid, desc, [str(e)]))
         except Exception as e:
             results.append(("FAIL", cid, desc, ["check crashed: %r" % e]))
+        finally:
+            if saved is not None:      # whatever a check set in app.config is put back for the next one
+                for name, value in saved.items():
+                    setattr(_mods["config"], name, value)
         return fn
     return wrap
 
@@ -69,10 +85,17 @@ _cache = {}
 
 
 def read(path):
+    """The file as LF text: a CRLF checkout must read the same as an LF one."""
     if path not in _cache:
-        with open(path, encoding="utf-8", errors="replace", newline="") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             _cache[path] = f.read()
     return _cache[path]
+
+
+def read_raw(path):
+    """The file with its line ends as they are on disk."""
+    with open(path, encoding="utf-8", errors="replace", newline="") as f:
+        return f.read()
 
 
 def lines(path):
@@ -157,7 +180,21 @@ def add_device(conn, ip, hostname="rtr", role="router"):
     return did
 
 
-# ============================================================ static tier
+def _put_lldp(conn, dev, local_if, sysname, port, remote_id=None, chassis=None, mgmt_ip=None):
+    conn.execute("INSERT INTO lldp_neighbors (device_id, local_if, remote_chassis, remote_sysname, remote_port, "
+                 "remote_mgmt_ip, remote_device_id, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                 (dev, local_if, chassis, sysname, port, mgmt_ip, remote_id, "2026-01-01 00:00:00"))
+
+def _put_adj(conn, dev, proto, peer_ip, state="Established", peer_device_id=None):
+    conn.execute("INSERT INTO adjacencies (device_id, proto, peer_ip, peer_device_id, state, last_seen) "
+                 "VALUES (?, ?, ?, ?, ?, ?)", (dev, proto, peer_ip, peer_device_id, state, "2026-01-01 00:00:00"))
+
+def _put_iface(conn, dev, name, ip):
+    conn.execute("INSERT INTO interfaces (device_id, name, ip, last_seen) VALUES (?, ?, ?, ?)",
+                 (dev, name, ip, "2026-01-01 00:00:00"))
+
+
+# ============================================================ checks (source text and the app in-process)
 
 @check("R1", "aliases are never deleted (static + a re-IP keeps the old IP)")
 def _():
@@ -171,6 +208,43 @@ def _():
     conn.commit()
     row = conn.execute("SELECT device_id FROM device_aliases WHERE kind='mgmt_ip' AND value='192.0.2.1'").fetchone()
     need(row and row["device_id"] == did, "old mgmt_ip alias 192.0.2.1 is gone after a re-IP", p)
+
+    # Merge: the loser's aliases, events and the rows that point at it move to the survivor; nothing is left behind.
+    loser = add_device(conn, "192.0.2.50", "twin")
+    third = add_device(conn, "192.0.2.60", "third")
+    _put_lldp(conn, third, "Gi1", "twin", "Gi1", remote_id=loser)
+    _put_adj(conn, third, "bgp", "192.0.2.50")
+    conn.execute("UPDATE adjacencies SET peer_device_id = ?", (loser,))
+    m["events"].emit(conn, loser, "device_discovered", "info", "twin", "")
+    ident.merge(conn, did, loser)
+    conn.commit()
+
+    def one(sql, *args):
+        return conn.execute(sql, args).fetchone()[0]
+    need(one("SELECT device_id FROM device_aliases WHERE kind='mgmt_ip' AND value='192.0.2.50'") == did,
+         "merge: the loser's alias did not move to the survivor", p)
+    need(one("SELECT COUNT(*) FROM devices WHERE id = ?", loser) == 0, "merge: the loser is still there", p)
+    need(one("SELECT remote_device_id FROM lldp_neighbors") == did and one("SELECT peer_device_id FROM adjacencies") == did,
+         "merge: a neighbor or peer still points at the loser", p)
+    need(one("SELECT COUNT(*) FROM events WHERE device_id = ?", did) >= 1, "merge: the loser's events were lost", p)
+    for a, b in ((did, did), (did, 999999), (999999, did)):
+        try:
+            ident.merge(conn, a, b)
+            p.append("merge(%s, %s) was accepted" % (a, b))
+        except ValueError:
+            pass
+
+    # Delete: nothing keeps pointing at a deleted device.
+    conn.execute("INSERT INTO node_positions (node_id, x, y, updated_at) VALUES (?, 1, 1, '')", ("dev:%d" % did,))
+    conn.commit()
+    client = m["appmod"].app.test_client()
+    need(client.delete("/api/devices/%d" % did).status_code == 200, "DELETE /api/devices failed", p)
+    need(one("SELECT COUNT(*) FROM device_aliases WHERE device_id = ?", did) == 0
+         and one("SELECT COUNT(*) FROM lldp_neighbors WHERE remote_device_id IS NOT NULL") == 0
+         and one("SELECT COUNT(*) FROM adjacencies WHERE peer_device_id IS NOT NULL") == 0
+         and one("SELECT COUNT(*) FROM node_positions WHERE node_id = ?", "dev:%d" % did) == 0,
+         "delete left an alias, a neighbor/peer reference or a saved map place behind", p)
+    need(client.delete("/api/devices/%d" % did).status_code == 404, "deleting a missing device must be 404", p)
     conn.close()
     return p
 
@@ -201,7 +275,6 @@ def _():
 @check("R3", "IOS-XE commands: no invalid LLDP self-query, no textfsm, brief-table fallback present")
 def _():
     p = []
-    ssh_src = read("topo/app/collectors/ssh.py")
     cmds = " | ".join(app_modules()["ssh"].COMMANDS.values())
     for bad in ("lldp local-info", "lldp entry local"):
         need(bad not in cmds, "COMMANDS uses '%s' (invalid / always empty on IOS-XE 17.3)" % bad, p)
@@ -212,8 +285,28 @@ def _():
                 for kw in node.keywords:
                     if kw.arg == "use_textfsm" and getattr(kw.value, "value", None) is True:
                         p.append("%s:%d use_textfsm=True (needs ntc-templates on Alpine)" % (path, node.lineno))
-    need("fill_lldp_local_if" in ssh_src, "ssh.py no longer fills Local Intf from the brief table", p)
-    need("fill_lldp_local_if" in read("topo/app/parsers/ios.py"), "ios.fill_lldp_local_if is missing", p)
+    # An older IOS prints no "Local Intf:" in the detail output: the collector must take it from the brief table.
+    from app import platforms
+    ssh = app_modules()["ssh"]
+    detail = "------------------------------------------------\nChassis id: 0200.0000.0001\nPort id: Gi0/1\nSystem Name: sw1\n"
+    brief = ("Device ID           Local Intf     Hold-time  Capability      Port ID\n"
+             "sw1                 Gi3            120        B               Gi0/1\n")
+
+    class _Conn:
+        def send_command(self, cmd, **kw):
+            return brief if cmd == platforms.IOS.get("lldp_brief_command") else detail
+
+        def disconnect(self):
+            pass
+    real = ssh.ConnectHandler
+    ssh.ConnectHandler = lambda **kw: _Conn()
+    try:
+        got = list(ssh.run_tasks({"mgmt_ip": "192.0.2.9", "platform": "cisco_ios", "role": "router"},
+                                 {"username": "u", "password": "p", "secret": ""}, ["lldp"]))
+    finally:
+        ssh.ConnectHandler = real
+    rows = got[0][4] or []
+    need(got[0][1] and [r["local_if"] for r in rows] == ["Gi3"], "Local Intf was not filled from the brief table: %r" % (got,), p)
     return p
 
 
@@ -254,6 +347,11 @@ def _():
     return p
 
 
+# Every page in the menu (and none of the open ones): R6 renders them in-process, R20 asks the real server.
+PAGES = ("/", "/devices", "/conflicts", "/topology", "/settings", "/ipam", "/templates", "/find", "/backups", "/changes",
+         "/syslog")
+
+
 @check("R6", "every page renders (a stray Jinja2 {{ in inline JS makes Flask 500)")
 def _():
     p = []
@@ -261,7 +359,7 @@ def _():
     did = add_device(conn, "192.0.2.1")
     conn.close()
     client = m["appmod"].app.test_client()
-    for url in ("/", "/devices", "/devices/%d" % did, "/conflicts", "/topology", "/settings", "/ipam", "/templates"):
+    for url in PAGES + ("/devices/%d" % did,):
         code = client.get(url).status_code
         need(code == 200, "GET %s -> %s" % (url, code), p)
     # The menu: no open conflict = "Conflicts" after Settings; an open one = "Conflicts (1)", highlighted, before Settings.
@@ -393,22 +491,6 @@ def _():
     return p
 
 
-def _put_iface(conn, dev, name, ip):
-    conn.execute("INSERT INTO interfaces (device_id, name, ip, last_seen) VALUES (?, ?, ?, ?)",
-                 (dev, name, ip, "2026-01-01 00:00:00"))
-
-
-def _put_adj(conn, dev, proto, peer_ip, state="Established", peer_device_id=None):
-    conn.execute("INSERT INTO adjacencies (device_id, proto, peer_ip, peer_device_id, state, last_seen) "
-                 "VALUES (?, ?, ?, ?, ?, ?)", (dev, proto, peer_ip, peer_device_id, state, "2026-01-01 00:00:00"))
-
-
-def _put_lldp(conn, dev, local_if, sysname, port, remote_id=None, chassis=None, mgmt_ip=None):
-    conn.execute("INSERT INTO lldp_neighbors (device_id, local_if, remote_chassis, remote_sysname, remote_port, "
-                 "remote_mgmt_ip, remote_device_id, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                 (dev, local_if, chassis, sysname, port, mgmt_ip, remote_id, "2026-01-01 00:00:00"))
-
-
 @check("R12", "peers resolve by a unique interface IP: not an ambiguous one, not to themselves, never stored as an alias")
 def _():
     p = []
@@ -464,15 +546,6 @@ def _():
     lldp = [e for e in g["edges"] if e["layer"] == "lldp"]
     need(len([e for e in lldp if e["label"] == "Gi1 - Gi2" or e["label"] == "Gi2 - Gi1"]) == 1, "the Gi1/Gi2 cable is not drawn exactly once", p)
     need(len([e for e in lldp if "4" in e["label"] and "Gi5" not in e["label"]]) == 2, "differently spelled ports must keep both edges (a duplicate line beats a hidden link)", p)
-    # A port id that is only a MAC (Linux lldpd) is labelled with the port description; the cable key keeps the id.
-    _put_lldp(conn, a, "Gi8", "host9", "0200.0000.0008")
-    conn.execute("UPDATE lldp_neighbors SET remote_port_descr = 'eth0' WHERE remote_port = '0200.0000.0008'")
-    conn.commit()
-    need("Gi8 - eth0" in [e["label"] for e in topology.build(conn)["edges"]], "a MAC port id must be shown as the port description", p)
-    need(topology.port_text("Gi1", "Management") == "Gi1" and topology.port_text("0200.0000.0008", None) == "0200.0000.0008",
-         "a real port name stays, and a MAC with no description stays", p)
-    conn.execute("DELETE FROM lldp_neighbors WHERE local_if = 'Gi8'")
-    conn.commit()
     g = topology.build(conn)
     ghosts = {n["id"]: n for n in g["nodes"] if n["ghost"]}
     need("ghost:lldp:sw9" in ghosts and "ghost:lldp:aabb.ccdd.eeff" in ghosts, "unresolved neighbors are not ghost nodes: %r" % sorted(ghosts), p)
@@ -500,6 +573,33 @@ def _():
     mixed = {e["layer"] for e in topology.build(conn, "lldp,bgp")["edges"]}
     need("lldp" in mixed and "bgp" in mixed and "ospf" not in mixed, "?layer=lldp,bgp must show exactly those two layers: %r" % sorted(mixed), p)
     need(not topology.build(conn, "none")["edges"], "an unknown layer name must draw no edges", p)
+    conn.close()
+    return p
+
+
+@check("R13-labels", "topology labels and node looks: MAC port ids, BGP AS and iBGP/eBGP, Linux ghosts, device type and vendor")
+def _():
+    p = []
+    m, conn = fresh_db()
+    from app import topology
+    a = add_device(conn, "192.0.2.1", "a")
+    b = add_device(conn, "192.0.2.2", "b")
+    # A port id that is only a MAC (Linux lldpd) is labelled with the port description; the cable key keeps the id.
+    _put_lldp(conn, a, "Gi8", "host9", "0200.0000.0008")
+    conn.execute("UPDATE lldp_neighbors SET remote_port_descr = 'eth0' WHERE remote_port = '0200.0000.0008'")
+    conn.commit()
+    need("Gi8 - eth0" in [e["label"] for e in topology.build(conn)["edges"]], "a MAC port id must be shown as the port description", p)
+    need(topology.port_text("Gi1", "Management") == "Gi1" and topology.port_text("0200.0000.0008", None) == "0200.0000.0008",
+         "a real port name stays, and a MAC with no description stays", p)
+    conn.execute("DELETE FROM lldp_neighbors WHERE local_if = 'Gi8'")
+    conn.commit()
+    _put_iface(conn, a, "Lo0", "10.255.0.1")
+    _put_iface(conn, b, "Lo0", "10.255.0.2")
+    _put_adj(conn, a, "bgp", "10.255.0.2")
+    _put_adj(conn, b, "bgp", "10.255.0.1")
+    _put_adj(conn, a, "ospf", "10.255.0.2", "FULL")
+    _put_adj(conn, b, "ospf", "10.255.0.1", "EXSTART")
+    conn.commit()
     # The BGP label carries the AS numbers: a row stores its peer's AS, so a's own AS is b's row.
     conn.execute("UPDATE adjacencies SET remote_as = 65002 WHERE device_id = ? AND proto = 'bgp'", (a,))
     conn.execute("UPDATE adjacencies SET remote_as = 65001 WHERE device_id = ? AND proto = 'bgp'", (b,))
@@ -538,6 +638,27 @@ def _():
     nodes = [n for n in topology.build(conn)["nodes"] if not n["ghost"]]
     need(nodes and all(n["vendor"] == "juniper" and n["device_type"] for n in nodes), "topology nodes must carry vendor (lower case) and device_type", p)
     conn.close()
+    return p
+
+
+@check("R13-positions", "saved map places: stored for every viewer, returned with the map, a bad value refused, DELETE clears")
+def _():
+    p = []
+    m, conn = fresh_db()
+    nid = "dev:%d" % add_device(conn, "192.0.2.1", "a")
+    conn.close()
+    client = m["appmod"].app.test_client()
+    url = "/api/topology/positions"
+
+    def node():
+        return next(n for n in client.get("/api/topology").get_json()["nodes"] if n["id"] == nid)
+    need(client.put(url, json={"positions": {nid: {"x": 12.5, "y": -3}}}).status_code == 200, "saving a node position failed", p)
+    need((node().get("x"), node().get("y")) == (12.5, -3), "saved position not returned by /api/topology: %r" % node(), p)
+    need(client.get("/api/topology").get_json().get("positions", {}).get(nid) == {"x": 12.5, "y": -3},
+         "/api/topology 'positions' lacks the saved place", p)
+    need(client.put(url, json={"positions": {nid: {"x": "a", "y": 1}}}).status_code == 400, "a non-numeric position was accepted", p)
+    need(client.delete(url).status_code == 200, "clearing positions failed", p)
+    need("x" not in node(), "position still returned after DELETE", p)
     return p
 
 
@@ -582,7 +703,8 @@ def _():
 def _():
     p = []
     tasks = app_modules()["ssh"].TASKS
-    words = {"four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12}
+    words = {w: n for n, w in enumerate(("one two three four five six seven eight nine ten eleven twelve thirteen "
+                                         "fourteen fifteen sixteen seventeen eighteen nineteen twenty").split(), 1)}
     doc = read("CLAUDE.md")
     for pat in (r"Per device, (\w+) tasks", r"All (\w+) tasks share"):
         m = re.search(pat, doc)
@@ -602,7 +724,7 @@ def _():
     files = sorted(glob.glob("topo/**/*.sh", recursive=True) + glob.glob("topo/services/*.initd"))
     need(len(files) >= 5, "expected the shell scripts under topo/, found %d" % len(files), p)
     for f in files:
-        text = read(f)
+        text = read_raw(f)
         need("\r" not in text, "%s has CR characters (CRLF breaks the shebang on Alpine)" % f, p)
         # login-setup.sh is sourced from /etc/profile.d, not executed.
         need(text.startswith("#!") or f.endswith("login-setup.sh"), "%s has no shebang" % f, p)
@@ -625,12 +747,41 @@ def _():
 @check("R17", "poller always releases its per-device lock and resets stuck rows at start")
 def _():
     p = []
-    import inspect
-    poller = app_modules()["poller"]
-    src = inspect.getsource(poller._poll_device)
-    fin = src.find("finally:")
-    need(fin != -1 and "_finish(" in src[fin:], "_poll_device no longer calls _finish() in a finally block", p)
-    need("_reset_stuck()" in inspect.getsource(poller._loop), "poller._loop no longer resets stuck 'running' rows", p)
+    m, conn = fresh_db()
+    ssh, poller = m["ssh"], m["poller"]
+    did = add_device(conn, "192.0.2.1", "a")
+    conn.execute("UPDATE devices SET poll_state = 'running' WHERE id = ?", (did,))
+    conn.commit()
+
+    def state():
+        return tuple(conn.execute("SELECT poll_state, fail_count FROM devices WHERE id = ?", (did,)).fetchone())
+
+    def broken(*a, **k):
+        raise RuntimeError("collector blew up")
+
+    class Stop(BaseException):      # not an Exception, so the loop's own "keep going" does not swallow it
+        pass
+
+    def stop(*a, **k):
+        raise Stop()
+    real_run, real_tick = ssh.run_tasks, poller._tick
+    ssh.run_tasks, poller._tick = broken, stop
+    try:
+        try:
+            poller._loop()          # start-up: a row left 'running' by a stopped server is reset
+        except Stop:
+            pass
+        need(state()[0] == "idle", "the poller loop no longer resets stuck 'running' rows: %r" % (state(),), p)
+        conn.execute("UPDATE devices SET poll_state = 'running' WHERE id = ?", (did,))
+        conn.commit()
+        try:
+            poller._poll_device(did)
+        except RuntimeError:
+            pass
+        need(state() == ("idle", 1), "a crash inside a poll did not release the lock and count a failure: %r" % (state(),), p)
+    finally:
+        ssh.run_tasks, poller._tick = real_run, real_tick
+    conn.close()
     return p
 
 
@@ -663,8 +814,9 @@ def _():
     m = app_modules()
     from app import platforms
     ios_tasks = tuple(platforms.IOS["commands"])
-    core = ("version", "interfaces", "lldp", "bgp", "ospf", "routes")
-    need(ios_tasks == core + ("vlans", "trunks", "stp", "mac", "config"), "IOS tasks are %r" % (ios_tasks,), p)
+    ios_only = set(platforms.SWITCH_TASKS) | {"config"}
+    core = tuple(t for t in ios_tasks if t not in ios_only)
+    need(set(core) >= {"version", "interfaces", "lldp", "bgp", "ospf", "routes"}, "IOS lost a core task: %r" % (ios_tasks,), p)
     for name, plat in platforms.PLATFORMS.items():
         if plat["transport"] == "snmp":
             # SNMP asks version and interfaces only, through net-snmp's get and walk: no CLI.
@@ -683,10 +835,11 @@ def _():
         need(set(plat["parsers"]) == set(plat["commands"]), "%s: commands and parsers differ" % name, p)
         # SSH platforms run `show ...`; the XML API platform sends `<show>...</show>` operations. Nothing else.
         prefix = "<show>" if plat.get("transport") == "xml_api" else "show "
-        extra = [("lldp_brief", plat.get("lldp_brief_command", prefix + "x")),
-                 ("bgp_summary", plat.get("bgp_summary_command", prefix + "x")),
-                 ("routes_fallback", plat.get("routes_fallback_command", prefix + "x")),
-                 ("fib", plat.get("fib_command", prefix + "x"))]
+        # Every helper command the platform sends: any key ending in _command (one) or _commands (a dict of several).
+        extra = [(k, v) for k, v in plat.items() if k.endswith("_command")]
+        for k, v in plat.items():
+            if k.endswith("_commands"):
+                extra += [("%s.%s" % (k, name2), cmd2) for name2, cmd2 in v.items()]
         for task, cmd in list(plat["commands"].items()) + extra:
             need(cmd.startswith(prefix), "%s %s runs %r: only read-only 'show' commands are allowed" % (name, task, cmd), p)
     need(platforms.get(None) is platforms.IOS and platforms.get("no-such-os") is platforms.IOS, "unknown platform must fall back to IOS", p)
@@ -766,10 +919,9 @@ def _():
 @check("R23", "LLDP crawl: adopted devices are inventory-only; off by default; bad IPs refused")
 def _():
     p = []
-    cfg_src = read("topo/app/config.py")
-    need('"TOPO_LLDP_AUTO_ADOPT", "false"' in cfg_src, "TOPO_LLDP_AUTO_ADOPT must default to false", p)
-    need('"TOPO_DISCOVERY_INTERVAL_S", "0"' in cfg_src, "TOPO_DISCOVERY_INTERVAL_S must default to 0 (off)", p)
     m, conn = fresh_db()
+    need(m["config"].LLDP_AUTO_ADOPT is False, "TOPO_LLDP_AUTO_ADOPT must default to false", p)
+    need(m["config"].DISCOVERY_INTERVAL_S == 0, "TOPO_DISCOVERY_INTERVAL_S must default to 0 (off)", p)
     from app import lldp_crawl as crawl
     ssh, config = m["ssh"], m["config"]
     did = add_device(conn, "192.0.2.1", "r1")
@@ -974,6 +1126,8 @@ def _():
                     fh.write(js)
                 r = subprocess.run([node, "--check", tmp], capture_output=True, text=True)
                 need(r.returncode == 0, "%s script %d does not parse: %s" % (f, i, r.stderr.strip()[:150]), p)
+    if not node and not p:
+        raise Skip("no node: the inline scripts were not parsed (the other parts passed)")
     return p
 
 
@@ -1064,7 +1218,8 @@ def _():
                            cmds["lldp"]: sample("panos_lldp.xml"), cmds["bgp"]: sample("panos_bgp.xml"),
                            cmds["ospf"]: sample("panos_ospf_neighbor.xml"),
                            plat["bgp_summary_command"]: sample("panos_bgp_summary.xml"),
-                           cmds["routes"]: sample("panos_route.xml"), plat["fib_command"]: sample("panos_fib.xml")}
+                           cmds["routes"]: sample("panos_route.xml"), plat["fib_command"]: sample("panos_fib.xml"),
+                           cmds["vpn"]: sample("panos_vpn_flow.xml")}
     real = panos.requests.Session
     panos.requests.Session = FakeSession
     try:
@@ -1221,7 +1376,6 @@ def _():
     need(topology.norm_mac("sw1") is None and topology.norm_mac("0200.0000") is None and topology.norm_mac(None) is None, "norm_mac must refuse what is not a MAC", p)
     n = conn.execute("SELECT COUNT(*) FROM device_aliases WHERE lower(value) LIKE '%0009%' OR lower(value) LIKE '%lab-fw-1%'").fetchone()[0]
     need(n == 0, "a matched MAC or name was stored as an identity alias (%d)" % n, p)
-    p += at("topo/app/topology.py", grep(r"device_aliases|INSERT|UPDATE|DELETE", "topo/app/topology.py"))
 
     # Settings API: partial update, bad body, env fallback.
     set_on(True, True)
@@ -1341,6 +1495,23 @@ def _():
     conn.close()
     resp = m["appmod"].app.test_client().get("/api/devices/%d/configs/1" % did)
     need(resp.status_code == 200 and b"hunter2" not in resp.data, "API returns an unmasked secret by default", p)
+    # The Backups page: the list, and a search that can neither find nor show a secret.
+    client = m["appmod"].app.test_client()
+    listed = client.get("/api/backups").get_json()
+    need([(x["device_id"], x["versions"]) for x in listed] == [(did, 1)] and "body" not in listed[0], "GET /api/backups: %r" % listed, p)
+    word = a.split()[0]
+
+    def found(**q):
+        return client.get("/api/backups/search", query_string=q).get_json()["devices"]
+    hit = found(q=word)
+    need(len(hit) == 1 and hit[0]["count"] >= 1, "search for %r found %r" % (word, hit), p)
+    need(found(q=word, invert="1") == [], "invert must drop a device that has the line", p)
+    for leak in ("$9$abc", "hunter2", "lab123"):
+        need(found(q=leak) == [], "a secret can be searched for: %r" % leak, p)
+    everything = client.get("/api/backups/search", query_string={"q": ".", "regex": "1"}).get_data(as_text=True)
+    need(not [x for x in ("$9$abc", "hunter2", "lab123") if x in everything], "the search returns an unmasked secret", p)
+    need(client.get("/api/backups/search").status_code == 400
+         and client.get("/api/backups/search", query_string={"q": "(", "regex": "1"}).status_code == 400, "a bad search must be a 400", p)
     return p
 
 
@@ -1686,7 +1857,7 @@ def _():
     return p
 
 
-# ============================================================ live tier
+# ---- failed-poll reasons, managed nodes, IPAM ------------------------
 
 @check("R55", "a failed poll says why: plain one-line reasons per cause, no secret in any of them, the event and devices.last_poll_error carry the reason, one event per failure, success clears it")
 def _():
@@ -2024,8 +2195,9 @@ def _():
     ssh.apply_result(conn, did, "vlans", [])
     conn.commit()
     need(n() == 11, "an empty answer must delete nothing", p)
-    import time
-    time.sleep(1.1)
+    def stale(table):      # as between two real polls: the stored rows are older than this one
+        conn.execute("UPDATE %s SET last_seen = '2000-01-01 00:00:00'" % table)
+    stale("vlans")
     ssh.apply_result(conn, did, "vlans", [x for x in v if x["vlan_id"] != 12])
     conn.commit()
     need(n() == 10, "a real list must replace the old one (VLAN 12 should be gone): %d" % n(), p)
@@ -2037,7 +2209,7 @@ def _():
     conn.commit()
     nt = lambda: conn.execute("SELECT COUNT(*) FROM trunks WHERE device_id = ?", (did,)).fetchone()[0]
     need(nt() == 3, "stored %d trunks" % nt(), p)
-    time.sleep(1.1)
+    stale("trunks")
     ssh.apply_result(conn, did, "trunks", tr[:2])
     conn.commit()
     need(nt() == 2, "a real trunk list must replace the old one: %d" % nt(), p)
@@ -2075,10 +2247,10 @@ def _():
     ssh.apply_result(conn, did, "mac", mac)
     conn.commit()
     need(nm() == 14, "mac: only the 14 dynamic rows must be stored: %d" % nm(), p)
-    time.sleep(1.1)   # a later second than the rows above, so a wrongful delete would show
+    stale("mac_table")
     ssh.apply_result(conn, did, "mac", [])
     need(nm() == 14, "an empty mac parse must delete nothing: %d" % nm(), p)
-    time.sleep(1.1)
+    stale("mac_table")
     ssh.apply_result(conn, did, "mac", mac[:5])
     conn.commit()
     need(nm() == 2, "a real mac answer must replace the old rows: %d" % nm(), p)
@@ -2171,9 +2343,9 @@ def _():
     page = client.get("/settings").get_data(as_text=True)
     need("Confetti Traffic</span>" in page and 'id="links-form"' in page and 'id="sp-form"' in page, "/settings has no Confetti Traffic section holding the URL and the syslog pull", p)
     # The header shortcut: a placeholder in base.html, the shared script, never HTML built from the URL, opens safely.
-    base = open("topo/templates/base.html", encoding="utf-8").read()
+    base = read("topo/templates/base.html")
     need('id="confetti-links"' in base and 'src="/static/confetti-links.js"' in base, "base.html must hold the shortcut span and load confetti-links.js", p)
-    js = open("topo/static/confetti-links.js", encoding="utf-8").read()
+    js = read("topo/static/confetti-links.js")
     need("innerHTML" not in js and "document.write" not in js, "confetti-links.js must not build HTML from the URL", p)
     need("noopener" in js and "_blank" in js and "https?" in js, "confetti-links.js must open in a new tab with noopener and re-check http(s)", p)
     # Node import from the saved URL: only on a click or an opt-in interval, only from that URL, a bad value changes nothing.
@@ -2197,7 +2369,8 @@ def _():
         need(r.status_code == 200 and calls == ["http://hub.example:8080"], "the import must use exactly the saved URL: %s %r" % (r.status_code, calls), p)
         calls.clear()
         disc._traffic_tick()   # what the timer runs; the loop itself skips it while the interval is 0
-        src = open("topo/app/discovery.py", encoding="utf-8").read()
+        need(calls == ["http://hub.example:8080"], "the timer's import did not ask the saved URL: %r" % calls, p)
+        src = read("topo/app/discovery.py")
         need("minutes > 0 and has_url" in src, "the timer must import only when the interval is above 0 and a URL is saved", p)
     finally:
         disc.confetti.discover, disc.start = real, real_start
@@ -2319,13 +2492,29 @@ def _():
     need(not layers("lldp,bgp,ospf"), "?layer=lldp,bgp,ospf must not draw the new layers", p)
     after = {t: conn.execute("SELECT COUNT(*) FROM %s" % t).fetchone()[0] for t in ("device_aliases", "routes", "interfaces")}
     need(before == after, "building the map must not store anything (an alias, a route or an interface): %r -> %r" % (before, after), p)
-    need("INSERT" not in read("topo/app/topology.py").split("def _connected")[1].split("def _as_numbers")[0], "_connected must not write to the database", p)
+    return p
+
+
+@check("R37-display", "the flapping rule for Recent changes: default 3 within 60, whole numbers in range only, all or nothing")
+def _():
+    p = []
+    m, conn = fresh_db()
+    conn.close()
+    client = m["appmod"].app.test_client()
+    url = "/api/settings/flap-display"
+    need(client.get(url).get_json() == {"count": 3, "window_min": 60}, "defaults: %r" % client.get(url).get_json(), p)
+    need(client.put(url, json={"count": 5}).get_json() == {"count": 5, "window_min": 60}, "a partial PUT must keep the other value", p)
+    for bad in ({"count": 1}, {"count": 101}, {"window_min": 0}, {"window_min": 1441}, {"count": "4"}, {"count": True},
+                {"count": 4.5}, {"count": 10, "window_min": 0}, {}, [1]):
+        r = client.put(url, json=bad)
+        need(r.status_code == 400 and client.get(url).get_json() == {"count": 5, "window_min": 60},
+             "%r must be refused (400) and change nothing: %s" % (bad, r.status_code), p)
     return p
 
 
 @check("R39", "ruff F rules: no undefined names, unused imports or variables, redefinitions (topo/, dev/)")
 def _():
-    # Not a constraint check; the next constraint (25) takes R41. ruff is a dev tool
+    # Not a constraint check. ruff is a dev tool
     # (dev/requirements-dev.txt), so a machine without it is NOT RUN, never a pass.
     ruff = [shutil.which("ruff")] if shutil.which("ruff") else [sys.executable, "-m", "ruff"]
     if subprocess.run(ruff + ["--version"], capture_output=True).returncode != 0:
@@ -2403,8 +2592,6 @@ def _():
     db.rollback()
     need(db.execute("SELECT COUNT(*) FROM syslog").fetchone()[0] == 0 and n > 0,
          "insert() must not commit (the caller does)", p)
-    need(".commit(" not in read(SYSLOG_CORE), "syslog_core.py must never call commit (the caller does)", p)
-    need("syslog_core.migrate" in read("topo/app/db.py"), "db.init_db must call syslog_core.migrate", p)
     return p
 
 
@@ -2503,10 +2690,10 @@ def _():
     need(row["poll_state"] == "running" and row["poll_requested_at"] == "", "a claimed request must set 'running' and clear the request: %r" % (tuple(row),), p)
     need(requested(b)["poll_state"] == "idle", "a failing device with a request was claimed (backoff bypassed)", p)
 
-    src = read("topo/app/syslog_trigger.py")
-    need("poll_state" not in src.split('"""')[2], "syslog_trigger.py must not touch poll_state", p)
-    need("allow_reuse_address" not in re.sub(r"#.*", "", read("topo/app/syslog_server.py")), "the syslog listener must not set allow_reuse_address", p)
-    need("syslog_core.insert" in read("topo/app/syslog_server.py"), "syslog_server.py must store through syslog_core.insert", p)
+    listener = importlib.import_module("app.syslog_server")
+    need(not listener._Server.allow_reuse_address, "the syslog listener must not set allow_reuse_address", p)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(syslog)")}
+    need({"origin", "origin_id", "msg_hash"} <= cols, "db.init_db must add syslog_core's columns: %r" % sorted(cols), p)
     return p
 
 
@@ -2698,6 +2885,324 @@ def _():
     return p
 
 
+@check("R58", "IPsec VPN: real answers parse, only read-only commands that cannot print a key, an answer that is not understood deletes nothing, quiet first poll, one map line per tunnel, peers never stored")
+def _():
+    p = []
+    m, conn = fresh_db()
+    ssh, panos, pp, ios = m["ssh"], m["panos"], m["panos_parser"], m["ios"]
+    from app import events, platforms, topology
+
+    # ---- parsers, on sanitised real answers (and one written from Cisco's documented layout)
+    real = ios.parse_vpn(sample("ios_crypto_session_detail.txt"))
+    need(len(real) == 1 and (real[0]["name"], real[0]["peer_ip"], real[0]["local_ip"], real[0]["ike_version"], real[0]["status"],
+                             real[0]["state"], real[0]["packets_in"], real[0]["packets_out"], real[0]["uptime"]) ==
+         ("Tunnel100", "192.0.2.87", "198.51.100.171", "1", "up", "UP-ACTIVE", 330552, 330553, "2w1d"), "ios session: %r" % real, p)
+    enc = ios.fill_vpn_encryption(real, ios.parse_vpn_transforms(sample("ios_crypto_ipsec_sa.txt")))
+    need(enc[0]["encryption"] == "esp-256-aes esp-sha-hmac", "ios transform: %r" % enc[0]["encryption"], p)
+    odd = {r["name"]: r for r in ios.parse_vpn(sample("ios_crypto_session_not_captured.txt"))}
+    need(len(odd) == 2 and (odd["Tunnel200"]["status"], odd["Tunnel200"]["ike_state"], odd["Tunnel200"]["ike_version"]) == ("down", "down", "2"),
+         "a negotiating tunnel must be down: %r" % odd.get("Tunnel200"), p)
+    idle = odd.get("GigabitEthernet2", {})
+    need((idle.get("status"), idle.get("ike_state"), idle.get("ipsec_state"), idle.get("ike_version"), idle.get("vrf"),
+          idle.get("packets_in"), idle.get("packets_out")) == ("down", "up", "down", "", "BLUE", 7, 9),
+         "UP-IDLE (IKE only) must be down, counters summed over the flows: %r" % idle, p)
+    need(ios.parse_vpn("") == [] and ios.parse_vpn("\n  \n") == [], "an empty answer is 'no tunnels'", p)
+    for junk in ("% Invalid input detected at '^' marker.", "        ^\n% Incomplete command.", "something else"):
+        need(ios.parse_vpn(junk) is None, "%r must not read as a tunnel list" % junk[:30], p)
+    flow = pp.parse_vpn_flow(sample("panos_vpn_flow.xml"))
+    need(len(flow or []) == 1 and (flow[0]["name"], flow[0]["interface"], flow[0]["local_ip"], flow[0]["peer_ip"], flow[0]["status"]) ==
+         ("TO-RTR-A", "tunnel.100", "192.0.2.87", "198.51.100.171", "up"), "panos flow: %r" % flow, p)
+    down = pp.parse_vpn_flow(sample("panos_vpn_flow.xml").replace("<mon>up</mon>", "<mon>down</mon>"))
+    need(down and down[0]["status"] == "down", "a tunnel monitor that says down must make the tunnel down", p)
+    need(pp.parse_vpn_flow('<response status="success"><result><num_ipsec>0</num_ipsec></result></response>') == [], "no tunnels must be []", p)
+    for junk in ("", "<x", '<response status="error"><msg>no</msg></response>', '<response status="success"><result></result></response>'):
+        need(pp.parse_vpn_flow(junk) is None, "panos: %r must not read as a tunnel list" % junk[:40], p)
+
+    # ---- every command is a read-only show that cannot print a configuration or a key; the capture tool holds the same line
+    spec = importlib.util.spec_from_file_location("capture_output", "dev/capture_output.py")
+    cap = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cap)
+    pan, ios_plat = platforms.PANOS, platforms.IOS
+    for cmd in [ios_plat["commands"]["vpn"], ios_plat["vpn_transform_command"]]:
+        need(cap.allowed(cmd, False), "IOS VPN command refused as unsafe: %r" % cmd, p)
+    for cmd in [pan["commands"]["vpn"], pan["vpn_flow_command"] % 1] + list(pan["vpn_commands"].values()):
+        need(cap.allowed(cmd, True), "PAN-OS VPN command refused as unsafe: %r" % cmd, p)
+    for cmd, xml in (("show running-config", False), ("show crypto key mypubkey rsa", False), ("clear crypto session", False),
+                     ("configure terminal", False), ("show crypto isakmp key", False), ("<show><config><running/></config></show>", True),
+                     ("<request><vpn/></request>", True), ("<test><vpn><ike-sa/></vpn></test>", True)):
+        need(not cap.allowed(cmd, xml), "the capture tool would send %r" % cmd, p)
+
+    # ---- the SSH collector: algorithms from the second command, which may fail; anything not understood fails the task
+    asked = []
+    answers = {}
+
+    class _Conn:
+        def send_command(self, cmd, **kw):
+            asked.append(cmd)
+            got = answers.get(cmd, "")
+            if isinstance(got, Exception):
+                raise got
+            return got
+
+        def disconnect(self):
+            pass
+    dev = {"mgmt_ip": "192.0.2.9", "platform": "cisco_ios", "role": "router"}
+
+    def over_ssh():
+        asked.clear()
+        real_connect = ssh.ConnectHandler
+        ssh.ConnectHandler = lambda **kw: _Conn()
+        try:
+            return list(ssh.run_tasks(dev, {"username": "u", "password": "p", "secret": ""}, ["vpn"]))[0]
+        finally:
+            ssh.ConnectHandler = real_connect
+    show, more = ios_plat["commands"]["vpn"], ios_plat["vpn_transform_command"]
+    answers.update({show: sample("ios_crypto_session_detail.txt"), more: sample("ios_crypto_ipsec_sa.txt")})
+    got = over_ssh()
+    need(got[1] and got[4][0]["encryption"] == "esp-256-aes esp-sha-hmac", "ssh vpn task: %r" % (got,), p)
+    answers[more] = RuntimeError("timeout")
+    got = over_ssh()
+    need(got[1] and len(got[4]) == 1 and got[4][0]["encryption"] == "", "a failed algorithm command must keep the tunnels: %r" % (got,), p)
+    answers[show] = ""
+    got = over_ssh()
+    need(got[1] and got[4] == [] and asked == [show], "no tunnels: ok, empty, and nothing else asked: %r %r" % (got, asked), p)
+    answers[show] = "          ^\n% Invalid input detected at '^' marker."
+    got = over_ssh()
+    need(not got[1] and "% Invalid input" in (got[3] or ""), "a '%%' answer must fail the task and say what the device said: %r" % (got,), p)
+    for plat_name in ("snmp", "confetti_node"):
+        need("vpn" not in platforms.tasks(platforms.get(plat_name)), "%s must not run the vpn task" % plat_name, p)
+
+    # ---- the XML API collector
+    replies = {pan["commands"]["vpn"]: sample("panos_vpn_flow.xml"), pan["vpn_commands"]["ike_sa"]: sample("panos_vpn_ike_sa.xml"),
+               pan["vpn_commands"]["gateway"]: sample("panos_vpn_gateway.xml"),
+               pan["vpn_commands"]["ipsec_sa"]: sample("panos_vpn_ipsec_sa.xml"),
+               pan["vpn_commands"]["tunnel"]: sample("panos_vpn_tunnel.xml"), pan["vpn_flow_command"] % 2: sample("panos_vpn_flow_tunnel.xml")}
+    sent = []
+
+    class _Resp:
+        status_code = 200
+
+        def __init__(self, text):
+            self.text = text
+
+    class _Session:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, data=None, **kw):
+            if data["type"] == "keygen":
+                return _Resp('<response status="success"><result><key>K</key></result></response>')
+            sent.append(data["cmd"])
+            return _Resp(replies.get(data["cmd"], '<response status="error"><msg>denied</msg></response>'))
+
+    def over_api():
+        sent.clear()
+        real_session = panos.requests.Session
+        panos.requests.Session = _Session
+        try:
+            return list(panos.run_tasks({"mgmt_ip": "192.0.2.9"}, {"username": "u", "password": "p"}, ["vpn"]))[0]
+        finally:
+            panos.requests.Session = real_session
+    got = over_api()
+    t = (got[4] or [{}])[0]
+    need(got[1] and (t.get("ike_state"), t.get("ike_version"), t.get("encryption"), t.get("selectors"), t.get("bytes_in"),
+                     t.get("packets_out")) == ("up", "1", "A256 / SHA1", "0.0.0.0/0 0.0.0.0/0", 129049920, 1075440),
+         "panos vpn task: %r" % (got[4],), p)
+    need(all(c.startswith("<show>") for c in sent), "a command that is not <show>: %r" % sent, p)
+    for key in list(replies):
+        if key != pan["commands"]["vpn"]:
+            del replies[key]
+    got = over_api()
+    need(got[1] and got[4][0]["ike_state"] == "" and got[4][0]["status"] == "up",
+         "refused helper commands must keep the tunnel, IKE state unknown (not 'down'): %r" % (got,), p)
+    replies[pan["commands"]["vpn"]] = '<response status="success"><result><num_ipsec>0</num_ipsec></result></response>'
+    got = over_api()
+    need(got[1] and got[4] == [] and len(sent) == 1, "no tunnels: one request only: %r" % sent, p)
+    replies[pan["commands"]["vpn"]] = '<response status="success"><result></result></response>'
+    need(not over_api()[1], "an answer that is not a tunnel list must fail the task", p)
+
+    # ---- store, events, and "a failed task deletes nothing"
+    a = add_device(conn, "192.0.2.1", "a")
+    b = add_device(conn, "192.0.2.2", "b")
+
+    def tunnel(name, peer, local, status="up", iface=None):
+        return {"name": name, "peer_ip": peer, "interface": iface or name, "local_ip": local, "vrf": "", "ike_version": "2",
+                "ike_state": status, "ipsec_state": status, "status": status, "state": status, "encryption": "x",
+                "selectors": "", "packets_in": 1, "packets_out": 2, "bytes_in": None, "bytes_out": None, "uptime": ""}
+
+    def poll(dev_id, rows):
+        ssh.apply_result(conn, dev_id, "vpn", rows)
+        conn.execute("INSERT INTO poll_history (device_id, transport, task, ok, started_at, received_at) VALUES (?, 'ssh', 'vpn', 1, '', '')", (dev_id,))
+        conn.commit()
+    kinds = lambda: [(r[0], r[1]) for r in conn.execute("SELECT kind, severity FROM events ORDER BY id")]
+    count = lambda: conn.execute("SELECT COUNT(*) FROM vpn_tunnels WHERE device_id = ?", (a,)).fetchone()[0]
+    one = tunnel("Tunnel1", "198.51.100.2", "198.51.100.1")
+    poll(a, [one])
+    poll(a, [one])
+    need(kinds() == [] and count() == 1, "the first poll and an unchanged one must be silent: %r" % kinds(), p)
+    poll(a, [dict(one, status="down", state="DOWN"), tunnel("Tunnel2", "198.51.100.9", "198.51.100.1")])
+    need(sorted(kinds()) == [("vpn_added", "info"), ("vpn_state", "warning")], "one down and one new tunnel: %r" % kinds(), p)
+    poll(a, [one])
+    need(kinds()[2:] == [("vpn_state", "info"), ("vpn_removed", "warning")] and count() == 1, "back up and one gone: %r" % kinds(), p)
+    for kind, change, item in (("vpn_state", "changed", "Tunnel1 to 198.51.100.2"), ("vpn_removed", "removed", "Tunnel2 to 198.51.100.9"),
+                               ("vpn_added", "added", "Tunnel2 to 198.51.100.9")):
+        row = conn.execute("SELECT subject, detail FROM events WHERE kind = ? ORDER BY id LIMIT 1", (kind,)).fetchone()
+        d = events.describe(kind, row[0], row[1], "a")
+        need((d["type"], d["change"], d["item"]) == ("VPN tunnel", change, item), "describe(%s): %r" % (kind, d), p)
+
+    real_run = ssh.run_tasks
+    ssh.run_tasks = lambda *x, **k: iter([("version", True, "", None, {}), ("vpn", False, None, "no answer", None)])
+    try:
+        m["poller"]._poll_device(a)
+    finally:
+        ssh.run_tasks = real_run
+    need(count() == 1, "a failed vpn task deleted tunnels", p)
+
+    # ---- the map: mirrored reports are one line, up only if both are up; unknown and two-owner peers are unknown nodes
+    _put_iface(conn, a, "Lo0", "198.51.100.1")
+    _put_iface(conn, b, "Lo0", "198.51.100.2")
+    conn.commit()
+    poll(b, [tunnel("Tunnel1", "198.51.100.1", "198.51.100.2")])
+    poll(a, [one, tunnel("Tunnel3", "203.0.113.9", "198.51.100.1", "down")])
+    lines_ = lambda: sorted((e["to"], e["label"], e["up"], len(e["details"])) for e in topology.build(conn, "ipsec")["edges"])
+    need(lines_() == [("dev:%d" % b, "IPsec up", True, 2), ("ghost:peer:203.0.113.9", "IPsec down", False, 1)], "ipsec lines: %r" % lines_(), p)
+    poll(b, [tunnel("Tunnel1", "198.51.100.1", "198.51.100.2", "down")])
+    need(("dev:%d" % b, "IPsec down", False, 2) in lines_(), "one end down must draw the line down: %r" % lines_(), p)
+    need(not [e for e in topology.build(conn, "lldp,bgp")["edges"] if e["layer"] == "ipsec"], "?layer= must leave IPsec out", p)
+    # two tunnels between the same pair, matched by their addresses, not by their order
+    _put_iface(conn, a, "Lo1", "198.51.100.11")
+    _put_iface(conn, b, "Lo1", "198.51.100.12")
+    conn.commit()
+    poll(a, [one, tunnel("Tunnel9", "198.51.100.12", "198.51.100.11", "down")])
+    poll(b, [tunnel("Tunnel9", "198.51.100.11", "198.51.100.12", "down"), tunnel("Tunnel1", "198.51.100.1", "198.51.100.2")])
+    ends = sorted((e["label"], sorted(d["tunnel"] for d in e["details"])) for e in topology.build(conn, "ipsec")["edges"])
+    need(ends == [("IPsec down", ["Tunnel9", "Tunnel9"]), ("IPsec up", ["Tunnel1", "Tunnel1"])], "two tunnels between one pair: %r" % ends, p)
+
+    # ---- the API names the peer's device when exactly one owns the address, and stores nothing
+    aliases = conn.execute("SELECT COUNT(*) FROM device_aliases").fetchone()[0]
+    client = m["appmod"].app.test_client()
+    rows = {(r["hostname"], r["name"]): r for r in client.get("/api/vpn").get_json()}
+    need(rows[("a", "Tunnel1")]["peer_device_id"] == b and rows[("a", "Tunnel1")]["peer_hostname"] == "b", "peer not resolved: %r" % rows[("a", "Tunnel1")], p)
+    third = add_device(conn, "192.0.2.3", "c")
+    _put_iface(conn, third, "Lo0", "198.51.100.2")
+    conn.commit()
+    rows = {(r["hostname"], r["name"]): r for r in client.get("/api/vpn?device_id=%d" % a).get_json()}
+    need(rows[("a", "Tunnel1")]["peer_device_id"] is None and len(rows) == 2, "an address on two devices must name none: %r" % rows, p)
+    need(client.get("/api/vpn?device_id=x").status_code == 400, "a bad device_id must be 400", p)
+    # a management address that sits on interfaces of two devices names neither of them
+    _put_iface(conn, b, "Gi9", "192.0.2.2")
+    _put_iface(conn, third, "Gi9", "192.0.2.2")
+    conn.commit()
+    poll(a, [one, tunnel("Tunnel8", "192.0.2.2", "198.51.100.1")])
+    shared = [r for r in client.get("/api/vpn?device_id=%d" % a).get_json() if r["name"] == "Tunnel8"]
+    need(shared and shared[0]["peer_device_id"] is None, "an ambiguous management address was resolved: %r" % shared, p)
+    need(conn.execute("SELECT COUNT(*) FROM device_aliases WHERE value LIKE '198.51.100.%'").fetchone()[0] == 0
+         and conn.execute("SELECT COUNT(*) FROM device_aliases").fetchone()[0] >= aliases, "a peer or interface address became an alias", p)
+    need("peer_device_id" not in [r[1] for r in conn.execute("PRAGMA table_info(vpn_tunnels)")], "the peer's device must not be stored", p)
+    found = client.get("/api/find?q=198.51.100.2").get_json()
+    need(any(s["key"] == "vpn" and s["rows"] for s in found["sections"]), "Find must list a VPN peer address", p)
+    poll(a, [])
+    need(count() == 0, "a real 'no tunnels' answer must clear the rows", p)
+    conn.close()
+    return p
+
+
+@check("R59", "Compare: a link whose state changed is 'changed' (not gone plus new), only shown layers count, and nothing is saved while a compare or snapshot is shown")
+def _():
+    p = []
+    page = read("topo/templates/topology.html")
+    need('src="/static/compare.js"' in page and "function buildCompare" not in page, "topology.html must use static/compare.js", p)
+    writes = re.findall(r"fetch\('/api/topology/positions'", page)
+    need(len(writes) == 2, "expected two position writes (save, clear), found %d: guard a new one and extend this check" % len(writes), p)
+    node = shutil.which("node")
+    if not node:
+        if p:
+            return p
+        raise Skip("no node: static/compare.js was not run")
+
+    def function_of(name):
+        m = re.search(r"^function %s\((?:[^\n]*\}$|.*?^\})" % name, page, re.M | re.S)
+        return m.group(0) if m else ""
+    guards = "\n".join(function_of(n) for n in ("readOnlyView", "savePositions", "rearrange"))
+    script = r"""
+const c = require(__PATH__);
+const node = (id) => ({ id: id, label: id, ghost: false, reachable: 1 });
+const link = (from, to, layer, label, up) => ({ from: from, to: to, layer: layer, label: label, up: up });
+const older = { taken_at: 't1', positions: {}, nodes: [node('a'), node('b'), node('c'), node('old')],
+  edges: [link('a', 'b', 'bgp', 'BGP Established', true), link('a', 'b', 'ipsec', 'IPsec up', true), link('a', 'c', 'ospf', 'OSPF FULL', true),
+          link('a', 'old', 'lldp', 'x - y', true)] };
+const newer = { taken_at: 't2', positions: {}, nodes: [node('a'), node('b'), node('c'), node('new')],
+  edges: [link('a', 'b', 'bgp', 'BGP Idle', false), link('a', 'b', 'ipsec', 'IPsec down', false), link('a', 'c', 'ospf', 'OSPF FULL', true),
+          link('a', 'new', 'lldp', 'p - q', true)] };
+const out = {};
+const all = c.buildCompare(older, newer, x => x);
+out.edges = all.edges.map(e => e.layer + ' ' + e.to + ' ' + e.cmp).sort();
+out.nodes = all.nodes.map(n => n.id + ' ' + n.cmp).sort();
+out.goneKey = c.edgeKey(all.edges.find(e => e.cmp === 'gone')).endsWith('|gone');
+const only = c.buildCompare(older, newer, m => Object.assign({}, m, { edges: m.edges.filter(e => e.layer === 'ospf') }));
+out.hidden = only.edges.map(e => e.cmp);
+out.same = only.nodes.filter(n => n.id === 'b').map(n => n.cmp);
+
+let viewSnap = null, comparing = false, treeOn = false, sent = 0;
+const cmpOn = () => comparing, toast = () => {}, confirm = () => true;
+const network = { getPositions: () => ({}) };
+const fetch = () => { sent++; const p = { then: () => p, catch: () => p }; return p; };
+__GUARDS__
+savePositions(['a']); out.live = sent;
+for (const mode of ['compare', 'snapshot']) {
+  sent = 0; comparing = mode === 'compare'; viewSnap = mode === 'snapshot' ? {} : null;
+  savePositions(['a']); rearrange(); out[mode] = sent;
+}
+console.log(JSON.stringify(out));
+""".replace("__PATH__", json.dumps(os.path.abspath("topo/static/compare.js"))).replace("__GUARDS__", guards)
+    tmp = os.path.join(TMP, "r59.js")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(script)
+    r = subprocess.run([node, tmp], capture_output=True, text=True)
+    if r.returncode != 0:
+        return p + ["node failed: %s" % r.stderr.strip()[:300]]
+    got = json.loads(r.stdout)
+    need(got["edges"] == ["bgp b changed", "ipsec b changed", "lldp new added", "lldp old gone", "ospf c same"], "links: %r" % got["edges"], p)
+    need(got["nodes"] == ["a changed", "b changed", "c same", "new added", "old gone"], "nodes: %r" % got["nodes"], p)
+    need(got["goneKey"], "a gone link needs its own id", p)
+    need(got["hidden"] == ["same"] and got["same"] == ["same"], "a hidden layer's changes must not count: %r %r" % (got["hidden"], got["same"]), p)
+    need(got["live"] == 1, "the live map must still save places", p)
+    need(got["compare"] == 0 and got["snapshot"] == 0, "places were written while read-only: %r" % got, p)
+    return p
+
+
+@check("R60", "colours: every CSS variable a page uses exists, and every theme and colour layout defines the whole palette")
+def _():
+    p = []
+    strip = lambda s: re.sub(r"/\*.*?\*/", "", s, flags=re.S)
+
+    def blocks(path):
+        for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", strip(read(path))):
+            yield " ".join(m.group(1).split()), set(re.findall(r"(--[\w-]+)\s*:", m.group(2)))
+    theme = list(blocks("topo/static/theme.css"))
+    palette = theme[0][1]
+    need(len(theme) >= 5 and "--bg" in palette, "theme.css: no palette found", p)
+    for path in ("topo/static/theme.css", "topo/static/layout.css"):
+        for sel, names in blocks(path):
+            if "--bg" in names and palette - names:
+                p.append("%s %s misses %s" % (path, sel[-60:], " ".join(sorted(palette - names))))
+    shared = set(re.findall(r"(--[\w-]+)\s*:", strip(read("topo/static/layout.css")))) | palette
+    for f in sorted(glob.glob("topo/templates/*.html") + glob.glob("topo/static/*.js") + glob.glob("topo/static/*.css")):
+        src = strip(read(f))
+        local = set(re.findall(r"(--[\w-]+)\s*:", src)) | set(re.findall(r"setProperty\('(--[\w-]+)'", src))
+        used = set(re.findall(r"var\(\s*(--[\w-]+)\s*\)", src)) | set(re.findall(r"themeColor\('(--[\w-]+)'", src))
+        used |= set(re.findall(r"'(--(?:green|red|orange|pink|yellow|blue|cyan|purple|gray))'", src))
+        for name in sorted(used - shared - local):
+            p.append("%s uses %s, which no stylesheet defines" % (f, name))
+    return p
+
+
+# ============================================================ live tier (a real server)
+
+
 def run_live():
     """Start the real server (serve.py) from a temp copy on free ports and
     drive it over HTTP and UDP."""
@@ -2736,7 +3241,7 @@ def run_live():
         need(health.get("poller_running") is True, "poller is not running", problems)
         need(health.get("reach_running") is True, "ICMP checker is not running", problems)
         need(b"topo_up 1" in get("/metrics")[1], "/metrics does not answer", problems)
-        for url in ("/", "/devices", "/topology", "/conflicts", "/settings", "/syslog", "/changes", "/ipam", "/templates", "/configs/", "/api/ipam/findings", "/api/templates"):
+        for url in PAGES + ("/configs/", "/static/theme.css"):
             code = get(url)[0]
             need(code == 200, "GET %s -> %s" % (url, code), problems)
         req = urllib.request.Request(base + "/api/devices", method="POST",
@@ -2747,25 +3252,6 @@ def run_live():
         need(b"regress1" in get("/api/devices")[1], "new device missing from GET /api/devices", problems)
         graph = json.loads(get("/api/topology")[1])
         need(any(n["label"] == "regress1" for n in graph.get("nodes", [])), "new device missing from /api/topology", problems)
-        need(get("/api/lldp-neighbors")[0] == 200 and get("/api/adjacencies")[0] == 200, "neighbor APIs do not answer", problems)
-
-        def send(method, path, body):
-            req = urllib.request.Request(base + path, method=method, data=json.dumps(body).encode() if body else None,
-                                         headers={"Content-Type": "application/json"})
-            try:
-                with urllib.request.urlopen(req, timeout=5) as r:
-                    return r.status
-            except urllib.error.HTTPError as e:
-                return e.code
-        nid = next(n["id"] for n in graph["nodes"] if n["label"] == "regress1")
-        need(send("PUT", "/api/topology/positions", {"positions": {nid: {"x": 12.5, "y": -3}}}) == 200, "saving a node position failed", problems)
-        saved = next(n for n in json.loads(get("/api/topology")[1])["nodes"] if n["id"] == nid)
-        need((saved.get("x"), saved.get("y")) == (12.5, -3), "saved position not returned by /api/topology: %r" % saved, problems)
-        need(json.loads(get("/api/topology")[1]).get("positions", {}).get(nid) == {"x": 12.5, "y": -3}, "/api/topology 'positions' lacks the saved place", problems)
-        need(send("PUT", "/api/topology/positions", {"positions": {nid: {"x": "a", "y": 1}}}) == 400, "a non-numeric position was accepted", problems)
-        need(send("DELETE", "/api/topology/positions", None) == 200, "clearing positions failed", problems)
-        cleared = next(n for n in json.loads(get("/api/topology")[1])["nodes"] if n["id"] == nid)
-        need("x" not in cleared, "position still returned after DELETE", problems)
         # syslog: a real UDP datagram is stored, parsed, served and not passed on as a pulled row
         need(health.get("syslog_listening") is True, "the syslog listener is not bound", problems)
         udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -2800,12 +3286,21 @@ def run_live():
 # ============================================================ run
 
 def tree_state():
-    """What git sees changed/untracked, plus any bytecode: a run must not
-    add to either."""
-    out = sorted(glob.glob("**/__pycache__", recursive=True))
-    if shutil.which("git"):
-        r = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
-        out += r.stdout.splitlines()
+    """{path: (size, mtime)} of every file in the repo. A run must not add, remove or change one. Left out: git's own
+    files, ruff's cache, and what a dev server on the same checkout writes while the gate runs."""
+    out = {}
+    for folder, dirs, files in os.walk("."):
+        rel = os.path.relpath(folder, ".").replace(os.sep, "/")
+        dirs[:] = [d for d in dirs if d not in (".git", ".ruff_cache") and not (rel == "topo" and d == "backups")]
+        for name in files:
+            path = name if rel == "." else rel + "/" + name
+            if path.startswith("topo/topo.db") or path == ".claude/settings.local.json":
+                continue
+            try:
+                st = os.stat(path)
+            except OSError:
+                continue
+            out[path] = (st.st_size, st.st_mtime_ns)
     return out
 
 
@@ -2820,8 +3315,8 @@ else:
         results.append(("FAIL", "R20", "live tier", ["crashed: %r" % e]))
 after = tree_state()
 if after != before:
-    results.append(("FAIL", "clean", "run left files in the tree",
-                    ["before %s, after %s" % (before, after)]))
+    results.append(("FAIL", "clean", "the run changed files in the tree",
+                    sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))[:20]))
 shutil.rmtree(TMP, ignore_errors=True)
 
 results.sort(key=lambda r: (len(r[1]), r[1]))

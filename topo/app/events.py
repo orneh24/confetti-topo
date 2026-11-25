@@ -80,6 +80,17 @@ def describe(kind, subject, detail, hostname):
             out.update(type=label, change="removed", item=peer, before="", after="n/a")
         else:
             out.update(type=label, change="changed", item=peer, before=before, after=after or state)
+    elif kind.startswith("vpn_"):
+        # "VPN tunnel <name> to <peer>: up" or "... removed"
+        item = re.sub(r"^VPN tunnel ", "", rest)
+        item = item[:-len(" removed")] if item.endswith(" removed") else item.rsplit(": ", 1)[0]
+        state = rest.rsplit(": ", 1)[-1]
+        if kind == "vpn_added":
+            out.update(type="VPN tunnel", change="added", item=item, before="n/a", after=state)
+        elif kind == "vpn_removed":
+            out.update(type="VPN tunnel", change="removed", item=item, before="", after="n/a")
+        else:
+            out.update(type="VPN tunnel", change="changed", item=item, before=before, after=after or state)
     elif kind == "routes_changed":
         m = re.search(r"routes (\+\d+ -\d+)", rest)
         out.update(type="Routes", change="changed", item=m.group(1) if m else rest)

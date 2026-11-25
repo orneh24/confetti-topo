@@ -60,8 +60,45 @@ def _keygen(session, host, creds):
     return key
 
 
+VPN_DETAIL_MAX = 50   # tunnels asked for their counters per poll
+
+
+def _try_op(session, host, key, cmd):
+    """A helper command: "" when the firewall will not answer it (a role without the right), so the poll goes on."""
+    try:
+        return _op(session, host, key, cmd)
+    except Exception:
+        return ""
+
+
+def _run_vpn(session, host, key, output, plat):
+    tunnels = plat["parsers"]["vpn"](output)
+    if tunnels is None:
+        raise ApiError("the answer is not a VPN tunnel list")
+    if not tunnels:
+        return output, []
+    helpers = {name: _try_op(session, host, key, cmd) for name, cmd in plat["vpn_commands"].items()}
+    ike = parser.parse_vpn_ike_sa(helpers["ike_sa"])
+    versions = parser.parse_vpn_gateways(helpers["gateway"])
+    algorithms = parser.parse_vpn_ipsec_sa(helpers["ipsec_sa"])
+    selectors = parser.parse_vpn_selectors(helpers["tunnel"])
+    asked = 0
+    for t in tunnels:
+        tid, gateway = str(t.pop("tunnel_id") or ""), t.pop("gateway_id")
+        t["ike_state"] = "" if ike is None else "up" if gateway in ike else "down"
+        t["ike_version"] = versions.get(gateway, "")
+        t["encryption"] = algorithms.get(tid, "")
+        t["selectors"] = selectors.get(tid, "")
+        if tid and asked < VPN_DETAIL_MAX:
+            asked += 1
+            t.update(parser.parse_vpn_flow_detail(_try_op(session, host, key, plat["vpn_flow_command"] % int(tid))))
+    return "\n\n".join([output] + [x for x in helpers.values() if x]), tunnels
+
+
 def _run_command(session, host, key, task, plat):
     output = _op(session, host, key, plat["commands"][task])
+    if task == "vpn":
+        return _run_vpn(session, host, key, output, plat)
     if task == "routes":
         # The RIB is the answer; without the FIB (a role that may not run it) the RIB is still worth having.
         try:

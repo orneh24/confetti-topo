@@ -1,0 +1,20 @@
+<response status="success"><result>
+  <entries>
+    <entry>
+      <gwid>1</gwid>
+      <gateway>GW-TO-RTR-A</gateway>
+      <tid>2</tid>
+      <remote>198.51.100.171                          </remote>
+      <name>TO-RTR-A</name>
+      <proto>ESP</proto>
+      <enc>A256</enc>
+      <hash>SHA1</hash>
+      <i_spi>286331153</i_spi>
+      <o_spi>572662306</o_spi>
+      <kb>4608000</kb>
+      <life>3600</life>
+      <remain>3090</remain>
+    </entry>
+  </entries>
+  <ntun>2</ntun>
+</result></response>

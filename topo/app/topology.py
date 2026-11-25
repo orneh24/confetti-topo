@@ -83,6 +83,31 @@ def resolve(owners, device_id, stored_id, ip):
     return None if found == device_id else found
 
 
+def vpn_tunnels(conn, device_id=None):
+    """Stored IPsec tunnels, each with the device its peer address belongs to (peer_device_id, or None).
+
+    The match is made now and never stored (constraint 12): the one device with that address on an interface, else
+    the one device managed at that address. A device is never its own peer.
+    """
+    owners = interface_owners(conn)
+    managed = {r["mgmt_ip"]: r["id"] for r in conn.execute(
+        "SELECT mgmt_ip, MIN(id) AS id FROM devices WHERE mgmt_ip IS NOT NULL AND mgmt_ip <> '' "
+        "GROUP BY mgmt_ip HAVING COUNT(*) = 1")}
+    shared = {r["ip"] for r in conn.execute("SELECT ip FROM interfaces WHERE ip IS NOT NULL AND ip <> '' "
+                                            "GROUP BY ip HAVING COUNT(DISTINCT device_id) > 1")}
+    sql = ("SELECT v.*, d.hostname FROM vpn_tunnels v JOIN devices d ON d.id = v.device_id"
+           + (" WHERE v.device_id = ?" if device_id is not None else "") + " ORDER BY d.hostname, v.name, v.peer_ip")
+    out = []
+    for r in conn.execute(sql, () if device_id is None else (device_id,)):
+        row = dict(r)
+        found = owners.get(row["peer_ip"])
+        if found is None and row["peer_ip"] not in shared:   # an address on two devices names none of them
+            found = managed.get(row["peer_ip"])
+        row["peer_device_id"] = resolve({}, row["device_id"], found, None)
+        out.append(row)
+    return out
+
+
 def norm_mac(text):
     """12 lower-case hex digits for "02:00:00:00:00:09", "0200.0000.0009" or "02-00-00-00-00-09", else None."""
     text = (text or "").strip()
@@ -198,10 +223,13 @@ def _is_up(row):
     return row["state"] == ("Established" if row["proto"] == "bgp" else "FULL")
 
 
+LAYERS = ("lldp", "bgp", "ospf", "ipsec", "default", "connected")
+
+
 def build(conn, layer=None):
-    """layer limits the edges to some sources: "lldp", "bgp", "ospf", "default", "connected", or a comma list
-    such as "lldp,bgp". None or "" overlays all five; an unknown name draws none."""
-    wanted = {"lldp", "bgp", "ospf", "default", "connected"} if not layer else {x.strip() for x in layer.split(",")}
+    """layer limits the edges to some sources: "lldp", "bgp", "ospf", "ipsec", "default", "connected", or a comma
+    list such as "lldp,bgp". None or "" overlays all six; an unknown name draws none."""
+    wanted = set(LAYERS) if not layer else {x.strip() for x in layer.split(",")}
     ctx = lldp_context(conn)
     owners = ctx["owners"]
     device_as = bgp_as_numbers(conn, owners)
@@ -337,6 +365,9 @@ def build(conn, layer=None):
                     "details": [_session_report(x, names) for x in ends],
                 })
 
+    if "ipsec" in wanted:
+        _ipsec(conn, ghost_id, edges)
+
     if "default" in wanted:
         # A device's 0.0.0.0/0 route(s): one edge per next hop, from the device to the owner of the next hop.
         # RIB only (a PAN-OS FIB row would draw the same line twice). Not de-duplicated: a default is one-way.
@@ -364,6 +395,52 @@ def build(conn, layer=None):
             nodes[p["node_id"]].update(x=p["x"], y=p["y"])
 
     return {"nodes": list(nodes.values()), "edges": edges, "positions": positions}
+
+
+def _vpn_report(r):
+    """What one end says about an IPsec tunnel, for the link details."""
+    def traffic(unit):
+        got = (r[unit + "_in"], r[unit + "_out"])
+        return "" if got == (None, None) else "in {} / out {}".format(*("?" if x is None else x for x in got))
+    return {"reported_by": r["hostname"], "tunnel": r["name"], "interface": r["interface"], "local_ip": r["local_ip"],
+            "peer_ip": r["peer_ip"], "state": r["state"] or r["status"],
+            "ike": " ".join(x for x in ("IKEv" + r["ike_version"] if r["ike_version"] else "", r["ike_state"]) if x),
+            "ipsec_state": r["ipsec_state"], "encryption": r["encryption"], "selectors": r["selectors"], "vrf": r["vrf"],
+            "packets": traffic("packets"), "bytes": traffic("bytes"), "uptime": r["uptime"]}
+
+
+def _ipsec(conn, ghost_id, edges):
+    """IPsec layer: one line per tunnel. A tunnel both ends report is drawn once, up only if both say up; a peer that
+    is not a known device is the same unknown node a BGP peer at that address would be. Built from vpn_tunnels when
+    asked; the peer's device is never stored (constraint 12)."""
+    pairs = {}   # {device, device} -> {device_id: [rows that device reports]}
+    for r in vpn_tunnels(conn):
+        remote = r["peer_device_id"]
+        if remote is None:
+            edges.append({"from": "dev:{}".format(r["device_id"]), "to": ghost_id("peer", r["peer_ip"]), "layer": "ipsec",
+                          "label": "IPsec " + r["status"], "up": r["status"] == "up", "details": [_vpn_report(r)]})
+        else:
+            pairs.setdefault(frozenset([r["device_id"], remote]), {}).setdefault(r["device_id"], []).append(r)
+    for pair, by_device in pairs.items():
+        lo, hi = sorted(pair)
+        a = sorted(by_device.get(lo, []), key=lambda x: x["status"] != "up")
+        b = sorted(by_device.get(hi, []), key=lambda x: x["status"] != "up")
+        tunnels = []
+        # First the two reports whose addresses mirror each other; what is left (NAT, an end with no local address)
+        # is paired by position, up first.
+        for x in list(a):
+            twin = next((y for y in b if x["local_ip"] and (x["local_ip"], x["peer_ip"]) == (y["peer_ip"], y["local_ip"])), None)
+            if twin is not None:
+                tunnels.append([x, twin])
+                a.remove(x)
+                b.remove(twin)
+        for k in range(max(len(a), len(b))):
+            tunnels.append([side[k] for side in (a, b) if k < len(side)])
+        for ends in tunnels:
+            up = all(x["status"] == "up" for x in ends)
+            edges.append({"from": "dev:{}".format(lo), "to": "dev:{}".format(hi), "layer": "ipsec",
+                          "label": "IPsec " + ("up" if up else "down"), "up": up,
+                          "details": [_vpn_report(x) for x in ends]})
 
 
 def _connected(conn, nodes, edges, names):

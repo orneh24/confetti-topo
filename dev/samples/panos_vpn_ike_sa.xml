@@ -1,0 +1,11 @@
+<response status="success"><result>
+  <entry>
+    <gwid>1</gwid>
+    <name>GW-TO-RTR-A</name>
+    <role>Resp</role>
+    <mode>Main</mode>
+    <algo>PSK/DH14/ AES/SHA1</algo>
+    <created>Jan.01 10:00:00</created>
+    <expires>Jan.01 18:00:00</expires>
+  </entry>
+</result></response>

@@ -23,7 +23,8 @@ tbody tr.selected td:first-child { box-shadow: inset 4px 0 0 var(--blue), inset 
 td.when { white-space: nowrap; }
 /* Every column is as wide as its content; Notes (the last) takes the rest of the row, so there is no extra space after each column. */
 #table th, #table td { width: 1%; white-space: nowrap; }
-#table th:last-child, #table td:last-child { width: auto; white-space: normal; }
+#table th:last-child, #table td:last-child { width: auto; white-space: normal; min-width: 200px; }
+#table td:nth-child(5) { white-space: normal; min-width: 150px; max-width: 320px; }   /* a long subject wraps, Notes keeps its room */
 /* Column widths: static/colresize.js (kept in confetti-topo-changes-columns, data-col-key). */
 td.notes .pill { margin-right: 4px; }
 /* Before / After: a state word is coloured by what it means - green good, yellow warning, red bad. */
@@ -299,7 +300,7 @@ function renderTiles(list) {
     // A peer is down when its newest state event in view is a warning (the list is newest first).
     var seen = {}, peersDown = 0;
     list.forEach(function (e) {
-        if (!/^(bgp|ospf)_/.test(e.kind)) { return; }
+        if (!/^(bgp|ospf|vpn)_/.test(e.kind)) { return; }
         var key = e.device_id + '|' + e.type + '|' + e.item;
         if (seen[key]) { return; }
         seen[key] = true;

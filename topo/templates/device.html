@@ -143,6 +143,18 @@
             <div class="empty" id="adj-empty" style="display:none">no BGP or OSPF sessions</div>
         </div>
     </div>
+    <!-- Shown only for a device that reports IPsec tunnels. -->
+    <div class="section wide" data-box="vpn" id="vpn" style="display:none">
+        <div class="section-header"><span>VPN tunnels <span id="vpn-count"></span></span>
+            <span class="hdr-actions"><a href="/topology">map</a></span></div>
+        <div class="section-body">
+            <table data-sortable class="striped compact">
+                <thead><tr><th>Tunnel</th><th>Status</th><th>Peer</th><th>Interface</th><th>IKE</th><th>IPsec SA</th>
+                    <th>Encryption</th><th>Traffic in / out</th></tr></thead>
+                <tbody id="vpn-rows"></tbody>
+            </table>
+        </div>
+    </div>
     <div class="section wide" data-box="drift" id="drift-section" style="display:none">
         <div class="section-header"><span>Template drift</span></div>
         <div class="section-body">
@@ -294,21 +306,21 @@ function loadDevice() {
             kv('site', d.site || '') + kv('key', d.key) + kv('enabled', d.enabled ? 'yes' : 'no') +
             kv('ping', d.reachable === null || d.reachable === undefined ? 'not checked' : (d.reachable ? 'up' : 'down')) +
             kv('poll interval', d.poll_interval_s + 's') + kv('poll state', d.poll_state) +
-            kv('fail count', d.fail_count) + (d.hub_info ? kv('hub says', d.hub_info) : '') + (d.last_poll_error ? kv('last poll error', d.last_poll_error) : '') + kv('first seen', d.first_seen) + kv('last seen', d.last_seen);
+            kv('fail count', d.fail_count) + (d.hub_info ? kv('hub says', d.hub_info) : '') + (d.last_poll_error ? kv('last poll error', d.last_poll_error) : '') + kv('first seen', fmtTime(d.first_seen)) + kv('last seen', fmtTime(d.last_seen));
         document.getElementById('device-body').innerHTML = body;
         fillEditForm(d);
 
         var aliasRows = '';
         for (var i = 0; i < d.aliases.length; i++) {
             var a = d.aliases[i];
-            aliasRows += '<tr><td>' + esc(a.kind) + '</td><td>' + esc(a.value) + '</td><td>' + esc(a.first_seen) + '</td></tr>';
+            aliasRows += '<tr><td>' + esc(a.kind) + '</td><td>' + esc(a.value) + '</td>' + timeCell(a.first_seen) + '</tr>';
         }
         document.getElementById('alias-rows').innerHTML = aliasRows || '<tr><td colspan="3" class="empty">none</td></tr>';
 
         var sourceRows = '';
         for (var j = 0; j < d.sources.length; j++) {
             var s = d.sources[j];
-            sourceRows += '<tr><td>' + esc(s.source) + '</td><td>' + esc(s.ref) + '</td><td>' + esc(s.last_seen) + '</td></tr>';
+            sourceRows += '<tr><td>' + esc(s.source) + '</td><td>' + esc(s.ref) + '</td>' + timeCell(s.last_seen) + '</tr>';
         }
         document.getElementById('source-rows').innerHTML = sourceRows || '<tr><td colspan="3" class="empty">none</td></tr>';
         loadStatus(d);
@@ -428,6 +440,12 @@ function loadInterfaces() {
     });
 }
 
+// A stored time in the viewer's own format ("" stays empty).
+function fmtTime(iso) { return iso ? new Date(iso).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : ''; }
+
+// A table cell with a time; it still sorts by the stored value.
+function timeCell(iso) { return '<td data-sort="' + ctxMenu.attr(iso || '') + '">' + esc(fmtTime(iso)) + '</td>'; }
+
 function fmtBps(v) {
     if (v === null || v === undefined) { return ''; }
     var u = ['b/s', 'kb/s', 'Mb/s', 'Gb/s'], i = 0;
@@ -514,7 +532,7 @@ function renderInterfaces() {
                 '<td data-sort="' + ((f.in_bps || 0) + (f.out_bps || 0)) + '">' +
                     (f.in_bps === null || f.in_bps === undefined ? '' : esc(fmtBps(f.in_bps) + ' / ' + fmtBps(f.out_bps)) +
                      ' <button type="button" class="linklike" data-if="' + ctxMenu.attr(f.name) + '" onclick="showTraffic(this.getAttribute(\'data-if\'))" title="Traffic over time">graph</button>') + '</td>' +
-                '<td>' + esc(f.last_seen) + '</td>' +
+                timeCell(f.last_seen) +
                 '</tr>';
         }
         document.getElementById('interface-rows').innerHTML = rows;
@@ -562,9 +580,9 @@ function loadConfigs() {
         for (var i = 0; i < list.length; i++) {
             var v = list[i];
             rows += '<tr data-id="' + v.id + '" data-prev="' + (i + 1 < list.length ? list[i + 1].id : '') +
-                '"><td>#' + esc(v.id) + '</td><td>' + esc(v.captured_at) + '</td><td>' +
+                '"><td>#' + esc(v.id) + '</td>' + timeCell(v.captured_at) + '<td>' +
                 esc(v.size) + ' bytes</td><td><button onclick="viewConfig(' + v.id + ')">View</button></td></tr>';
-            opts += '<option value="' + v.id + '">#' + v.id + ' ' + esc(v.captured_at) + '</option>';
+            opts += '<option value="' + v.id + '">#' + v.id + ' ' + esc(fmtTime(v.captured_at)) + '</option>';
         }
         document.getElementById('config-rows').innerHTML = rows;
         document.getElementById('config-empty').style.display = list.length ? 'none' : 'block';
@@ -742,7 +760,7 @@ function loadLldp() {
             if (n.remote_device_id) { name = '<a href="/devices/' + n.remote_device_id + '">' + esc(name) + '</a>'; }
             else { name = esc(name) + ' <span class="pill idle">unknown</span>'; }
             rows += '<tr><td>' + esc(n.local_if) + '</td><td>' + name + '</td><td>' + esc(n.remote_port || '') +
-                '</td><td>' + esc(n.remote_mgmt_ip || '') + '</td><td>' + esc(n.last_seen) + '</td></tr>';
+                '</td><td>' + esc(n.remote_mgmt_ip || '') + '</td>' + timeCell(n.last_seen) + '</tr>';
         }
         document.getElementById('lldp-rows').innerHTML = rows;
         showCap('lldp');
@@ -776,17 +794,18 @@ function testLogin(id, btn, out) {
 function loadStatus(d) {
     Promise.all([
         fetch('/api/adjacencies?device_id=' + deviceId).then(function (r) { return r.json(); }),
-        fetch('/api/devices/' + deviceId + '/interfaces').then(function (r) { return r.json(); })
+        fetch('/api/devices/' + deviceId + '/interfaces').then(function (r) { return r.json(); }),
+        fetch('/api/vpn?device_id=' + deviceId).then(function (r) { return r.json(); })
     ]).then(function (res) {
-        var adj = res[0], ifs = res[1], html = '';
+        var adj = res[0], ifs = res[1], vpn = res[2], html = '';
         html += chip('#device-body', 'Ping', d.reachable === null || d.reachable === undefined ? 'not checked' : (d.reachable ? 'up' : 'down'),
                      d.reachable === 0 ? 'bad' : (d.reachable ? 'ok' : 'idle'));
         if (isUnpolled(d) || !d.enabled) {
             html += chip('#device-body', 'Poll', 'not polled', 'idle');
         } else if (d.fail_count > 0) {
-            html += chip('#device-body', 'Poll', 'failing (' + d.fail_count + ')', 'bad', (d.last_poll_error ? d.last_poll_error + ' - ' : '') + (d.last_poll_ok ? 'last good poll ' + d.last_poll_ok : 'never polled ok'));
+            html += chip('#device-body', 'Poll', 'failing (' + d.fail_count + ')', 'bad', (d.last_poll_error ? d.last_poll_error + ' - ' : '') + (d.last_poll_ok ? 'last good poll ' + fmtTime(d.last_poll_ok) : 'never polled ok'));
         } else {
-            html += chip('#device-body', 'Poll', d.last_poll_ok ? 'ok' : 'waiting', d.last_poll_ok ? 'ok' : 'idle', d.last_poll_ok || '');
+            html += chip('#device-body', 'Poll', d.last_poll_ok ? 'ok' : 'waiting', d.last_poll_ok ? 'ok' : 'idle', fmtTime(d.last_poll_ok));
         }
         var down = adj.filter(function (a) { return a.state !== (a.proto === 'bgp' ? 'Established' : 'FULL'); });
         var flap = adj.filter(function (a) { return a.flapping; });
@@ -794,8 +813,14 @@ function loadStatus(d) {
                      down.length ? 'bad' : (adj.length ? 'ok' : 'idle'),
                      down.map(function (a) { return a.proto + ' ' + a.peer_ip + ' ' + a.state; }).join(', '));
         if (flap.length) { html += chip('#sessions', 'Flapping', flap.length, 'running'); }
+        if (vpn.length) {
+            var vpnDown = vpn.filter(function (t) { return t.status !== 'up'; });
+            html += chip('#vpn', 'VPN', vpnDown.length ? vpnDown.length + ' of ' + vpn.length + ' down' : vpn.length + ' up', vpnDown.length ? 'bad' : 'ok',
+                         vpnDown.map(function (t) { return t.name + ' to ' + t.peer_ip + ' ' + t.state; }).join(', '));
+        }
         if (d.drift_status) {
-            var dt = { compliant: ['matches', 'ok'], drifted: ['drifted', 'bad'], render_error: ['template error', 'running'] }[d.drift_status] || [d.drift_status, 'idle'];
+            var dt = { compliant: ['matches', 'ok'], drifted: ['drifted', 'bad'], render_error: ['template error', 'running'], no_template: ['none', 'idle'],
+                       no_backup: ['no backup yet', 'idle'] }[d.drift_status] || [d.drift_status, 'idle'];
             html += chip('#drift-section', 'Template', dt[0], dt[1]);
         }
         var errIfs = ifs.filter(function (i) { return (i.input_errors_24h || 0) + (i.crc_errors_24h || 0) > 0; });
@@ -806,6 +831,33 @@ function loadStatus(d) {
             html += chip('#interfaces', 'Ports down', ifDown.length, 'bad', ifDown.map(function (i) { return i.name; }).join(', '));
         }
         document.getElementById('status-strip').innerHTML = html;
+    });
+}
+
+function loadVpn() {
+    fetch('/api/vpn?device_id=' + deviceId).then(function (r) { return r.json(); }).then(function (list) {
+        function pair(a, b) { return a === null && b === null ? '' : (a === null ? '?' : a.toLocaleString()) + ' / ' + (b === null ? '?' : b.toLocaleString()); }
+        var rows = list.map(function (t) {
+            var peer = esc(t.peer_ip);
+            if (t.peer_device_id) { peer = '<a href="/devices/' + t.peer_device_id + '">' + esc(t.peer_hostname) + '</a> ' + peer; }
+            var traffic = t.bytes_in !== null || t.bytes_out !== null ? pair(t.bytes_in, t.bytes_out) + ' bytes'
+                : (t.packets_in !== null || t.packets_out !== null ? pair(t.packets_in, t.packets_out) + ' packets' : '');
+            var ike = [t.ike_version ? 'IKEv' + t.ike_version : '', t.ike_state].filter(Boolean).join(' ');
+            var about = (t.selectors ? 'selectors: ' + t.selectors + '\n' : '') + 'last seen ' + new Date(t.last_seen).toLocaleString();
+            return '<tr title="' + ctxMenu.attr(about) + '"><td>' + esc(t.name) + '</td>' +
+                '<td><span class="pill ' + (t.status === 'up' ? 'ok' : 'bad') + '">' + esc(t.status) + '</span> ' + esc(t.state) +
+                (t.uptime ? ' <span class="muted">' + esc(t.uptime) + '</span>' : '') + '</td>' +
+                '<td>' + peer + '</td><td>' + esc(t.interface) + (t.vrf ? ' <span class="muted">vrf ' + esc(t.vrf) + '</span>' : '') + '</td>' +
+                '<td>' + esc(ike) + '</td><td>' + esc(t.ipsec_state) + '</td><td>' + esc(t.encryption) + '</td>' +
+                '<td>' + esc(traffic) + '</td></tr>';
+        }).join('');
+        document.getElementById('vpn-rows').innerHTML = rows;
+        document.getElementById('vpn-count').textContent = list.length ? '(' + list.length + ')' : '';
+        var box = document.getElementById('vpn'), shown = list.length > 0;
+        if ((box.style.display !== 'none') !== shown) {
+            box.style.display = shown ? '' : 'none';
+            window.dispatchEvent(new Event('resize'));   // the box grid places the boxes again
+        }
     });
 }
 
@@ -900,6 +952,7 @@ function pollNow() {
         loadMac();
         loadLldp();
         loadAdjacencies();
+        loadVpn();
         loadEvents();
         loadSyslog();
         loadConfigs();
@@ -912,7 +965,7 @@ function pollNow() {
 
 // Right-click menus (static/ctxmenu.js). Each table body is one menu target; the row under the pointer is found
 // when the menu opens, so the tables can be rebuilt (poll, refresh) without touching the menu.
-['alias-rows', 'source-rows', 'event-rows', 'lldp-rows', 'adj-rows', 'interface-rows', 'route-rows', 'mac-rows',
+['alias-rows', 'source-rows', 'event-rows', 'lldp-rows', 'adj-rows', 'vpn-rows', 'interface-rows', 'route-rows', 'mac-rows',
  'trunk-rows', 'vlan-rows', 'config-rows'].forEach(function (id) {
     document.getElementById(id).setAttribute('data-ctx', 'row');
 });
@@ -942,6 +995,7 @@ ctxMenu.register('row', function (tb, ev) {
     }
     else if (id === 'lldp-rows') { copy('Copy local port', 0); copy('Copy remote port', 2); copy('Copy management IP', 3); }
     else if (id === 'adj-rows') { copy('Copy peer', 1); }
+    else if (id === 'vpn-rows') { copy('Copy tunnel name', 0); copy('Copy peer', 2); }
     else if (id === 'mac-rows') { copy('Copy MAC address', 1); copy('Copy port', 2); }
     else if (id === 'vlan-rows') { copy('Copy VLAN', 0); copy('Copy name', 1); }
     else if (id === 'trunk-rows') { copy('Copy port', 0); }
@@ -994,6 +1048,7 @@ loadStp();
 loadMac();
 loadLldp();
 loadAdjacencies();
+loadVpn();
 loadEvents();
 loadSyslog();
 loadConfigs();

@@ -41,3 +41,15 @@ sanitised with documentation addresses only (192.0.2.0/24, 198.51.100.0/24, 203.
   rate lines and the `packets input, ... bytes` / `packets output, ... bytes` counter lines the traffic graph uses). The
   second interface's `30 second` rate lines (what `load-interval 30` gives) were **written from IOS's documented
   format, not captured**. Addresses and MACs were replaced; the counter values are real.
+
+- `ios_crypto_session_detail.txt` and `ios_crypto_ipsec_sa.txt` have the **real format** of `show crypto session detail` and
+  `show crypto ipsec sa` from an IOS-XE 17.3 CSR1000v with one IKEv1 VTI tunnel. Addresses, the tunnel number, SPIs and the profile
+  name were replaced.
+
+- `panos_vpn_*.xml` have the **real shape** of `show vpn flow`, `ike-sa`, `ipsec-sa`, `tunnel` and `flow tunnel-id` from a PA-VM on
+  PAN-OS 11.1, with names, addresses, SPIs and times replaced. A remote-access entry was removed from `tunnel`.
+  `panos_vpn_gateway.xml` was rewritten with made-up gateways, using the captured element names.
+
+- `ios_crypto_session_not_captured.txt` (a negotiating IKEv2 session, an `UP-IDLE` session with a bare `IKE SA` line, an inside
+  VRF, two flows) was **written from Cisco's documented layout, not captured**. Replace it with a real capture when one exists.
+

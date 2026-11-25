@@ -547,6 +547,21 @@ def api_trunks():
     return jsonify(out)
 
 
+@app.route("/api/vpn", methods=["GET"])
+def api_vpn():
+    """IPsec tunnels (the vpn task). ?device_id=N narrows them. peer_device_id / peer_hostname are looked up now."""
+    device_id = request.args.get("device_id", type=int)
+    if "device_id" in request.args and device_id is None:
+        return jsonify({"error": "device_id must be a number"}), 400
+    conn = db.get_db()
+    names = {r["id"]: r["hostname"] for r in conn.execute("SELECT id, hostname FROM devices")}
+    out = topology.vpn_tunnels(conn, device_id)
+    for row in out:
+        row["peer_hostname"] = names.get(row["peer_device_id"])
+        row["last_seen"] = db.iso(row["last_seen"])
+    return jsonify(out)
+
+
 @app.route("/api/routes", methods=["GET"])
 def api_routes():
     """A device's routing table. ?device_id=N is required; ?vrf=, ?kind=rib|fib and ?prefix= (substring) narrow it."""
@@ -1500,7 +1515,7 @@ def api_syslog_sources():
 @app.route("/api/topology", methods=["GET"])
 def api_topology():
     """?layer= limits the edges to one source or a comma list (lldp,bgp);
-    default overlays all three on the same device nodes."""
+    default overlays every layer (topology.LAYERS) on the same device nodes."""
     return jsonify(topology.build(db.get_db(), request.args.get("layer")))
 
 

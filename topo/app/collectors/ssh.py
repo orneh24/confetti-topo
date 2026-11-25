@@ -62,12 +62,24 @@ def _error_text(exc, task=None):
 
 def _run_command(conn, task, plat):
     # A large config is slow to read over SSH.
-    read_timeout = 60 if task == "config" else 30 if task == "routes" else 20
+    read_timeout = 60 if task == "config" else 30 if task in ("routes", "vpn") else 20
     output = conn.send_command(plat["commands"][task], read_timeout=read_timeout)
     if task in platforms.SWITCH_TASKS and _is_cli_error(output):
         # "% Invalid input" is not an empty list: fail the task so nothing stored is deleted.
-        raise RuntimeError("device answered: " + output.strip().splitlines()[0][:80])
+        raise RuntimeError("device answered: " + _cli_message(output))
     parsed = plat["parsers"][task](output)
+    if task == "vpn":
+        if parsed is None:
+            # Not "no tunnels" (that is an empty answer): fail the task so nothing stored is deleted.
+            hint = " (no crypto feature or license, or the login is not in privileged EXEC)" if _is_cli_error(output) else ""
+            raise RuntimeError("device answered: " + _cli_message(output) + hint)
+        if parsed and plat.get("vpn_transform_command"):
+            try:   # the algorithms are a bonus: the tunnels are worth having without them
+                more = conn.send_command(plat["vpn_transform_command"], read_timeout=30)
+            except Exception:
+                more = ""
+            output = output + "\n\n" + more
+            parsed = ios.fill_vpn_encryption(parsed, ios.parse_vpn_transforms(more))
     if task == "config" and not parsed:
         # Unlike the other parsers, an empty result is not a normal device state: it is an error
         # message or a truncated read, and must never be stored as a backup (constraint 29).
@@ -89,6 +101,12 @@ def _is_switch(device):
     """Only a device the topology draws as a switch is asked for its VLANs. The model is known from the first poll on,
     so a new switch gets its VLANs from its second poll."""
     return topology.device_type(device.get("role"), device.get("model"), device.get("hostname"), device.get("platform")) == "switch"
+
+
+def _cli_message(output):
+    """The line of a CLI answer that says what is wrong: the "%" line (above it IOS only prints a "^" marker)."""
+    rows = [x.strip() for x in output.splitlines() if x.strip()]
+    return next((x for x in rows if x.startswith("%")), rows[0] if rows else "nothing")[:80]
 
 
 def _is_cli_error(output):
@@ -186,6 +204,8 @@ def apply_result(conn, device_id, task, parsed):
         _apply_stp(conn, device_id, parsed, now)
     elif task == "mac":
         _apply_mac(conn, device_id, parsed, now)
+    elif task == "vpn":
+        _apply_vpn(conn, device_id, parsed, now)
     elif task == "config":
         _apply_config(conn, device_id, parsed, now)
 
@@ -423,6 +443,45 @@ def _apply_routes(conn, device_id, parsed, now):
     for kind in {r["kind"] for r in parsed}:
         conn.execute("DELETE FROM routes WHERE device_id = ? AND kind = ? AND last_seen <> ?",
                      (device_id, kind, now))
+
+
+_VPN_FIELDS = ("interface", "local_ip", "vrf", "ike_version", "ike_state", "ipsec_state", "status", "state", "encryption",
+               "selectors", "packets_in", "packets_out", "bytes_in", "bytes_out", "uptime")
+
+
+def _apply_vpn(conn, device_id, parsed, now):
+    """Store the IPsec tunnels, one row per (name, peer). The list is only given for an answer that was understood
+    (an unknown one fails the task), so an empty list is real and clears the table. A tunnel that appears, goes away
+    or changes between up and down is an event, not on the first poll."""
+    old = {(r["name"], r["peer_ip"]): r["status"] for r in conn.execute(
+        "SELECT name, peer_ip, status FROM vpn_tunnels WHERE device_id = ?", (device_id,))}
+    new = {(t["name"], t["peer_ip"]): t for t in parsed}
+    if not events.is_baseline(conn, device_id, "vpn"):
+        host = _hostname(conn, device_id)
+
+        def subject(key, tail):
+            return "{}: VPN tunnel {} to {}{}".format(host, key[0], key[1], tail)
+        for key, t in new.items():
+            if key not in old:
+                events.emit(conn, device_id, "vpn_added", "info" if t["status"] == "up" else "warning",
+                            subject(key, ": " + t["status"]))
+            elif old[key] != t["status"]:
+                events.emit(conn, device_id, "vpn_state", "info" if t["status"] == "up" else "warning",
+                            subject(key, ": " + t["status"]), "{} -> {}".format(old[key], t["status"]))
+        for key in old:
+            if key not in new:
+                events.emit(conn, device_id, "vpn_removed", "warning", subject(key, " removed"))
+    for key, t in new.items():
+        conn.execute(
+            """INSERT INTO vpn_tunnels (device_id, name, peer_ip, {cols}, last_seen) VALUES (?, ?, ?, {marks}, ?)
+               ON CONFLICT(device_id, name, peer_ip) DO UPDATE SET {sets}, last_seen=excluded.last_seen""".format(
+                cols=", ".join(_VPN_FIELDS), marks=", ".join("?" * len(_VPN_FIELDS)),
+                sets=", ".join("{0}=excluded.{0}".format(c) for c in _VPN_FIELDS)),
+            (device_id, key[0], key[1]) + tuple(t[c] for c in _VPN_FIELDS) + (now,),
+        )
+    for name, peer in old:
+        if (name, peer) not in new:
+            conn.execute("DELETE FROM vpn_tunnels WHERE device_id = ? AND name = ? AND peer_ip = ?", (device_id, name, peer))
 
 
 def _apply_vlans(conn, device_id, parsed, now):

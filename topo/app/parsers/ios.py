@@ -562,3 +562,78 @@ def parse_mac(text):
         if m:
             rows.append({"vlan": m.group(1), "mac": m.group(2).lower(), "type": m.group(3).lower(), "port": m.group(4)})
     return rows
+
+
+# ---------------------------------------------------------------------------
+# show crypto session detail / show crypto ipsec sa — IPsec VPNs
+# ---------------------------------------------------------------------------
+
+_VPN_HEADER = "Crypto session current status"
+_VPN_PEER_RE = re.compile(r"^Peer:\s*(\S+)\s+port\s+\d+(?:\s+fvrf:\s*(\S+))?(?:\s+ivrf:\s*(\S+))?", re.M)
+_VPN_IKE_RE = re.compile(r"(IKE(?:v[12])?) SA:\s+local\s+(\S+)/\d+\s+remote\s+\S+/\d+\s+(\S+)")
+_VPN_UP = ("UP-ACTIVE", "UP-NO-IKE", "UP-STANDBY")   # IPsec traffic can pass; UP-IDLE is IKE with no IPsec SA
+
+
+def parse_vpn(text):
+    """IPsec sessions from 'show crypto session detail', one row per (interface, peer).
+
+    None means "not an answer to this command" (an error, anything unexpected): the task then fails and deletes
+    nothing. An empty answer is what a router with no crypto session prints (seen on IOS-XE 17.3), so it is [].
+    """
+    text = (text or "").replace("\r", "")
+    if not text.strip():
+        return []
+    if _VPN_HEADER not in text:
+        return None
+    rows = {}
+    for block in re.split(r"^Interface:[ \t]*", text, flags=re.M)[1:]:
+        peer = _VPN_PEER_RE.search(block)
+        if not peer:
+            continue
+        name = block.split(None, 1)[0]
+        status = re.search(r"^Session status:\s*(\S+)", block, re.M)
+        state = status.group(1) if status else ""
+        uptime = re.search(r"^Uptime:\s*(\S+)", block, re.M)
+        ikes = _VPN_IKE_RE.findall(block)
+        ike_up = any(i[2].lower() == "active" for i in ikes)
+        flows = re.findall(r"^\s*IPSEC FLOW:\s*(?:permit\s+)?(.+?)\s*$", block, re.M)
+        sas = sum(int(n) for n in re.findall(r"Active SAs:\s*(\d+)", block))
+        pkts_in = re.findall(r"Inbound:\s+#pkts dec'ed\s+(\d+)", block)
+        pkts_out = re.findall(r"Outbound:\s+#pkts enc'ed\s+(\d+)", block)
+        vrf = peer.group(3) or ""
+        row = {
+            "name": name, "interface": name, "peer_ip": peer.group(1),
+            "local_ip": ikes[0][1] if ikes else "",
+            "vrf": "" if vrf == "(none)" else vrf,
+            "ike_version": ikes[0][0][4:] if ikes else "",   # "IKEv1" -> "1", a bare "IKE" -> ""
+            "ike_state": "up" if ike_up else "down",
+            "ipsec_state": "up" if sas else "down",
+            "status": "up" if state in _VPN_UP else "down",
+            "state": state, "encryption": "", "selectors": "; ".join(flows[:10]),
+            "packets_in": sum(map(int, pkts_in)) if pkts_in else None,
+            "packets_out": sum(map(int, pkts_out)) if pkts_out else None,
+            "bytes_in": None, "bytes_out": None,
+            "uptime": uptime.group(1) if uptime else "",
+        }
+        # Two sessions on one interface to one peer (a rekey): the one that is up is the tunnel.
+        key = (name, row["peer_ip"])
+        if key not in rows or (row["status"] == "up" and rows[key]["status"] != "up"):
+            rows[key] = row
+    return list(rows.values())
+
+
+def parse_vpn_transforms(text):
+    """{(interface, peer ip): "esp-256-aes esp-sha-hmac"} from 'show crypto ipsec sa' (the inbound ESP SA)."""
+    out = {}
+    for block in re.split(r"^interface:[ \t]*", (text or "").replace("\r", ""), flags=re.M)[1:]:
+        name = block.split(None, 1)[0]
+        for part in re.split(r"^\s*protected vrf:", block, flags=re.M):
+            peer = re.search(r"current_peer:?\s+(\d{1,3}(?:\.\d{1,3}){3})", part)
+            transform = re.search(r"inbound esp sas:.*?transform:\s*([^,\n]+?)\s*,", part, re.S)
+            if peer and transform:
+                out.setdefault((name, peer.group(1)), transform.group(1))
+    return out
+
+
+def fill_vpn_encryption(rows, transforms):
+    return [dict(r, encryption=transforms.get((r["interface"], r["peer_ip"]), r["encryption"])) for r in rows]

@@ -109,6 +109,13 @@ def _find_ip(conn, ip):
                         [dict(_dev(r), proto=r["proto"], state=r["state"],
                               remote_as="" if r["remote_as"] is None else r["remote_as"], interface=r["local_if"] or "")
                          for r in rows]))
+    rows = conn.execute(
+        """SELECT d.id AS device_id, d.hostname, v.name, v.status, v.state, v.interface
+           FROM vpn_tunnels v JOIN devices d ON d.id = v.device_id WHERE v.peer_ip = ? ORDER BY d.hostname""",
+        (s,)).fetchall()
+    out.append(_section("vpn", "VPN peer of", ["device", "tunnel", "status", "vpn_state", "interface"],
+                        [dict(_dev(r), tunnel=r["name"], status=r["status"], vpn_state=r["state"], interface=r["interface"])
+                         for r in rows]))
     return out
 
 

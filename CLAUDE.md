@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Overview
 
 A simplistic server that maps a network from what its devices say about themselves: LLDP neighbors
-(cables) and BGP/OSPF adjacencies (sessions), drawn as a topology graph, and that keeps the inventory
+(cables), BGP/OSPF adjacencies (sessions) and IPsec VPN tunnels, drawn as a topology graph, and that keeps the inventory
 around it: device inventory, IPAM, config templates and their pull endpoint, running-config backups
 with drift, syslog and change events. Infrastructure is ESXi 7.0 with Cisco CSR1000v routers
 initially; other vendors later.
@@ -65,14 +65,14 @@ Each tick (`TOPO_POLL_TICK_S`, default 15s): claim devices with `poll_state='idl
 `next_poll_at <= now`, mark them `'running'` (this is the per-device lock — a device whose SSH hangs is never
 queued twice), and hand each to a `ThreadPoolExecutor` (`TOPO_POLL_WORKERS`, default 8).
 
-Per device, eleven tasks run independently, **each committing its own transaction**: `version`, `interfaces`,
-`lldp`, `bgp`, `ospf`, `routes`, `config` (IOS only, the running-config backup, last so a slow read delays nothing) and `vlans`, `trunks`, `stp` and `mac` (IOS **switches** only: `ssh.run_tasks` leaves it out for a router, which answers
+Per device, twelve tasks run independently, **each committing its own transaction**: `version`, `interfaces`,
+`lldp`, `bgp`, `ospf`, `routes`, `vpn` (IPsec tunnels), `config` (IOS only, the running-config backup, last so a slow read delays nothing) and `vlans`, `trunks`, `stp` and `mac` (IOS **switches** only: `ssh.run_tasks` leaves it out for a router, which answers
 `Invalid input`, and PAN-OS has none; a new switch gets it from its second poll, once its model is known). Partial failure is the normal case — an LLDP timeout must never discard interface data
 collected 200ms earlier. `role='node'` devices (confetti-traffic's imported Alpine fleet) are polled only when their platform is
 `confetti_node`, and then through the hub, not by SSH (`collectors/hub.py`, constraint 39); any other node is never polled —
 `poller.py`'s device-selection query is `role != 'node' OR platform = 'confetti_node'`.
 
-All eleven tasks share **one SSH session** per poll (PAN-OS: one keygen per poll) (`ssh.run_tasks` is a generator, so each task still commits
+All twelve tasks share **one SSH session** per poll (PAN-OS: one keygen per poll) (`ssh.run_tasks` is a generator, so each task still commits
 before the next command runs). Each apply step deletes that device's rows not seen in this poll — a removed
 peer or cable must not stay on the topology forever. But **only a successful task deletes**: a timeout or a
 failed login applies nothing (constraint 14). `interfaces` skips the delete on an empty result, since empty
@@ -103,8 +103,10 @@ were captured from a real PA-VM (PAN-OS 11.1); other versions and Panorama are u
 
 ### Topology
 
-`app/topology.py` builds `GET /api/topology`, a vis.js-shaped `{nodes, edges}` graph over LLDP neighbors and
-BGP/OSPF adjacencies (`?layer=lldp|bgp|ospf`, or a comma list, limits it; the page's LLDP/BGP/OSPF buttons are independent toggles; a Lines dropdown sets the connector thickness Small / Medium / Large, `confetti-topo-line-width`, per browser, `lineScale()` multiplies the widths by 0.5 / 1 / 2). A neighbor/peer that does not resolve to a known
+`app/topology.py` builds `GET /api/topology`, a vis.js-shaped `{nodes, edges}` graph over LLDP neighbors,
+BGP/OSPF adjacencies, IPsec tunnels, default routes and shared subnets (`topology.LAYERS`; `?layer=lldp|bgp|ospf|ipsec|default|connected`,
+or a comma list, limits it; the page's layer buttons are independent toggles (a browser also keeps which layers existed
+when it saved its choice, `confetti-topo-layers-known`, so a new layer starts on); a Lines dropdown sets the connector thickness Small / Medium / Large, `confetti-topo-line-width`, per browser, `lineScale()` multiplies the widths by 0.5 / 1 / 2). A neighbor/peer that does not resolve to a known
 device renders as a **ghost node** (`ghost:lldp:<sysname|chassis>`, or `ghost:peer:<ip>` shared by BGP and
 OSPF) rather than being dropped — an edge to nowhere reads as a bug, a distinctly styled ghost reads as
 "something is out there, unidentified". A cable or BGP/OSPF session both ends report is drawn once (a
@@ -144,6 +146,12 @@ Who is that neighbor? Two steps:
 
 NULL after these steps is the expected result for peers outside the lab, not a bug.
 
+**IPsec layer** (`topology._ipsec`, button IPsec, pink): built at query time from `vpn_tunnels`. The peer resolves to the one
+device that holds the address on an interface, or else has it as its management IP (an address on two devices names neither);
+anything else is a `ghost:peer:<ip>` shared with BGP/OSPF. Two known ends make one line per tunnel (reports paired by mirrored
+local/peer addresses, else by position, up first), up only if every report says up; down is red and dashed. The link card has one
+block per reporting end. Constraint 40.
+
 **Default and Connected layers** (`topology.build`, `_connected`; buttons Default / Connected, `?layer=default|connected`): built at
 query time from stored `routes` and `interfaces`, never stored. *Default* = one green arrow per RIB `0.0.0.0/0` next hop, to the
 unique owner of that address (constraint 12), else a `ghost:peer:<ip>` shared with BGP/OSPF; not de-duplicated. *Connected* = devices
@@ -172,6 +180,18 @@ FIB (`<show><routing><fib/>`); a FIB that cannot be read keeps the RIB. Under `i
 mask and takes the header's. `emit()` writes one `routes_changed` event per poll (`+N -M` on (vrf, prefix) of the RIB),
 never one per prefix. Fixtures: `dev/samples/ios_route_*.txt`, `panos_route.xml`, `panos_fib.xml`. Not handled: IPv6,
 a cap on a very large table (a full BGP table would be one row per route).
+
+### IPsec VPN tunnels
+
+The `vpn` task (IOS and PAN-OS; not SNMP or hub nodes) stores one row per tunnel and peer in `vpn_tunnels` (name, interface,
+local and peer IP, VRF, IKE version, IKE and IPsec state, `status` up/down, the device's own state word, algorithms, selectors,
+packet and byte counters, uptime). IOS: `show crypto session detail`, then `show crypto ipsec sa` for the transform (only when
+there are tunnels; may fail). PAN-OS: `<show><vpn><flow>` is the list; `ike-sa`, `gateway`, `ipsec-sa`, `tunnel` and
+`flow tunnel-id N` (at most 50) add fields and may fail. Events `vpn_added`, `vpn_state`, `vpn_removed`. `GET /api/vpn[?device_id=N]`
+adds `peer_device_id` / `peer_hostname`. Shown as the IPsec layer, a VPN tunnels box and status chip on the device page, in the
+dashboard's "Sessions and VPNs down" widget, in Find ("VPN peer of") and in the "Peers down" tile. A device without a crypto
+feature (IOS 15.4 here) fails the task every poll and keeps its other tasks. Commands, sources and what is not verified:
+skill `ipsec-vpn`. Not handled: IPv6, GRE/DMVPN views, remote-access VPN. No syslog message triggers a poll for it.
 
 ### VLANs, trunks and spanning tree (switches)
 
@@ -287,9 +307,9 @@ than `TOPO_SNAPSHOT_RETENTION_DAYS` (14) are pruned. `GET /api/topology/snapshot
 `GET /api/topology/snapshots/<id>` are read-only. The topology page's History dropdown shows one with a banner and "Back to live".
 A snapshot is the `/api/topology` answer, so it holds nothing the page does not already show.
 
-**Compare** (its own toolbar row; `buildCompare` in topology.html, browser only, no API of its own, nothing stored): From (Off or a
+**Compare** (its own toolbar row; `buildCompare` and `matchEdges` in `static/compare.js`, browser only, no API of its own, nothing stored; constraint 41): From (Off or a
 snapshot) and To (Live or a snapshot), always read older → newer; `/topology?compare=<id>,<id|live>` opens one. The newer map is drawn
-with what is gone added back. A link is `added`, `gone`, `changed` (up/down, label, flapping) or `same`; BGP/OSPF links are matched by
+with what is gone added back. A link is `added`, `gone`, `changed` (up/down, label, flapping) or `same`; BGP/OSPF/IPsec links are matched by
 ends and protocol, because their label holds the state (`matchEdges`). A device is `changed` when its ping state or **any of its links**
 changed. Only shown layers count. Changed items are green / red / orange (`--orange`) with a `+` / `−` / `~` mark; unchanged ones are faded,
 their links grey. Three per-browser toggles (`confetti-topo-cmp-group`, `-cmp-only-dev`, `-cmp-only-edge`): **Group changed / unchanged**
@@ -469,6 +489,7 @@ topo/
                          the end of theme.js that does nothing in any other layout; same block as in confetti-traffic). Loaded AFTER theme.css
   static/confetti-links.js — the header shortcut buttons to the other Confetti projects (URLs from the Settings page, `GET /api/settings/links`); opens in a new tab; the SAME file as in confetti-traffic, copy it by hand and keep the two identical
   static/dashgrid.js   — the dashboard's (and device page's, `page: 'device'`; the saved key is `<prefix>-<page>-layout`) movable/resizable widgets (`data-box` is the attribute name, kept): drag a `.section[data-box]` by its header (pointer events on `document`, not pointer capture: moving the node in the DOM drops the capture), drag the corner grip to resize (width snaps to grid columns, height free); a widget dropped on the middle band of another (outlined `dg-join`) shares that row with it and the widgets already on it, the columns split between them (`joinRow`, the first is pinned to column 1 via `state.row`); while dragging, a `.dg-ghost` clone follows the pointer and the original stays in the grid as a grid-pattern drop place (`.dg-drag`); a drop in a row's empty space (`emptySpace`: right of its last widget or left of its first) puts the widget beside that row's widgets; "Reset layout" button and, when the page passes `autoSort: true`, an "Auto sort layout" button (`autoSort()`: drops saved sizes, puts the non-full-width widgets in rows of similar height, widens a last short row to fill it, gives each widget at least the columns its content needs (`needColumns`, no sideways scroll), stacks widgets beside the tallest one when that leaves less empty space (it spans their grid rows: `state.rows`, `stackPlan`), lets up to three short `.wide` widgets share a row and stretches every widget to its row height (`state.fill`); best effort; a widget hidden at the time (display none) is skipped and keeps its default size); a "Lock layout" button (`state.locked`, saved with the layout) stops moving, resizing, Reset, Auto sort and the re-sort on fold until "Unlock layout"; saved per browser in `confetti-topo-dashboard-layout`. Injects its own CSS; the SAME file as in confetti-traffic, copy it by hand and keep the two identical
+  static/compare.js    — the topology page's Compare logic (edgeKey, matchEdges, buildCompare), run by node in R59
   static/ctxmenu.js    — right-click menus, loaded once by base.html (menu CSS at the end of layout.css); the SAME file as in confetti-traffic, copy it by hand and keep the two identical. A row carries data-ctx="<type>" and the page calls ctxMenu.register(type, fn(el, ev)); `ctxMenu.extend(fn(target, ev))` adds items to every menu (colresize.js); one document-level listener finds the row. Fill data-* attributes with ctxMenu.attr(), never esc(). A destructive item is `danger: true`, goes last and must ask confirm() (R29 fails a page that has one without). Used by every page: rows and a `page` menu for empty space (`document.documentElement.setAttribute('data-ctx', 'page')`; header/nav/footer keep the browser menu) on the dashboard, devices, device (one `row` menu per table body), conflicts, settings and changes pages, and the topology map (ctxMenu.open from vis's `oncontext`). Rows are looked up by id when the menu opens, because the tables are rebuilt on every refresh; a destructive item reuses the page's own confirming function. R29 checks it
   static/fold.js       — Collapse / Expand for `.section[data-fold]` (`data-fold-default="closed"`) and every dashboard widget; the
                          choice per page and box in `confetti-topo-folded`; `fold.open(id)`. topo only (not shared)
@@ -486,13 +507,15 @@ topo/
   services/ — confetti-topo.initd, login-setup.sh, topo-backup.sh
   scripts/  — topo-setup.sh, topo-update.sh, topo-db.sh (database backup/list/env/restore on the VM), seed_mock_lab.py (fake lab in a new scratch DB),
               capture_readme.py (re-records docs/img/ from that mock lab; run after any UI change)
+dev/capture_output.py — capture show-command output from a real device for a new parser (writes outside the repo; refuses
+                        commands that can print a configuration or a key)
 container/ — Dockerfile + compose
 dev/regress.py — the regression gate (see below); dev/samples/ = parser fixtures;
 dev/requirements-dev.txt — ruff (dev machine only); ruff.toml — F rules only (repo root)
 docs/ — TOPOLOGY-MAPPING.md, HANDOFF.md, ROADMAP.md, img/
 .claude/ — agents: check-red-prover, dashboard-ui-checker, lab-validator, leak-scanner, readme-image-capturer;
            skills: 6 reference skills (cisco-ios-patterns, netmiko-ssh-automation, network-bgp-diagnostics,
-           network-config-validation, network-interface-health, panos-xml-api) and 7
+           network-interface-health, panos-xml-api, ipsec-vpn) and 7
            confetti-topo-* (api, dev-run, add-platform, add-task, lab-validation, release, ui). regression-gate,
            docs-drift-checker, confetti-interop-checker and the alpine-appliance and constraint-regression
            skills are user-level (~/.claude), not in this repo
@@ -675,6 +698,20 @@ Keep the two in step; `confetti-interop-checker` reports drift.
     three tasks with a reason (`pollerr`, constraint 38) and deletes nothing (constraint 14); an empty LLDP list is a real answer and clears. A plain
     `role='node'` device on another platform is still never polled. Checked by R56 (and R8, R10, R19).
 
+40. **IPsec tunnels are read with `show` commands that cannot print a key, an answer that is not understood deletes nothing, and the
+    peer's device is never stored.** A parser returns None for "not understood" (the task fails with the device's text, rows stay) and
+    an empty list for a real "no tunnels" (rows are cleared). A failed helper command leaves its fields empty (an unknown IKE state is
+    not "down"). No events on a first poll. The map and `/api/vpn` resolve a peer at query time to the one device that holds the
+    address, never as an alias (constraints 1, 12); both ends of a tunnel make one line, up only if both say up. Nothing may run
+    or read a command that can print a configuration or a pre-shared key (`dev/capture_output.py` refuses them). Checked by R58
+    (and R19, R30).
+41. **Compare counts only what is shown, and nothing is saved while a compare or an old snapshot is on screen.** A BGP, OSPF or IPsec link
+    whose state changed is "changed", not one gone and one added (`static/compare.js` `matchEdges`). `savePositions` and Re-arrange
+    do nothing while `readOnlyView()`. Checked by R59.
+42. **Every colour a page uses exists, and every theme and colour layout defines the whole palette.** A CSS variable that is used but not
+    defined fails silently (the Connected layer was drawn blue). A new colour goes in every block of `theme.css` and in the Retro 95
+    and MS-DOS blocks of `layout.css`. Checked by R60.
+
 ## Regression gate
 
 `python dev/regress.py` (stdlib only, except that `R39` runs ruff: `pip install -r dev/requirements-dev.txt`, else R39 is `NOT RUN`; `--static` skips the live tier, `-v` shows detail for passes) is the
@@ -687,7 +724,9 @@ container files and the BGP `Idle (Admin)` parse found on a real 15.4 router; `R
 that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static/ctxmenu.js`, quote-safe `data-*`, scripts parse); `R30` (constraint 15)
 the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti project's URL; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll; `R39` is the ruff `F` lint over `topo/` and `dev/` (not a constraint check); `R40` (constraint 24) the shared syslog parser and insert rule, `R40-sync` that `syslog_core.py`, `syslog_pull.py` and `syslog_cases.json` are byte-identical in both repos (`NOT RUN` if confetti-traffic is not next to this repo); `R41` (constraint 25) the syslog poll trigger; `R42` (constraint 26) the syslog pull; `R43`..`R50` (constraints 27..33) the checks that came with the former butler's features: template sandbox, the open `/configs/` pull, config backups,
 SNMP, drift and interface error history; `R51` (constraint 34) the in-place upgrade of an old database; `R52`..`R55` (constraints 35..38) traffic rates, database backup/restore,
-Find / Test login storing nothing, failed-poll reasons (R55), the managed Confetti Traffic node (R56) and IPAM prefixes (R57); the next constraint (40) takes `R58`. Output is one line per check
+Find / Test login storing nothing, failed-poll reasons (R55), the managed Confetti Traffic node (R56), IPAM prefixes (R57), IPsec tunnels (R58, constraint 40), Compare (R59, 41) and the colour palette (R60, 42);
+the next constraint (43) takes `R61`. `R13-labels` and `R13-positions` (more of constraint 13) and `R37-display` (the flapping-mark setting) sit beside
+their numbers. The script drops `TOPO_*` variables, restores any setting a check changes, and reads files with LF line ends. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by
 reverting its fix in a scratch copy. Adding a constraint means adding its check with the same number; the

@@ -117,6 +117,7 @@ button.active { border-color: var(--cyan); color: var(--text); background: var(-
     <button class="active" data-layer="lldp" data-name="LLDP" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide the cables the devices report over LLDP">LLDP</button>
     <button class="active" data-layer="bgp" data-name="BGP" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide BGP sessions">BGP</button>
     <button class="active" data-layer="ospf" data-name="OSPF" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide OSPF adjacencies">OSPF</button>
+    <button class="active" data-layer="ipsec" data-name="IPsec" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide IPsec VPN tunnels (Cisco IOS and PAN-OS)">IPsec</button>
     <button class="active" data-layer="default" data-name="Default" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide default routes: a line from each device to the device its 0.0.0.0/0 next hop belongs to">Default</button>
     <button class="active" data-layer="connected" data-name="Connected" aria-pressed="true" onclick="toggleLayer(this)" title="Show or hide devices that have an address in the same subnet (the management subnet is left out)">Connected</button>
     <button class="active" id="unknown-btn" aria-pressed="true" onclick="toggleUnknown(this)" title="Neighbors and peers that are not matched to a known device">Unknown nodes</button>
@@ -210,16 +211,18 @@ button.active { border-color: var(--cyan); color: var(--text); background: var(-
         <div class="row"><span class="ln" style="border-color:var(--purple)"></span>eBGP session (different AS): both AS numbers and state</div>
         <div class="row"><span class="sw" style="background:var(--bg-muted);border:1px dashed var(--text-dim)"></span>AS area: the routers of one BGP AS</div>
         <div class="row"><span class="ln" style="border-color:var(--blue)"></span>OSPF adjacency and its state</div>
+        <div class="row"><span class="ln" style="border-color:var(--pink);border-top-width:3px"></span>IPsec VPN tunnel</div>
         <div class="row"><span class="ln" style="border-color:var(--green)"></span>Default route: arrow points at the next hop's device</div>
         <div class="row"><span class="ln" style="border-color:var(--orange)"></span>Connected: devices with an address in the same subnet (3 or more meet at a small subnet dot)</div>
         <div class="row"><span class="ln" style="border-color:var(--yellow);border-top-style:dotted"></span>BGP session that is flapping (went down and up again several times in the last hour)</div>
-        <div class="row"><span class="ln" style="border-color:var(--red);border-top-style:dashed"></span>BGP/OSPF session that is not Established / FULL, or a cable or subnet port that is down</div>
+        <div class="row"><span class="ln" style="border-color:var(--red);border-top-style:dashed"></span>BGP/OSPF session that is not Established / FULL, an IPsec tunnel that is down, or a cable or subnet port that is down</div>
         <div class="hint">Double-click a router to open its page. Drag to move, scroll to zoom.</div>
     </details>
 </div>
 {% endblock %}
 {% block scripts %}
 <script src="/static/vendor/vis-network/vis-network.min.js"></script>
+<script src="/static/compare.js"></script>
 <script>
 var network = null;
 var nodeSet = null;
@@ -359,8 +362,6 @@ function oneVisNode(n, GROUP_COLOR) {
         };
 }
 
-// A link that is gone in a compare gets its own id: a live BGP link between the same two can carry the same label.
-function edgeKey(e) { return [e.from, e.to, e.layer, e.label].join('|') + (e.cmp === 'gone' ? '|gone' : ''); }
 
 // An LLDP, subnet or default-route link shows its label only while the pointer is on it or it is selected (many default
 // routes say the same "default via X"); BGP and OSPF links always show theirs. A group's "N links" label is a summary, so it stays.
@@ -416,8 +417,8 @@ function setLineWidth(value) {
 
 function toVisEdges(edges) {
     var LAYER_COLOR = { lldp: themeColor('--cyan'), bgp: themeColor('--yellow'), ospf: themeColor('--blue'),
-                        default: themeColor('--green'), connected: themeColor('--orange') };
-    var BEND = { lldp: 0, bgp: 0.25, ospf: -0.25, default: 0.45, connected: -0.45 };
+                        ipsec: themeColor('--pink'), default: themeColor('--green'), connected: themeColor('--orange') };
+    var BEND = { lldp: 0, bgp: 0.25, ospf: -0.25, ipsec: 0.65, default: 0.45, connected: -0.45 };
     var twins = {};   // from|to|layer -> how many such links came before: each next one bends further out
     // By site with "Bundle site links": the links between two sites become one line each (a session that is down, a link of
     // the selected device and a bundle clicked open stay as they are). One link between two sites is not worth a bundle.
@@ -463,7 +464,7 @@ function toVisEdges(edges) {
             length: e.to.indexOf('group:') === 0 ? 170 : (e.to.indexOf('ghost:') === 0 ? (e.layer === 'lldp' ? 110 : 230) : undefined),
             arrows: { to: { enabled: e.layer === 'default' } },   // a default route points at its next hop
             dashes: e.up === false ? true : (e.flapping ? [2, 5] : false),
-            width: (e.up === false ? 2 : (e.flapping || ebgp ? 3 : 1)) * lineScale(),
+            width: (e.up === false ? 2 : (e.flapping || ebgp || e.layer === 'ipsec' ? 3 : 1)) * lineScale(),
             // Lines between the same two devices would sit on top of each other: bend BGP one way, OSPF the other, and a
             // second link of the same kind between the same two (two cables, a default route per VRF) further out.
             smooth: perPair[pairKey(e)] === 1 ? false : { type: 'curvedCW', roundness: bend + twin * (bend < 0 ? -0.25 : 0.25) },
@@ -1073,7 +1074,7 @@ function loadCompare() {
         if (!a || !b) { return null; }
         // Older first, so "added" and "gone" read forward in time. The live map (no taken_at) is always the newest.
         if (a.taken_at && b.taken_at && a.taken_at > b.taken_at) { var t = a; a = b; b = t; }
-        return buildCompare(a, b);
+        return buildCompare(a, b, shownPart);
     });
 }
 
@@ -1084,64 +1085,6 @@ function shownPart(data) {
     edges.forEach(function (e) { used[e.from] = true; used[e.to] = true; });
     var nodes = data.nodes.filter(function (n) { return used[n.id] || !(n.ghost || n.device_type === 'subnet'); });
     return { nodes: nodes, edges: edges, positions: data.positions || {}, taken_at: data.taken_at };
-}
-
-// Which link in the older map is which in the newer one. A BGP/OSPF label holds the session state, so those are matched by
-// ends and protocol (same label first, then in order); every other link by ends, layer and label.
-function matchEdges(oldEdges, newEdges) {
-    function base(e) { return e.layer === 'bgp' || e.layer === 'ospf' ? [e.from, e.to, e.layer].join('|') : edgeKey(e); }
-    var left = {};
-    oldEdges.forEach(function (e) { (left[base(e)] = left[base(e)] || []).push(e); });
-    var pairs = newEdges.map(function (e) { return { now: e, was: null }; });
-    [true, false].forEach(function (sameLabel) {
-        pairs.forEach(function (p) {
-            var list = left[base(p.now)];
-            if (p.was || !list) { return; }
-            for (var i = 0; i < list.length; i++) {
-                if (!sameLabel || list[i].label === p.now.label) { p.was = list.splice(i, 1)[0]; return; }
-            }
-        });
-    });
-    var gone = [];
-    Object.keys(left).forEach(function (k) { gone = gone.concat(left[k]); });
-    return { pairs: pairs, gone: gone };
-}
-
-// The newer map plus what only the older one has, each node and link marked added / gone / changed / same (.cmp, .cmpWhy).
-function buildCompare(older, newer) {
-    var a = shownPart(older), b = shownPart(newer);
-    function mark(item, status, why) { return Object.assign({}, item, { cmp: status, cmpWhy: why }); }
-    var matched = matchEdges(a.edges, b.edges);
-    var edges = matched.pairs.map(function (p) {
-        if (!p.was) { return mark(p.now, 'added', 'new link'); }
-        var why = [];
-        if ((p.was.up === false) !== (p.now.up === false)) { why.push(p.now.up === false ? 'went down' : 'came up'); }
-        if (p.was.label !== p.now.label) { why.push('was: ' + p.was.label); }
-        if (!!p.was.flapping !== !!p.now.flapping) { why.push(p.now.flapping ? 'started flapping' : 'stopped flapping'); }
-        return mark(p.now, why.length ? 'changed' : 'same', why.join('; '));
-    }).concat(matched.gone.map(function (e) { return mark(e, 'gone', 'link is gone'); }));
-    var names = {};
-    a.nodes.concat(b.nodes).forEach(function (n) { names[n.id] = n.label; });
-    var linkNotes = {};   // node id -> what happened to its links
-    edges.forEach(function (e) {
-        if (e.cmp === 'same') { return; }
-        [[e.from, e.to], [e.to, e.from]].forEach(function (p) {
-            (linkNotes[p[0]] = linkNotes[p[0]] || []).push(e.layer + ' link to ' + (names[p[1]] || '?') + ' ' + e.cmp);
-        });
-    });
-    var old = {};
-    a.nodes.forEach(function (n) { old[n.id] = n; });
-    var nodes = b.nodes.map(function (n) {
-        var was = old[n.id];
-        delete old[n.id];
-        if (!was) { return mark(n, 'added', 'new on the map'); }
-        var why = [];
-        if ((was.reachable === 0) !== (n.reachable === 0)) { why.push(n.reachable === 0 ? 'stopped answering ping' : 'answers ping again'); }
-        why = why.concat(linkNotes[n.id] || []);
-        return mark(n, why.length ? 'changed' : 'same', why.join('\n'));
-    }).concat(Object.keys(old).map(function (id) { return mark(old[id], 'gone', 'gone from the map'); }));
-    return { nodes: nodes, edges: edges, positions: Object.assign({}, a.positions, b.positions),
-             from: older.taken_at, to: newer.taken_at };
 }
 
 // Unchanged nodes and links are faded. Links also turn grey: the layer colours include green, red and orange, which mean
@@ -1198,7 +1141,7 @@ function showCompareBar(data) {
     var text = 'Compare ' + shortWhen(data.from) + ' \u2192 ' + shortWhen(data.to) + ': ';
     text += total ? parts.map(function (p) { return p[0] + ' +' + p[1].added + ' \u2212' + p[1].gone + ' ~' + p[1].changed; }).join('  |  ')
         : 'no differences';
-    if (shownLayers().length < 5) { text += ' (shown layers only)'; }
+    if (shownLayers().length < layerCount()) { text += ' (shown layers only)'; }
     var el = document.getElementById('cmp-text');
     el.textContent = text;
     el.title = 'Read-only. ' + (total ? parts.map(function (p) {
@@ -1331,7 +1274,7 @@ function load() {
                 layersAuto = false;
                 layersBig = true;
                 document.querySelectorAll('.filters button[data-layer]').forEach(function (b) {
-                    setLayerButton(b, ['lldp', 'bgp'].indexOf(b.getAttribute('data-layer')) !== -1);
+                    setLayerButton(b, ['lldp', 'bgp', 'ipsec'].indexOf(b.getAttribute('data-layer')) !== -1);
                 });
                 updateFilterMarker();
                 load();
@@ -1476,6 +1419,11 @@ function shownLayers() {
 }
 
 var LAYER_KEY = 'confetti-topo-layers';   // localStorage: JSON list of the layers that are switched on
+// The layers that existed when that list was saved: a layer added later starts on, not "switched off by the viewer".
+var LAYER_KNOWN_KEY = 'confetti-topo-layers-known';
+var FIRST_LAYERS = ['lldp', 'bgp', 'ospf', 'default', 'connected'];   // a list saved without LAYER_KNOWN_KEY knew these
+
+function layerCount() { return document.querySelectorAll('.filters button[data-layer]').length; }
 
 function setLayerButton(btn, on) {
     btn.className = on ? 'active' : '';
@@ -1486,7 +1434,11 @@ function setLayerButton(btn, on) {
 }
 
 function saveLayers() {
-    try { localStorage.setItem(LAYER_KEY, JSON.stringify(shownLayers())); } catch (e) { /* private window: not remembered */ }
+    try {
+        localStorage.setItem(LAYER_KEY, JSON.stringify(shownLayers()));
+        localStorage.setItem(LAYER_KNOWN_KEY, JSON.stringify(Array.prototype.map.call(
+            document.querySelectorAll('.filters button[data-layer]'), function (b) { return b.getAttribute('data-layer'); })));
+    } catch (e) { /* private window: not remembered */ }
 }
 
 // Put the toggles back the way they were left; all on when nothing is saved, except on a big map (load() then starts with
@@ -1496,8 +1448,12 @@ function restoreLayers() {
     var saved = null;
     try { saved = JSON.parse(localStorage.getItem(LAYER_KEY)); } catch (e) { saved = null; }
     if (!Array.isArray(saved)) { layersAuto = true; return; }
+    var known = null;
+    try { known = JSON.parse(localStorage.getItem(LAYER_KNOWN_KEY)); } catch (e) { known = null; }
+    if (!Array.isArray(known)) { known = FIRST_LAYERS; }
     document.querySelectorAll('.filters button[data-layer]').forEach(function (b) {
-        setLayerButton(b, saved.indexOf(b.getAttribute('data-layer')) !== -1);
+        var name = b.getAttribute('data-layer');
+        setLayerButton(b, saved.indexOf(name) !== -1 || known.indexOf(name) === -1);
     });
 }
 
@@ -1506,7 +1462,7 @@ function updateFilterMarker() {
     var hidden = layersBig ? [] : Array.prototype.map.call(document.querySelectorAll('.filters button[data-layer]:not(.active)'),
         function (b) { return b.getAttribute('data-name'); });
     var nodes = Object.keys(hiddenNodes).length;
-    var text = hidden.length === 3 ? 'all connections hidden, devices only' : '';
+    var text = hidden.length === layerCount() ? 'all connections hidden, devices only' : '';
     if (!text) {
         if (unknownHidden()) { hidden.push('unknown nodes'); }
         if (nodes) { hidden.push(nodes + (nodes === 1 ? ' node' : ' nodes')); }
@@ -2305,7 +2261,7 @@ window.addEventListener('resize', fitNodePanel);
 document.addEventListener('themechange', fitNodePanel);   // the layout picker fires this too: the legend changes height
 fitNodePanel();
 // ---- Link card: click a link ---------------------------------------------------
-var LINK_KIND = { lldp: 'LLDP link (cable)', bgp: 'BGP session', ospf: 'OSPF adjacency', default: 'Default route',
+var LINK_KIND = { lldp: 'LLDP link (cable)', bgp: 'BGP session', ospf: 'OSPF adjacency', ipsec: 'IPsec VPN tunnel', default: 'Default route',
                   connected: 'Connected subnet' };
 
 // The fields each protocol reports, in the order they are shown: [key in the report, label shown].
@@ -2316,6 +2272,9 @@ var LINK_FIELDS = {
     bgp: [['peer_ip', 'neighbor'], ['local_as', 'own AS'], ['remote_as', 'neighbor AS'], ['state', 'state'], ['uptime', 'up for'],
           ['prefixes', 'prefixes'], ['local_if', 'local interface']],
     ospf: [['peer_ip', 'neighbor'], ['area', 'area'], ['state', 'state'], ['uptime', 'up for'], ['local_if', 'local interface']],
+    ipsec: [['tunnel', 'tunnel'], ['interface', 'interface'], ['local_ip', 'local IP'], ['peer_ip', 'peer IP'], ['state', 'state'],
+            ['ike', 'IKE'], ['ipsec_state', 'IPsec SA'], ['encryption', 'encryption'], ['selectors', 'selectors'], ['vrf', 'vrf'],
+            ['packets', 'packets'], ['bytes', 'bytes'], ['uptime', 'up for']],
     default: [['next_hop', 'next hop'], ['vrf', 'vrf'], ['interface', 'interface'], ['protocol', 'learned by'], ['distance', 'distance'], ['metric', 'metric']],
     connected: [['subnet', 'subnet'], ['interface', 'interface'], ['ip', 'address'], ['state', 'interface state']],
 };
