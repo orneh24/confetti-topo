@@ -11,6 +11,7 @@ It draws a graph of the network from what the devices say about themselves:
 
 - **LLDP** gives physical links (cables): "my port Gi1 sees device X port Gi2".
 - **BGP** and **OSPF** give logical links (sessions): "I have a peer at 10.0.0.2, state Established".
+- **IPsec** gives encrypted tunnels: "my Tunnel100 to 192.0.2.87 is up" (section 8.1).
 
 The server logs in to each device over SSH, runs read-only `show` commands, parses the text with
 regex, stores rows, and serves one JSON graph that the browser draws. Nothing is configured on
@@ -26,6 +27,7 @@ Flow: `poll -> parse -> two tables -> /api/topology -> vis.js`.
 | LLDP (old IOS only) | `show lldp neighbors` | the table that maps a neighbor to a local port (see 6.3) |
 | BGP | `show bgp summary` | neighbor IP, remote AS, state, prefixes received, uptime |
 | OSPF | `show ip ospf neighbor` | neighbor address, state, local interface |
+| IPsec | `show crypto session detail`, `show crypto ipsec sa` | tunnels, state, addresses, algorithms, counters |
 
 Verified on real IOS-XE 17.3 and 15.4 routers. Do not trust a command name from documentation:
 check it on a real device first (see 6.1).
@@ -40,6 +42,7 @@ after one `keygen` per poll (details and quirks in the `panos-xml-api` skill). C
 | LLDP | `<show><lldp><neighbors>all</neighbors></lldp></show>` | per local port: chassis id, port id, port description, system name, management address |
 | BGP | `<show><routing><protocol><bgp><peer/></bgp></protocol></routing></show>` and `...<bgp><summary/>...` | peers, remote AS, state, prefixes, uptime; the summary adds the router's own AS |
 | OSPF | `<show><routing><protocol><ospf><neighbor/></ospf></protocol></routing></show>` | neighbor address, state, area |
+| IPsec | `<show><vpn><flow></flow></vpn></show>` and five helpers | tunnels, state, addresses, algorithms, counters |
 
 ## 3. Storage (two tables are enough)
 
@@ -93,8 +96,8 @@ timestamp, one value for the whole poll).
 
 ## 5. Building the graph (`GET /api/topology`)
 
-Returns `{nodes: [...], edges: [...]}` in the shape vis.js wants. Optional `?layer=lldp|bgp|ospf`
-(or a comma list such as `lldp,bgp`) limits the edges to those sources; the default overlays all three on the same nodes.
+Returns `{nodes: [...], edges: [...]}` in the shape vis.js wants. Optional `?layer=lldp|bgp|ospf|ipsec|default|connected`
+(or a comma list such as `lldp,bgp`) limits the edges to those sources; the default overlays all six on the same nodes.
 
 **Nodes:** one per known device: `id "dev:<id>"`, `label` = hostname, `group` = role,
 `reachable` (ping state, optional), `ghost: false`.
@@ -218,6 +221,18 @@ against them.
 - **Events:** peer state change, peer added/removed, neighbor added/removed, from the same apply
   step that already holds the old rows.
 
+### 8.1 IPsec tunnels
+
+- Store one row per (device, tunnel name, peer address). Do not store which device the peer is: look it up when the map is
+  built, with the same rule as BGP peers (an address held by exactly one device).
+- Two ends of one tunnel mirror each other: A's local and peer address are B's peer and local address. Pair them that way
+  first, so two tunnels between the same pair stay apart. Draw one line, up only if every report says up.
+- "No tunnels" and "I do not understand this answer" must be different results. IOS-XE 17.3.8a answers nothing at all with
+  no VPN; IOS 15.4 without crypto answers `% Invalid input`. Only the first may clear stored rows.
+- IKE up with no IPsec SA (`UP-IDLE`) is not a working tunnel.
+- A peer behind NAT is seen by its outside address and stays unknown.
+- Never read a configuration or a key command for this. Commands and sources: the `ipsec-vpn` skill.
+
 ## 9. The browser side (vis-network)
 
 - Vendor the library (no CDN) and keep vanilla JS with no build step.
@@ -285,6 +300,7 @@ against them.
 - Old IOS (15.4) output without `Local Intf:`: local interface filled from the table.
 - Timeout during the LLDP task: nothing deleted, other tasks' data kept.
 - First poll of a new device: no events.
+- Both ends of an IPsec tunnel polled: one line; shut one end: the line turns red. A tunnel to an unknown peer: a ghost.
 - Merge two device records: edges re-point to the survivor; delete one: edges become ghosts.
 - Refresh while zoomed in: view does not reset.
 

@@ -19,7 +19,7 @@ Classic layout, labelled Tools). The look follows the hub UI of the sibling proj
 
 ## What it does
 
-- **Topology.** LLDP cables, BGP sessions and OSPF adjacencies on one graph, with per-protocol toggles and one to hide unknown (ghost) nodes, remembered in the browser.
+- **Topology.** LLDP cables, BGP sessions, OSPF adjacencies, IPsec VPN tunnels, default routes and shared subnets on one graph, with per-layer toggles and one to hide unknown (ghost) nodes, remembered in the browser.
   Devices are drawn as icons by type (router, switch, firewall, Linux server) with a Cisco, Palo Alto, Juniper or HPE mark; both can be switched off. A Lines dropdown makes the connector lines Small, Medium or Large.
   A cable or session that both routers report is drawn once. A neighbor that is not a known device shows
   as a dashed "ghost" node, so nothing is silently dropped. A BGP/OSPF session that is not Established /
@@ -31,6 +31,11 @@ Classic layout, labelled Tools). The look follows the hub UI of the sibling proj
 - **Compare two versions.** Pick two saved versions of the map, or one and Live. Devices and links that were added, are gone or changed
   are highlighted. A device counts as changed when its ping state or any of its links changed. "Group changed / unchanged" packs the
   unchanged devices below the changed ones, and two more buttons hide unchanged devices or links. Nothing is saved while comparing.
+- **IPsec VPNs.** Tunnels are read from Cisco IOS / IOS-XE (`show crypto session detail`) and Palo Alto PAN-OS (XML API). On the
+  map a tunnel is one pink line, red and dashed when either end says it is down; a peer that is not a known device is a ghost
+  node. Click it for what each end reports: IKE version and state, IPsec state, algorithms, selectors and counters. The device
+  page lists a device's tunnels, down tunnels show on the dashboard, and changes are recorded. Read-only; no keys or
+  configuration are read for this.
 - **Peers find their router.** A BGP or OSPF peer is usually a loopback or link address, not the router's
   management IP. confetti-topo also reads each router's interface addresses, so a peer resolves to its
   router when exactly one router owns that address. Peers outside your lab stay ghosts. Two optional switches on
@@ -73,6 +78,10 @@ Classic layout, labelled Tools). The look follows the hub UI of the sibling proj
 
 ![The whole dashboard: system, services, activity, devices, events, sessions down, open conflicts, unknown LLDP neighbors and map changes](docs/img/dashboard.png)
 
+![The topology map: cables, BGP and OSPF sessions, IPsec tunnels, default routes and shared subnets](docs/img/topology.png)
+
+![Compare: an older map against the live one, with added, gone and changed devices and links highlighted](docs/img/compare.png)
+
 ![The dashboard in four themes: Light, Monokai, Dark and Rainbow](docs/img/themes.png)
 
 ![The dashboard in four layouts: Classic, Modern, Retro 95 and MS-DOS (blue, and the Neon Green variant)](docs/img/layouts.png)
@@ -84,6 +93,9 @@ Built for Cisco IOS / IOS-XE. The parsers were checked against CSR1000v
 routers on IOS-XE 17.3 and 15.4; the merged confetti-topo has not been run on real routers yet (see
 [`docs/HANDOFF.md`](docs/HANDOFF.md)). The PAN-OS support was written from real output of a PA-VM on PAN-OS 11.1 and
 polled once against it; other PAN-OS versions, Panorama and several virtual routers are untested.
+
+IPsec collection was checked against one live tunnel between an IOS-XE 17.3 router (IKEv1) and a PA-VM on PAN-OS 11.1. A tunnel
+that is down, IKEv2, VRFs and a firewall with no tunnels have not been seen on real devices.
 
 ## Running locally
 

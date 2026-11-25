@@ -1,14 +1,28 @@
 # confetti-topo — handoff
 
+## IPsec VPN on the map, test and tooling pass (2026-11-25)
+
+New `vpn` poll task, `vpn_tunnels` table, IPsec map layer, device box, dashboard / Find / Recent changes (CLAUDE.md "IPsec VPN
+tunnels", constraint 40). Compare logic moved to `static/compare.js`. New checks R58-R60; the gate was cleaned up (CRLF failure,
+checks leaking settings, checks that could pass without testing anything). Device page times are shown in the viewer's format.
+
+Verified on real devices (dev machine, through the app): one IKEv1 tunnel between an IOS-XE 17.3.2 router and a PA-VM on PAN-OS
+11.1; stored values matched the raw output, each end resolved to the other, one line on the map. IOS-XE 17.3.8a without a VPN
+answers empty (stored as no tunnels). IOS 15.4 refuses the command: that task fails, the others succeed.
+Browser (mock lab): Dark and Light, Classic, Retro 95 and MS-DOS.
+
+Not verified on real devices: a tunnel that is down, IKEv2, an inside VRF, crypto maps, more than one tunnel, a firewall with no
+tunnels, Panorama, other PAN-OS versions. `ios_crypto_session_not_captured.txt` is written from Cisco's documented layout.
+Not done: the lab VM is not updated; the `theme.css` / `layout.css` change (`--pink`) is not copied to confetti-traffic.
+
 ## Topology page: compare two versions (2026-11-25)
 
 New Compare row on the Topology page (CLAUDE.md, "Topology history"), browser only. Also added the missing `--orange` theme colour
 (the Connected layer was drawn blue) and stopped node drags in History view from saving places. Checked in Chrome on the mock lab and
 on the dev machine's real database (22 nodes), Rainbow and Dark themes, Classic layout.
 
-Not verified: Retro 95 and MS-DOS layouts. No new `dev/regress.py` check (including for "nothing is saved in History / Compare").
-`docs/img/` is not re-recorded. confetti-traffic was not checked for the `theme.css` change. R15 fails on a CRLF checkout of
-`CLAUDE.md` (its pattern needs LF line ends); it matches the LF text.
+Not verified then: Retro 95 and MS-DOS layouts. confetti-traffic was not checked for the `theme.css` change. (The missing check
+and the R15 failure on a CRLF checkout were fixed in the work above.)
 
 ## Database restore validated on the lab VM (2026-11-22)
 

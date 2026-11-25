@@ -5,7 +5,7 @@
 
 Seeds a throwaway database with seed_mock_lab.py, starts a server on it (port
 a free port), drives Chromium, then stops the server and deletes the
-database. Writes themes.png, layouts.png and confetti-topo-demo.gif. Run it
+database. Writes dashboard.png, themes.png, layouts.png, topology.png, compare.png and confetti-topo-demo.gif. Run it
 after any UI change or rename so the README never shows an old look.
 """
 
@@ -98,6 +98,9 @@ def main():
             # The whole dashboard on one tall screen: the collages above cut off the lower widgets.
             shot(browser, "/", size={"width": 1280, "height": 1360}).save(os.path.join(OUT, "dashboard.png"), optimize=True)
 
+            # The oldest snapshot of the mock lab against the live map (seed_mock_lab.older_snapshot).
+            shot(browser, "/topology?compare=1,live").save(os.path.join(OUT, "compare.png"), optimize=True)
+
             frames = [shot(browser, path) for path in TOUR]
             frames[TOUR.index("/topology")].save(os.path.join(OUT, "topology.png"), optimize=True)
             frames += [shot(browser, "/", theme=t) for t in THEMES]
@@ -107,7 +110,7 @@ def main():
         small = [f.resize((960, 540), Image.LANCZOS).quantize(colors=128) for f in frames]
         small[0].save(os.path.join(OUT, "confetti-topo-demo.gif"), save_all=True,
                       append_images=small[1:], duration=1800, loop=0, optimize=True)
-        print("wrote dashboard.png, themes.png, layouts.png, confetti-topo-demo.gif to", os.path.normpath(OUT))
+        print("wrote dashboard.png, themes.png, layouts.png, topology.png, compare.png, confetti-topo-demo.gif to", os.path.normpath(OUT))
     finally:
         server.terminate()
         server.wait(timeout=10)
