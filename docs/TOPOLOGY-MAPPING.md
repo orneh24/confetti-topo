@@ -247,7 +247,13 @@ against them.
   (`confetti-topo-as-areas`, a look setting) draws a dashed box labelled `AS <n>` behind the nodes of each AS, on vis's
   `beforeDrawing`; it shows only while BGP is shown. A box is sized from the node places and a fixed size (not
   `getBoundingBox`, which grows with the selection outline), and its title sits on the top edge. The legend starts closed
-  (`confetti-topo-legend-open`). An LLDP port id that is only a MAC address (Linux lldpd) is labelled with the port
+  (`confetti-topo-legend-open`). One box around an AS whose nodes are far apart covers other AS areas, so where two would
+  meet an AS is drawn as several boxes with the same label (`static/mapgeo.js` `asAreas`; no node moves). Rejoin the parts
+  only when the joined box covers no more of another AS (a small tolerance): "meets nothing new" let one unavoidable touch
+  bring the big box back.
+  An unknown node seen by several devices is easily placed far away by physics and then makes the whole map small. It is
+  moved back only from outside the box around the devices to a place inside it, so it moves once (these are shared saved
+  places). **Fit** has a menu to zoom to the devices only or to one layer. An LLDP port id that is only a MAC address (Linux lldpd) is labelled with the port
   description when there is one (`topology.port_text`); the cable key still uses the port id. LLDP / BGP / OSPF toggle buttons (independent, remembered in `confetti-topo-layers`, a FILTERED marker while any is off) pass `?layer=` as a comma list. An independent **Unknown nodes** toggle
   (remembered in `confetti-topo-hide-unknown`) hides ghost nodes and their edges in the browser only; it is not
   sent as `?layer=`, and the FILTERED marker shows while it is off too.

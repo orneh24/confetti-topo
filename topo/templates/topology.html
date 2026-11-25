@@ -140,6 +140,7 @@ button.active { border-color: var(--cyan); color: var(--text); background: var(-
     <div class="tb-group" role="group" aria-label="Actions">
     <span class="tb-label">Actions</span>
     <button id="fit-btn" onclick="if (network) { fitMap(); }" title="Zoom and move the view so the whole map fits">Fit</button>
+    <button id="fit-more-btn" aria-haspopup="menu" aria-label="Fit part of the map" onclick="event.stopPropagation(); openFitMenu(this)" title="Zoom to the devices only, or to the links of one layer">&#9662;</button>
     <button id="tidy-btn" onclick="tidyAsAreas()" title="Move the routers so each BGP AS sits in its own block (changes the saved places)">Tidy AS areas</button>
     <button id="rearrange-btn" onclick="rearrange()" title="Forget every saved place and lay the whole map out again from scratch (the same map for everyone)">Re-arrange</button>
     <label class="hist-label" title="Look at the map as it was when it last changed. Read-only; pick Live to go back">History
@@ -223,6 +224,7 @@ button.active { border-color: var(--cyan); color: var(--text); background: var(-
 {% block scripts %}
 <script src="/static/vendor/vis-network/vis-network.min.js"></script>
 <script src="/static/compare.js"></script>
+<script src="/static/mapgeo.js"></script>
 <script>
 var network = null;
 var nodeSet = null;
@@ -540,7 +542,10 @@ function startSettling(pinIds) {
 // that touches a link or a node, or whose AS area would meet the area of another AS, is put on a ring around its device at the angle and distance with the most free
 // room (a slot facing away from the middle of the map wins a tie). Devices, links and other nodes never move for it.
 // One that is near and clear stays where it is (also where the viewer dragged it). The places it moved are saved.
-var UNKNOWN_NEAR = 400, UNKNOWN_RING = 130, UNKNOWN_CLEAR = 12;
+// An unknown node seen by SEVERAL devices has no one device to sit by. It moves only when it lies more than
+// UNKNOWN_OUT outside the box around the devices, to the freest place inside that box near the devices that see it
+// (static/mapgeo.js), so a second run leaves it there.
+var UNKNOWN_NEAR = 400, UNKNOWN_RING = 130, UNKNOWN_CLEAR = 12, UNKNOWN_OUT = 250;
 
 // Points along an edge. A BGP/OSPF link is curved to one side or the other, so both sides are sampled.
 function edgeSamples(e, pos) {
@@ -595,7 +600,7 @@ function tuckUnknown() {
     function room(id, o, x, y) {
         var best = 1e9;
         function near(px, py, radius) { best = Math.min(best, Math.hypot(px - x, py - y) - radius); }
-        Object.keys(pos).forEach(function (k) {
+        Object.keys(pos).forEach(function (k) {   // o is null for a node several devices see
             if (k !== id && k !== o) { near(pos[k].x, pos[k].y, k.indexOf('dev:') === 0 ? 45 : 30); }
         });
         edges.forEach(function (e) {
@@ -607,7 +612,7 @@ function tuckUnknown() {
             });
         });
         // the link from the device to the unknown node must not run over another node either
-        [0.5, 0.75].forEach(function (t) {
+        (o ? [0.5, 0.75] : []).forEach(function (t) {
             var lx = pos[o].x + (x - pos[o].x) * t, ly = pos[o].y + (y - pos[o].y) * t;
             Object.keys(pos).forEach(function (k) {
                 if (k !== id && k !== o) { best = Math.min(best, Math.hypot(pos[k].x - lx, pos[k].y - ly) - (k.indexOf('dev:') === 0 ? 45 : 30)); }
@@ -617,6 +622,17 @@ function tuckUnknown() {
     }
 
     var moved = [], byOwner = {};
+    var box = deviceBox(pos, UNKNOWN_OUT);
+    sharedOutliers(edges, pos, box).forEach(function (g) {
+        var best = null;
+        sharedCandidates(g.owners, pos, box).forEach(function (c) {
+            var score = Math.min(room(g.id, null, c.x, c.y), 60) - c.far * 0.08 - (asClash(g.id, null, c.x, c.y) ? 1000 : 0);
+            if (!best || score > best.score) { best = { score: score, x: c.x, y: c.y }; }
+        });
+        pos[g.id] = { x: best.x, y: best.y };   // the next one keeps clear of this one
+        network.moveNode(g.id, best.x, best.y);
+        moved.push(g.id);
+    });
     Object.keys(owner).forEach(function (id) { if (owner[id] && pos[owner[id]] && pos[id]) { (byOwner[owner[id]] = byOwner[owner[id]] || []).push(id); } });
     Object.keys(byOwner).forEach(function (o) {
         var p = pos[o], base = Math.atan2(p.y - cy, p.x - cx);   // away from the middle of the map
@@ -654,8 +670,9 @@ function settled() {
 // Fit the whole map in the part of the page the panels leave free: an open legend covers the left of the map and the
 // Devices list the right edge. Shrink the picture to the width between them and centre it there. A closed legend is
 // only its title in the bottom corner, so it is left out.
-function fitMap() {
-    network.fit();
+// ids: fit only these nodes (the Fit menu); without it the whole map.
+function fitMap(ids) {
+    if (ids && ids.length) { network.fit({ nodes: ids, maxZoomLevel: 1.5 }); } else { network.fit(); }
     var legend = document.querySelector('.legend-box');
     var list = document.getElementById('dev-list');
     var legendW = legend && legend.open && legend.offsetWidth ? legend.offsetWidth + 24 : 0;   // 12px edge gap on each side
@@ -728,6 +745,27 @@ function openExportMenu(btn) {
         { label: 'Map as PNG picture', action: exportPng },
         { label: 'Map data as JSON', action: exportJson },
     ] });
+}
+
+// The ▾ beside Fit: zoom to a part of the map. Only the view changes. A part is the known devices, or the nodes at the
+// ends of one shown layer's links.
+function openFitMenu(btn) {
+    if (!network) { return; }
+    function part(label, ids) {
+        var shown = ids.filter(function (id, i) { return ids.indexOf(id) === i && nodeSet.get(id); });
+        return { label: label, action: function () { fitMap(shown); }, disabled: !shown.length };
+    }
+    var items = [{ label: 'Whole map', action: function () { fitMap(); } },
+                 part('Devices only', nodeSet.getIds().filter(function (id) { return String(id).indexOf('dev:') === 0; }))];
+    shownLayers().forEach(function (layer) {
+        var ends = [];
+        lastEdges.forEach(function (e) { if (e.layer === layer) { ends.push(e.from, e.to); } });
+        if (ends.length) {
+            items.push(part(document.querySelector('.filters button[data-layer="' + layer + '"]').getAttribute('data-name') + ' links', ends));
+        }
+    });
+    var r = btn.getBoundingClientRect();
+    ctxMenu.open(r.left, r.bottom + 2, { title: 'Fit', items: items });
 }
 
 // /topology?device=<id> (from the Recent changes page): select that device and centre on it, once.
@@ -1712,9 +1750,6 @@ function tidyAsAreas() {
 // box would jump when a node is clicked. Room for the icon, the name under it and the vendor mark beside it.
 var AS_PAD = 10;   // the drawn box is this much bigger than the nodes in it
 function asRect(p) { return { left: p.x - 55, right: p.x + 55, top: p.y - 32, bottom: p.y + 50 }; }
-function unionRect(a, b) {
-    return { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top), right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) };
-}
 function asBoxes(pos, skip) {
     var boxes = {};
     Object.keys(nodeAs).forEach(function (id) {
@@ -1792,15 +1827,28 @@ function drawSiteAreas(ctx) {
     ctx.restore();
 }
 
+// The boxes that are drawn: one per AS, split where they would cover each other (asAreas, static/mapgeo.js). This runs on
+// every frame, so the answer is kept until a node moves or changes its AS.
+var asDrawn = { key: null, parts: [] };
+function drawnAsAreas() {
+    var pos = network.getPositions(), items = [], key = '';
+    Object.keys(nodeAs).forEach(function (id) {
+        if (!pos[id]) { return; }
+        items.push({ id: id, asn: nodeAs[id], rect: asRect(pos[id]) });
+        key += id + ' ' + nodeAs[id] + ' ' + Math.round(pos[id].x) + ' ' + Math.round(pos[id].y) + ';';
+    });
+    if (key !== asDrawn.key) { asDrawn = { key: key, parts: asAreas(items, 2 * AS_PAD) }; }
+    return asDrawn.parts;
+}
+
 function drawAsAreas(ctx) {
     if (!asAreasOn() || !nodeSet) { return; }
-    var boxes = asBoxes(network.getPositions());
     var pad = AS_PAD;
     ctx.save();
     // Biggest first: a smaller box that overlaps a bigger one is drawn on top of it, so its label stays readable.
     var area = function (b) { return (b.right - b.left) * (b.bottom - b.top); };
-    Object.keys(boxes).sort(function (x, y) { return area(boxes[y]) - area(boxes[x]); }).forEach(function (asn) {
-        var b = boxes[asn];
+    drawnAsAreas().slice().sort(function (x, y) { return area(y.box) - area(x.box); }).forEach(function (part) {
+        var b = part.box, asn = part.asn;
         var x = b.left - pad, y = b.top - pad, w = b.right - b.left + 2 * pad, h = b.bottom - b.top + 2 * pad;
         ctx.beginPath();
         ctx.roundRect(x, y, w, h, 14);

@@ -1,5 +1,12 @@
 # confetti-topo — handoff
 
+## Map: split AS boxes, Fit menu, shared unknown nodes (2026-11-25)
+
+`static/mapgeo.js`, constraints 44-45, checks R62-R63. Real dev map: the five unknown nodes seen by several devices moved
+(saved places; devices unchanged; a reload wrote nothing). Drawn size 2119 x 1081 -> 1787 x 553, Fit about 16 % larger (the
+map is limited by its width). "Devices only" did not change. Database backup from before: `topo-pre-mapfit-*`. The real map
+had no meeting AS boxes, so the split was checked on the mock lab (Compare) only.
+
 ## IPsec VPN on the map, test and tooling pass (2026-11-25)
 
 New `vpn` poll task, `vpn_tunnels` table, IPsec map layer, device box, dashboard / Find / Recent changes (CLAUDE.md "IPsec VPN

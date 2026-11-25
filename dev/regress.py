@@ -3311,6 +3311,95 @@ def _():
     return p
 
 
+def _mapgeo(script):
+    """Run a node script against static/mapgeo.js; it prints a JSON list of problems."""
+    node = shutil.which("node")
+    if not node:
+        raise Skip("no node: static/mapgeo.js was not run")
+    path = os.path.abspath("topo/static/mapgeo.js").replace("\\", "/")
+    tmp = os.path.join(TMP, "mapgeo_check.js")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write("const g = require(%s);\nconst bad = [];\nconst need = (ok, why) => { if (!ok) { bad.push(why); } };\n" % json.dumps(path)
+                 + script + "\nconsole.log(JSON.stringify(bad));\n")
+    r = subprocess.run([node, tmp], capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        return ["static/mapgeo.js did not run: " + r.stderr.strip()[:200]]
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
+@check("R62", "AS areas: boxes of different AS do not meet unless their nodes do, a map without overlap keeps one box per AS, and no node is lost")
+def _():
+    p = []
+    page = read("topo/templates/topology.html")
+    need('src="/static/mapgeo.js"' in page and "asAreas(items, 2 * AS_PAD)" in page and "drawnAsAreas()" in page,
+         "topology.html must draw the AS areas from asAreas in static/mapgeo.js", p)
+    p += _mapgeo(r"""
+const at = (id, asn, x, y) => ({ id: id, asn: asn, rect: { left: x - 55, right: x + 55, top: y - 32, bottom: y + 50 } });
+const check = (name, items, wanted) => {
+  const parts = g.asAreas(items, 20);
+  const ids = [].concat(...parts.map((q) => q.ids)).sort();
+  need(JSON.stringify(ids) === JSON.stringify(items.map((i) => i.id).sort()), name + ': every node must be in exactly one box');
+  parts.forEach((q) => q.ids.forEach((id) => {
+    const it = items.find((i) => i.id === id);
+    need(String(it.asn) === String(q.asn), name + ': a node is in the box of another AS');
+    need(it.rect.left >= q.box.left && it.rect.right <= q.box.right && it.rect.top >= q.box.top && it.rect.bottom <= q.box.bottom, name + ': a box does not hold its node');
+  }));
+  if (wanted !== undefined) { need(parts.length === wanted, name + ': expected ' + wanted + ' boxes, got ' + parts.length); }
+  return parts;
+};
+const clash = (parts) => parts.some((a) => parts.some((b) => String(a.asn) !== String(b.asn) && g.rectsMeet(a.box, b.box, 20)));
+check('apart', [at('a', 1, 0, 0), at('b', 1, 900, 0), at('c', 2, 0, 900), at('d', 2, 900, 900)], 2);
+// AS 2 has one node beside each end of AS 1's triangle: one box for AS 2 would cover AS 1
+const mixed = [at('a', 1, -340, -40), at('b', 1, 340, -40), at('c', 1, 0, 270), at('u7', 2, 560, 90), at('u8', 2, 60, 460)];
+const m = check('far apart', mixed, 3);
+need(!clash(m), 'boxes of two AS still meet');
+need(m.filter((q) => String(q.asn) === '1').length === 1, 'the AS that did not have to be split was split');
+// two nodes that touch cannot be separated; the far node of that AS must not make it worse, and it must finish
+const touch = check('touching', [at('a', 1, 0, 0), at('b', 2, 40, 0), at('a2', 1, 1000, 0)]);
+need(touch.length <= 3, 'touching nodes');
+check('same place', [at('a', 1, 0, 0), at('a2', 1, 0, 0), at('b', 2, 0, 0), at('b2', 2, 0, 0)]);
+// two AS interleaved in a row end up as boxes that do not meet
+need(!clash(check('interleaved', [0, 1, 2, 3, 4, 5].map((i) => at('n' + i, i % 2, i * 300, 0)))), 'interleaved AS still meet');
+// another AS sits between the 2nd and 3rd node of a row: the first split (at the wider gap) was not needed and is undone
+const row = check('row', [at('a', 1, 0, 0), at('b', 1, 900, 0), at('c', 1, 1200, 0), at('z', 2, 1050, 0)], 3);
+need(row.some((q) => q.ids.join() === 'a,b'), 'two parts that need not be apart were not joined again: ' + row.map((q) => q.ids.join('+')));
+// found on the mock lab in Compare: one router is 1 px too close to a far-apart AS. That touch cannot be helped, and it
+// must not bring the big box back over the other routers
+const near = check('near miss', [at('d1', 65000, -340, -40), at('d2', 65000, 340, -40), at('d3', 65000, 0, 270),
+  at('u7', 64501, 469, -23), at('u8', 64501, 31, 396)], 3);
+need(near.filter((q) => String(q.asn) === '64501').length === 2 && near.some((q) => q.ids.length === 3), 'near miss: ' + near.map((q) => q.asn + ':' + q.ids.join('+')));
+need(g.asAreas([], 20).length === 0, 'an empty map');
+""")
+    return p
+
+
+@check("R63", "an unknown node seen by several devices is moved only when it is far outside them, and always to a place inside, so a second look leaves it")
+def _():
+    p = []
+    page = read("topo/templates/topology.html")
+    need("sharedOutliers(edges, pos, box)" in page and "sharedCandidates(g.owners, pos, box)" in page
+         and "var box = deviceBox(pos, UNKNOWN_OUT);" in page, "tuckUnknown must use mapgeo.js for shared unknown nodes", p)
+    p += _mapgeo(r"""
+const pos = { 'dev:1': { x: 0, y: 0 }, 'dev:2': { x: 800, y: 0 }, 'dev:3': { x: 400, y: 200 },
+  'ghost:far': { x: 400, y: 900 }, 'ghost:near': { x: 400, y: 440 }, 'ghost:one': { x: 400, y: 1500 },
+  'ghost:mixed': { x: -900, y: 900 }, 'ghost:other': { x: -900, y: 950 }, 'subnet:x': { x: 0, y: 2000 } };
+const e = (a, b) => ({ from: a, to: b });
+const edges = [e('dev:1', 'ghost:far'), e('ghost:far', 'dev:2'), e('dev:1', 'ghost:near'), e('dev:2', 'ghost:near'),
+  e('dev:1', 'ghost:one'), e('dev:1', 'ghost:one'), e('dev:1', 'ghost:mixed'), e('ghost:other', 'ghost:mixed'), e('dev:1', 'subnet:x'), e('dev:2', 'subnet:x')];
+const box = g.deviceBox(pos, 250);
+need(box.left === -250 && box.right === 1050 && box.top === -250 && box.bottom === 450, 'the box is around the devices only: ' + JSON.stringify(box));
+const out = g.sharedOutliers(edges, pos, box);
+need(JSON.stringify(out.map((o) => o.id)) === '["ghost:far"]', 'only the far unknown node seen by several devices may move: ' + out.map((o) => o.id));
+const places = g.sharedCandidates(out[0].owners, pos, box);
+need(places.length > 20 && places.every((c) => g.inBox(box, c)), 'every candidate must be inside the box');
+need(places[0].far === 0 && places[0].x === 400 && places[0].y === 0, 'the rings are around the middle of the devices that see it');
+places.forEach((c) => { const moved = Object.assign({}, pos, { 'ghost:far': c });
+  if (g.sharedOutliers(edges, moved, g.deviceBox(moved, 250)).length) { need(false, 'a moved node would move again'); } });
+need(g.deviceBox({ 'ghost:far': { x: 1, y: 1 } }, 250) === null && g.sharedOutliers(edges, pos, null).length === 0, 'no device: nothing moves');
+""")
+    return p
+
+
 # ============================================================ live tier (a real server)
 
 

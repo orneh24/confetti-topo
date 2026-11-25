@@ -45,6 +45,9 @@ CDN.
   `LAYER_COLOR`, `BEND`, legend row, `LINK_KIND`, `LINK_FIELDS`, the big-map default, and `matchEdges` in `compare.js` if
   its label holds a state. A new colour goes in every theme block and both colour layouts (R60). Compare logic is
   `static/compare.js` (R59); nothing is saved while Compare or History is shown.
+- Geometry that a check should run (AS area boxes, where a far shared unknown node goes) is in `static/mapgeo.js` (R62, R63).
+  Anything that moves a node writes the shared saved places: its trigger must be false after the move.
+- Fit: `fitMap(ids)`; the ▾ menu is `openFitMenu`.
 - vis.js draws on a canvas, so it needs literal colour strings. Read them with `themeColor('--blue')` each time
   the graph is built, and rebuild on the `themechange` event (the layout picker fires it too).
 - Refresh every 20 s by **updating the DataSets in place** (`syncSet`: `remove` ids that vanished, `update`
