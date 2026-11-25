@@ -28,6 +28,9 @@ Classic layout, labelled Tools). The look follows the hub UI of the sibling proj
   node (double-click to open it). The layout stands still and is saved on the server, so everyone sees the
   same map (the Re-arrange button, or right-click the background and choose Re-arrange, starts over after a confirmation). "Focus on device" (right-click a device, or the button on its card) makes it the master and lays the map out as a tree from it, in this browser only. The Layout dropdown also has "By site": each site in its own box, the best connected device of the site on top and one row per hop below it; these places are saved and can be dragged. A big map (more than 20 devices) opens By site with only LLDP and BGP shown; single links are straight lines, and zoomed out the small labels and vendor marks are left out. An LLDP link shows its ports
   on hover or when selected.
+- **Compare two versions.** Pick two saved versions of the map, or one and Live. Devices and links that were added, are gone or changed
+  are highlighted. A device counts as changed when its ping state or any of its links changed. "Group changed / unchanged" packs the
+  unchanged devices below the changed ones, and two more buttons hide unchanged devices or links. Nothing is saved while comparing.
 - **Peers find their router.** A BGP or OSPF peer is usually a loopback or link address, not the router's
   management IP. confetti-topo also reads each router's interface addresses, so a peer resolves to its
   router when exactly one router owns that address. Peers outside your lab stay ghosts. Two optional switches on

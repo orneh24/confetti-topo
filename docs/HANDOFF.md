@@ -1,5 +1,15 @@
 # confetti-topo — handoff
 
+## Topology page: compare two versions (2026-11-25)
+
+New Compare row on the Topology page (CLAUDE.md, "Topology history"), browser only. Also added the missing `--orange` theme colour
+(the Connected layer was drawn blue) and stopped node drags in History view from saving places. Checked in Chrome on the mock lab and
+on the dev machine's real database (22 nodes), Rainbow and Dark themes, Classic layout.
+
+Not verified: Retro 95 and MS-DOS layouts. No new `dev/regress.py` check (including for "nothing is saved in History / Compare").
+`docs/img/` is not re-recorded. confetti-traffic was not checked for the `theme.css` change. R15 fails on a CRLF checkout of
+`CLAUDE.md` (its pattern needs LF line ends); it matches the LF text.
+
 ## Database restore validated on the lab VM (2026-11-22)
 
 The lab VM (Alpine, updated with `topo-update.sh -y <dir>` from an older build without the merged tables; 6 devices) was put on this build and

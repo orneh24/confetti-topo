@@ -287,6 +287,16 @@ than `TOPO_SNAPSHOT_RETENTION_DAYS` (14) are pruned. `GET /api/topology/snapshot
 `GET /api/topology/snapshots/<id>` are read-only. The topology page's History dropdown shows one with a banner and "Back to live".
 A snapshot is the `/api/topology` answer, so it holds nothing the page does not already show.
 
+**Compare** (its own toolbar row; `buildCompare` in topology.html, browser only, no API of its own, nothing stored): From (Off or a
+snapshot) and To (Live or a snapshot), always read older → newer; `/topology?compare=<id>,<id|live>` opens one. The newer map is drawn
+with what is gone added back. A link is `added`, `gone`, `changed` (up/down, label, flapping) or `same`; BGP/OSPF links are matched by
+ends and protocol, because their label holds the state (`matchEdges`). A device is `changed` when its ping state or **any of its links**
+changed. Only shown layers count. Changed items are green / red / orange (`--orange`) with a `+` / `−` / `~` mark; unchanged ones are faded,
+their links grey. Three per-browser toggles (`confetti-topo-cmp-group`, `-cmp-only-dev`, `-cmp-only-edge`): **Group changed / unchanged**
+(changed on top in their places, unchanged packed below, a box around each), **Hide unchanged devices**, **Hide unchanged links** (also
+drops unchanged unknown and subnet nodes left without a link). A changed unknown node is never folded into "N unknown"; bundles are off.
+Compare and History exclude each other. While either is on (`readOnlyView`), no node place is saved and Re-arrange does nothing.
+
 ### Syslog
 
 `app/syslog_server.py` (a daemon thread, `TOPO_SYSLOG_ENABLED` default true, UDP `TOPO_SYSLOG_PORT` 514) stores what devices say in `syslog`,

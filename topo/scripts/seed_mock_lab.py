@@ -126,6 +126,36 @@ def ts(minutes_ago=0):
     return t.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def older_snapshot(conn, ids, taken_at):
+    """Store the map as it "was": one more router (since removed), lab-rtr-c still answering ping, one BGP
+    session still up and sw-access-1 not plugged in yet. Then put today's rows back."""
+    c = ids[2]
+    old = identity.ingest(conn, [("serial", "9SIMLAB0004"), ("hostname", "lab-rtr-old")],
+                          {"serial": "9SIMLAB0004", "hostname": "lab-rtr-old", "site": "lab"}, "manual")
+    conn.execute("INSERT INTO lldp_neighbors (device_id, local_if, remote_sysname, remote_port, remote_device_id, "
+                 "last_seen) VALUES (?, 'GigabitEthernet5', 'lab-rtr-old', 'GigabitEthernet1', ?, ?)",
+                 (ids[0], old, ts()))
+    switch = conn.execute("SELECT * FROM lldp_neighbors WHERE device_id = ? AND remote_sysname = 'sw-access-1'",
+                          (c,)).fetchone()
+    conn.execute("DELETE FROM lldp_neighbors WHERE id = ?", (switch["id"],))
+    peer = "UPDATE adjacencies SET state = ?, uptime = ? WHERE device_id = ? AND peer_ip = '198.51.100.8'"
+    conn.execute(peer, ("Established", "3d04h", c))
+    conn.execute("UPDATE devices SET reachable = 1 WHERE id = ?", (c,))
+
+    history.maybe_snapshot(conn, force=True)
+    conn.execute("UPDATE topology_snapshots SET taken_at = ?", (taken_at,))
+
+    conn.execute("DELETE FROM lldp_neighbors WHERE remote_device_id = ?", (old,))
+    for table in ("device_aliases", "device_sources"):
+        conn.execute("DELETE FROM {} WHERE device_id = ?".format(table), (old,))
+    conn.execute("DELETE FROM devices WHERE id = ?", (old,))
+    keys = list(switch.keys())
+    conn.execute("INSERT INTO lldp_neighbors ({}) VALUES ({})".format(",".join(keys), ",".join("?" * len(keys))),
+                 tuple(switch))
+    conn.execute(peer, ("Idle (Admin)", "never", c))
+    conn.execute("UPDATE devices SET reachable = 0 WHERE id = ?", (c,))
+
+
 def main():
     db.init_db()
     conn = db.connect()
@@ -228,7 +258,8 @@ def main():
     except identity.Conflict:
         pass
 
-    # One topology snapshot, so the dashboard's Map changes widget has a row.
+    # Two topology snapshots, for the dashboard's Map changes widget and the topology page's Compare.
+    older_snapshot(conn, ids, ts(180))
     history.maybe_snapshot(conn, force=True)
 
     conn.commit()
