@@ -211,6 +211,18 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_poll_received ON poll_history(received_at);
         CREATE INDEX IF NOT EXISTS idx_poll_device ON poll_history(device_id, task);
 
+        -- The latest result of each task of a device (poll_history is pruned and keeps every poll).
+        -- state: ok | failed | unsupported. at = when the device was last asked.
+        CREATE TABLE IF NOT EXISTS task_status (
+            device_id   INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+            task        TEXT NOT NULL,
+            state       TEXT NOT NULL,
+            error       TEXT NOT NULL DEFAULT '',
+            at          TEXT NOT NULL,
+            last_ok_at  TEXT NOT NULL DEFAULT '',
+            PRIMARY KEY (device_id, task)
+        );
+
         -- State changes seen by the poller (see events.py). Age-pruned.
         CREATE TABLE IF NOT EXISTS events (
             id        INTEGER PRIMARY KEY AUTOINCREMENT,

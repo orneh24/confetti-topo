@@ -51,7 +51,10 @@ those two columns to NULL, so its neighbors become ghosts again.
 - `GET|POST /api/devices` — POST goes through `identity.ingest`
 - `GET|PUT|DELETE /api/devices/<id>` — PUT is an authoritative operator edit (bypasses the ladder, records new
   `serial`/`mgmt_ip`/`hostname` as aliases; a value another device owns comes back in `alias_warnings`)
-- `POST /api/devices/<id>/poll` — synchronous, inline on the request thread
+- `POST /api/devices/<id>/poll` — synchronous, inline on the request thread; asks every task, also one marked not supported.
+  A result with `unsupported: true` is not a failure (constraint 43)
+- Both device GETs add `failed_tasks`; `GET /api/devices/<id>` also adds `tasks` (`task`, `state` ok/failed/unsupported, `error`,
+  `at`, `last_ok_at`; table `task_status`)
 - `GET /api/vpn[?device_id=N]` — IPsec tunnels (`vpn_tunnels`); `peer_device_id` / `peer_hostname` are looked up at query time
 - `GET /api/find?q=` — IP, prefix, MAC or text over the stored tables (read-only); `GET /api/backups`, `/api/backups/search?q=&regex=1&invert=1` (masked)
 - `GET /api/backup` (list), `POST /api/backup/download {name?}`, `GET /api/backup/env` (secrets blanked), `POST /api/backup/restore` (multipart `file`)
@@ -101,7 +104,8 @@ claims due devices, marks them `running`, and runs the platform's tasks, each co
 IOS over one SSH session: `version`, `interfaces`, `lldp`, `bgp`, `ospf`, `routes`, `vpn`, `config`, and on
 switches `vlans`, `trunks`, `stp`, `mac`. PAN-OS over the XML API: the first seven. SNMP: `version`,
 `interfaces`. A `confetti_node` (`hub_api`, asked through its hub): `version`, `interfaces`, `lldp`. Rows a
-*successful* task no longer sees are deleted; a failed task changes nothing. `running` is released in a
+*successful* task no longer sees are deleted; a failed task changes nothing. IOS `% Invalid input` to `vpn` is
+`unsupported`: left out of scheduled polls for `TOPO_UNSUPPORTED_RECHECK_H` hours (24, 0 = never left out). `running` is released in a
 `finally` and reset at startup. The claim query takes `role != 'node' OR platform = 'confetti_node'`. Success:
 `fail_count=0`, `next_poll_at = now + poll_interval_s`. Failure: `fail_count += 1`,
 `next_poll_at = now + min(interval * 2**fail_count, POLL_MAX_BACKOFF_S)`.

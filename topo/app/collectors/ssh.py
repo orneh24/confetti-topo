@@ -56,7 +56,13 @@ def resolve_credentials(conn, device_id):
 CONNECT_TIMEOUT_S = 15
 
 
+class Unsupported(Exception):
+    """The device does not know the command; the text is the finished task error (pollerr.unsupported)."""
+
+
 def _error_text(exc, task=None):
+    if isinstance(exc, Unsupported):
+        return str(exc)
     return pollerr.explain(exc, "ssh", task, CONNECT_TIMEOUT_S)
 
 
@@ -69,6 +75,10 @@ def _run_command(conn, task, plat):
         raise RuntimeError("device answered: " + _cli_message(output))
     parsed = plat["parsers"][task](output)
     if task == "vpn":
+        if parsed is None and "% Invalid input" in output[:300]:
+            # IOS does not have the command at all. A login without privileged EXEC gets the same answer, so both are named.
+            raise Unsupported(pollerr.unsupported(plat["commands"][task],
+                                                  "no crypto feature or license, or the login is not in privileged EXEC"))
         if parsed is None:
             # Not "no tunnels" (that is an empty answer): fail the task so nothing stored is deleted.
             hint = " (no crypto feature or license, or the login is not in privileged EXEC)" if _is_cli_error(output) else ""

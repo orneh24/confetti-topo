@@ -80,6 +80,15 @@ there means a parse failure, not a router with no interfaces; `lldp`, `bgp` and 
 result ("LLDP is not enabled" is a real answer). The per-device `'running'` lock is always released in a
 `finally`, and `poller.start()` resets any `'running'` rows left by a server that stopped mid-poll.
 
+**The latest result of each task** is kept in `task_status` (one row per device and task: `ok` / `failed` / `unsupported`,
+the reason, when it was last asked and last ok; rows of tasks no longer asked for are removed). `GET /api/devices/<id>` returns
+it as `tasks`; both it and `GET /api/devices` give `failed_tasks`. A poll where only some tasks fail keeps `fail_count` 0 (no backoff, no
+`device_unreachable`), but it is not shown as plain ok: the device page has a Poll results box and its Poll chip reads "N of M
+tasks failed", the Devices page shows `!` and the task names (and counts it under "Poll failing"), the dashboard shows `partly`.
+**Not supported** (constraint 43): when IOS answers `% Invalid input` to the `vpn` command, the task is `unsupported`, not
+failed. The scheduled poll then leaves it out for `TOPO_UNSUPPORTED_RECHECK_H` hours (24; 0 = ask every poll); "Poll now" always
+asks. Only the `vpn` task and SSH devices do this: the same answer to another task is a failure.
+
 Backoff on failure: `next_poll_at = now + min(interval * 2**fail_count, TOPO_POLL_MAX_BACKOFF_S)`.
 
 Commands and parsers (`app/collectors/ssh.py`, `app/parsers/ios.py`) use **pure regex, not
@@ -93,7 +102,7 @@ only, no CLI; `collectors/snmp.py`). An unknown platform falls back to the IOS e
 started.
 
 **PAN-OS** (`collectors/panos.py`, `parsers/panos.py`, skill `panos-xml-api`): the poller picks the collector from the
-platform's `transport` (`xml_api` or `ssh`) and records it in `poll_history.transport`; the six tasks, the apply
+platform's `transport` (`xml_api` or `ssh`) and records it in `poll_history.transport`; the tasks, the apply
 steps and the events are shared. The collector logs in once per poll (`keygen`, with the username and password from
 the usual credential order), then sends one `<show>` operation per task; BGP takes two (the peer list, and the
 summary that holds the router's own AS). Its parsers use XML (ElementTree), the one place the parsers are not regex.
@@ -190,7 +199,7 @@ there are tunnels; may fail). PAN-OS: `<show><vpn><flow>` is the list; `ike-sa`,
 `flow tunnel-id N` (at most 50) add fields and may fail. Events `vpn_added`, `vpn_state`, `vpn_removed`. `GET /api/vpn[?device_id=N]`
 adds `peer_device_id` / `peer_hostname`. Shown as the IPsec layer, a VPN tunnels box and status chip on the device page, in the
 dashboard's "Sessions and VPNs down" widget, in Find ("VPN peer of") and in the "Peers down" tile. A device without a crypto
-feature (IOS 15.4 here) fails the task every poll and keeps its other tasks. Commands, sources and what is not verified:
+feature (IOS 15.4 here) reports the task as not supported (constraint 43) and keeps its other tasks. Commands, sources and what is not verified:
 skill `ipsec-vpn`. Not handled: IPv6, GRE/DMVPN views, remote-access VPN. No syslog message triggers a poll for it.
 
 ### VLANs, trunks and spanning tree (switches)
@@ -262,7 +271,7 @@ These came over on 2026-11-21 as the same code, `BUTLER_*` renamed to `TOPO_*`.
   nothing (constraint 37); refused for `role='node'`.
 - **Map notes** (`map_notes`, `GET|PUT /api/topology/notes`): free text (2000 characters) on a node or a link (`edge:<edgeKey>`), edited in
   the node and link cards, included in the JSON export. An empty note deletes it.
-- **Device page status strip**: ping, poll, sessions, flapping, template drift, interface errors 24 h and ports down, each a link to its box.
+- **Device page status strip**: ping, poll (or "N of M tasks failed"), VPN not supported, sessions, flapping, template drift, interface errors 24 h and ports down, each a link to its box.
 - **Recent changes, flapping and column widths**: a peer, interface or port (device + type + item) that changed `count` times or more within
   `window_min` minutes gets a yellow "flapping" pill in Notes and a line in the details pane (`computeFlaps`, display only, from the events
   loaded; not the BGP flap rule of constraint 22, so a peer cycling Idle/Active counts here). The rule is set on Settings ("Flapping on Recent
@@ -277,7 +286,7 @@ These came over on 2026-11-21 as the same code, `BUTLER_*` renamed to `TOPO_*`.
   Unknown LLDP widgets work the same way. IPAM caps its two tables at 25 (`capped25`).
 - **Big lists (added 2026-11-23)**, all per browser: the **Devices** page has chips (All, Down, Poll failing, Not polled yet, Template drift, one per role, each with a count)
   and a "Group by site" box (a heading row per site, `tr.grp`, click folds it; on by default above 20 devices; `tablesort.js` sorts inside a group); its Poll now / Delete
-  buttons are only in the right-click menu. The **dashboard** Devices widget has "Problems only" (down, poll failing or drifted; on by default above 20 devices, `confetti-topo-dashboard-problems`).
+  buttons are only in the right-click menu. The **dashboard** Devices widget has "Problems only" (down, poll failing in whole or part, or drifted; on by default above 20 devices, `confetti-topo-dashboard-problems`).
   **Recent changes** has "Hide flapping" and "Fold flapping" (on): the changes of one flapping item are one row, and its details pane lists them all. **Syslog** has 7 and 14 day
   windows, a count per severity and "Load older messages" (the server answers 2000 rows at most; the 15 s refresh waits while older rows are shown). Backups and the Settings
   credentials table have a filter box (`static/tablefilter.js`, `data-filter-table`; a bulk apply only touches the rows shown). On the topology, By site has "Bundle site links":
@@ -712,6 +721,12 @@ Keep the two in step; `confetti-interop-checker` reports drift.
     defined fails silently (the Connected layer was drawn blue). A new colour goes in every block of `theme.css` and in the Retro 95
     and MS-DOS blocks of `layout.css`. Checked by R60.
 
+43. **Only "the device does not know the command" is not supported, and it is never forgotten.** The `vpn` task becomes
+    `unsupported` only on IOS's `% Invalid input`; the text names both causes (no crypto feature, or not privileged EXEC). It
+    deletes nothing (constraint 14) and does not count as a poll error. It is asked again after `TOPO_UNSUPPORTED_RECHECK_H`
+    hours and on every "Poll now", so a new license or login is picked up. A failed task keeps the time it last worked, and a
+    page never shows a poll with a failed task as plain ok. Checked by R61.
+
 ## Regression gate
 
 `python dev/regress.py` (stdlib only, except that `R39` runs ruff: `pip install -r dev/requirements-dev.txt`, else R39 is `NOT RUN`; `--static` skips the live tier, `-v` shows detail for passes) is the
@@ -725,7 +740,8 @@ that a bulk apply is all-or-nothing; `R29` the right-click menus (shared `static
 the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of URLs, the poller's transport; `R31` (constraint 16) the optional LLDP chassis/name matching and its settings API; `R38` (constraint 23) the Default and Connected layers; `R37` (constraint 22) BGP flap detection; `R36` (constraint 21) the other Confetti project's URL; `R35` (constraint 20) topology history; `R34` (constraint 19) the VLAN task; `R33` (constraint 18) the optional access token; `R32` (constraint 17) the routes task: fixtures, empty table keeps rows, one event per changed poll; `R39` is the ruff `F` lint over `topo/` and `dev/` (not a constraint check); `R40` (constraint 24) the shared syslog parser and insert rule, `R40-sync` that `syslog_core.py`, `syslog_pull.py` and `syslog_cases.json` are byte-identical in both repos (`NOT RUN` if confetti-traffic is not next to this repo); `R41` (constraint 25) the syslog poll trigger; `R42` (constraint 26) the syslog pull; `R43`..`R50` (constraints 27..33) the checks that came with the former butler's features: template sandbox, the open `/configs/` pull, config backups,
 SNMP, drift and interface error history; `R51` (constraint 34) the in-place upgrade of an old database; `R52`..`R55` (constraints 35..38) traffic rates, database backup/restore,
 Find / Test login storing nothing, failed-poll reasons (R55), the managed Confetti Traffic node (R56), IPAM prefixes (R57), IPsec tunnels (R58, constraint 40), Compare (R59, 41) and the colour palette (R60, 42);
-the next constraint (43) takes `R61`. `R13-labels` and `R13-positions` (more of constraint 13) and `R37-display` (the flapping-mark setting) sit beside
+not supported tasks and task results (R61, constraint 43);
+the next constraint (44) takes `R62`. `R13-labels` and `R13-positions` (more of constraint 13) and `R37-display` (the flapping-mark setting) sit beside
 their numbers. The script drops `TOPO_*` variables, restores any setting a check changes, and reads files with LF line ends. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by

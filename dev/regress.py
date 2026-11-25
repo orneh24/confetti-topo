@@ -2966,9 +2966,9 @@ def _():
     answers[show] = ""
     got = over_ssh()
     need(got[1] and got[4] == [] and asked == [show], "no tunnels: ok, empty, and nothing else asked: %r %r" % (got, asked), p)
-    answers[show] = "          ^\n% Invalid input detected at '^' marker."
+    answers[show] = "% Authorization failed."
     got = over_ssh()
-    need(not got[1] and "% Invalid input" in (got[3] or ""), "a '%%' answer must fail the task and say what the device said: %r" % (got,), p)
+    need(not got[1] and "% Authorization failed" in (got[3] or ""), "a '%%' answer must fail the task and say what the device said: %r" % (got,), p)
     for plat_name in ("snmp", "confetti_node"):
         need("vpn" not in platforms.tasks(platforms.get(plat_name)), "%s must not run the vpn task" % plat_name, p)
 
@@ -3197,6 +3197,117 @@ def _():
         used |= set(re.findall(r"'(--(?:green|red|orange|pink|yellow|blue|cyan|purple|gray))'", src))
         for name in sorted(used - shared - local):
             p.append("%s uses %s, which no stylesheet defines" % (f, name))
+    return p
+
+
+@check("R61", "a command the device does not know is 'not supported': not a failure, skipped for a day (not on Poll now), nothing deleted; every task keeps its last result")
+def _():
+    p = []
+    m, conn = fresh_db()
+    ssh, poller, config = m["ssh"], m["poller"], m["config"]
+    from app import platforms, pollerr
+    show = platforms.IOS["commands"]["vpn"]
+    invalid = "          ^\n% Invalid input detected at '^' marker."
+
+    # ---- only IOS saying it does not know the VPN command counts
+    answers = {}
+
+    class _Conn:
+        def send_command(self, cmd, **kw):
+            return answers.get(cmd, "")
+
+        def disconnect(self):
+            pass
+
+    def over_ssh(task, dev):
+        real_connect = ssh.ConnectHandler
+        ssh.ConnectHandler = lambda **kw: _Conn()
+        try:
+            return list(ssh.run_tasks(dev, {"username": "u", "password": "p", "secret": ""}, (task,)))[0]
+        finally:
+            ssh.ConnectHandler = real_connect
+    router = {"mgmt_ip": "192.0.2.9", "platform": "cisco_ios", "role": "router"}
+    answers[show] = invalid
+    got = over_ssh("vpn", router)
+    need(not got[1] and (got[3] or "").startswith(pollerr.UNSUPPORTED) and show in got[3], "an unknown VPN command: %r" % (got,), p)
+    answers[show] = "% Authorization failed."
+    got = over_ssh("vpn", router)
+    need(not got[1] and not (got[3] or "").startswith(pollerr.UNSUPPORTED), "another '%%' answer is a failure: %r" % (got,), p)
+    answers[platforms.IOS["commands"]["vlans"]] = invalid
+    got = over_ssh("vlans", dict(router, role="switch"))
+    need(not got[1] and not (got[3] or "").startswith(pollerr.UNSUPPORTED), "other tasks still fail on it: %r" % (got,), p)
+
+    # ---- the poller: skip, keep the rows, ask again later and on Poll now
+    dev = add_device(conn, "192.0.2.1", "old-router")
+    conn.execute("INSERT INTO vpn_tunnels (device_id, name, peer_ip, status, last_seen) VALUES (?, 'Tunnel1', '198.51.100.2', 'up', '2026-01-01 00:00:00')", (dev,))
+    conn.commit()
+    why = pollerr.unsupported(show, "no crypto feature")
+    asked = []
+    reply = {"version": (True, None, {}), "lldp": (True, None, []), "vpn": (False, why, None)}
+
+    def fake(device, creds, tasks=None):
+        asked.append(tasks)
+        for name in ("version", "lldp", "vpn"):
+            if tasks is None or name in tasks:
+                ok, error, parsed = reply[name]
+                yield name, ok, "", error, parsed
+    status = lambda: {r["task"]: dict(r) for r in conn.execute("SELECT * FROM task_status WHERE device_id = ?", (dev,))}
+    device = lambda: conn.execute("SELECT fail_count, last_poll_error FROM devices WHERE id = ?", (dev,)).fetchone()
+    real_run = ssh.run_tasks
+    ssh.run_tasks = fake
+    try:
+        res = poller._poll_device(dev)
+        need(res["vpn"].get("unsupported") and status()["vpn"]["state"] == "unsupported" and status()["version"]["state"] == "ok",
+             "first poll: %r %r" % (res, status()), p)
+        need(tuple(device()) == (0, ""), "an unsupported task must not mark the poll as failing: %r" % (tuple(device()),), p)
+        first = status()["vpn"]["at"]
+        res = poller._poll_device(dev)
+        need(asked[-1] is not None and "vpn" not in asked[-1] and "version" in asked[-1], "it must not be asked again: %r" % (asked[-1],), p)
+        need(res.get("vpn", {}).get("skipped") and status()["vpn"]["at"] == first, "a skipped task keeps its status: %r" % res.get("vpn"), p)
+        poller.poll_now(dev)
+        need(asked[-1] is None, "Poll now must ask for everything: %r" % (asked[-1],), p)
+        conn.execute("UPDATE task_status SET at = datetime('now', '-25 hours') WHERE task = 'vpn'")
+        conn.commit()
+        poller._poll_device(dev)
+        need(asked[-1] is None, "after the recheck time it must be asked again: %r" % (asked[-1],), p)
+        keep = config.UNSUPPORTED_RECHECK_H
+        config.UNSUPPORTED_RECHECK_H = 0
+        poller._poll_device(dev)
+        need(asked[-1] is None, "0 hours must ask on every poll", p)
+        config.UNSUPPORTED_RECHECK_H = keep
+        need(conn.execute("SELECT COUNT(*) FROM vpn_tunnels WHERE device_id = ?", (dev,)).fetchone()[0] == 1,
+             "an unsupported answer deleted stored tunnels", p)
+
+        # ---- a failed task is shown, with when it last worked
+        good = status()["lldp"]["last_ok_at"]
+        reply["lldp"] = (False, "the command for lldp did not finish in time", None)
+        poller.poll_now(dev)
+        row = status()["lldp"]
+        need(row["state"] == "failed" and row["last_ok_at"] == good and good and "did not finish" in row["error"], "failed task: %r" % row, p)
+        client = m["appmod"].app.test_client()
+        listed = {d["id"]: d for d in client.get("/api/devices").get_json()}[dev]
+        need(listed["failed_tasks"] == ["lldp"] and listed["fail_count"] == 0, "device list: %r" % listed.get("failed_tasks"), p)
+        one = client.get("/api/devices/%d" % dev).get_json()
+        need({t["task"]: t["state"] for t in one["tasks"]} == {"version": "ok", "lldp": "failed", "vpn": "unsupported"}, "device tasks: %r" % one.get("tasks"), p)
+        need(one.get("failed_tasks") == ["lldp"], "one device (the map card reads it): %r" % one.get("failed_tasks"), p)
+        reply["lldp"] = (True, None, [])
+        poller.poll_now(dev)
+        need(status()["lldp"]["state"] == "ok" and status()["lldp"]["error"] == "", "a good poll must clear it: %r" % status()["lldp"], p)
+
+        # ---- a task that is no longer asked for does not stay behind
+        ssh.run_tasks = lambda *x, **k: iter([("version", True, "", None, {})])
+        poller.poll_now(dev)
+        need(list(status()) == ["version"], "stale task rows: %r" % list(status()), p)
+    finally:
+        ssh.run_tasks = real_run
+    client.delete("/api/devices/%d" % dev)
+    need(conn.execute("SELECT COUNT(*) FROM task_status").fetchone()[0] == 0, "task results survived their device", p)
+
+    # ---- the pages do not call an unsupported task a failure, and do not call a partly failed poll ok
+    for page, text in (("devices.html", "!data.results[task].unsupported"), ("topology.html", "!res.data.results[t].unsupported"),
+                       ("device.html", "r.unsupported ? ':not supported'"), ("dashboard.html", "failed_tasks")):
+        need(text in read("topo/templates/" + page), "%s: missing %r" % (page, text), p)
+    conn.close()
     return p
 
 

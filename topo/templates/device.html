@@ -23,6 +23,8 @@
 .tr-chart .out { fill: none; stroke: var(--yellow); stroke-width: 2; }
 .tr-chart text { fill: var(--text-dim); font-size: 11px; }
 .tr-key b { display: inline-block; width: 12px; height: 3px; vertical-align: middle; margin: 0 4px 0 10px; }
+    /* The reason is the point of the Poll results box: it wraps instead of running out of sight. */
+    #tasks table.compact td:nth-child(4) { white-space: normal; min-width: 200px; }
 </style>
 {% endblock %}
 {% block content %}
@@ -97,6 +99,15 @@
                         title="Log in with the credentials in use now and run only the version command; nothing is stored">Test login</button>
                 <span class="msg" id="cred-msg"></span>
             </form>
+        </div>
+    </div>
+    <div class="section wide" data-box="tasks" id="tasks" style="display:none">
+        <div class="section-header"><span>Poll results <span id="task-count"></span></span></div>
+        <div class="section-body">
+            <table data-sortable class="striped compact">
+                <thead><tr><th>Task</th><th>Result</th><th>Last good</th><th>Why</th></tr></thead>
+                <tbody id="task-rows"></tbody>
+            </table>
         </div>
     </div>
     <div class="section half" data-box="events">
@@ -309,6 +320,7 @@ function loadDevice() {
             kv('fail count', d.fail_count) + (d.hub_info ? kv('hub says', d.hub_info) : '') + (d.last_poll_error ? kv('last poll error', d.last_poll_error) : '') + kv('first seen', fmtTime(d.first_seen)) + kv('last seen', fmtTime(d.last_seen));
         document.getElementById('device-body').innerHTML = body;
         fillEditForm(d);
+        showTasks(d.tasks || []);
 
         var aliasRows = '';
         for (var i = 0; i < d.aliases.length; i++) {
@@ -805,8 +817,16 @@ function loadStatus(d) {
         } else if (d.fail_count > 0) {
             html += chip('#device-body', 'Poll', 'failing (' + d.fail_count + ')', 'bad', (d.last_poll_error ? d.last_poll_error + ' - ' : '') + (d.last_poll_ok ? 'last good poll ' + fmtTime(d.last_poll_ok) : 'never polled ok'));
         } else {
-            html += chip('#device-body', 'Poll', d.last_poll_ok ? 'ok' : 'waiting', d.last_poll_ok ? 'ok' : 'idle', fmtTime(d.last_poll_ok));
+            var bad = (d.tasks || []).filter(function (t) { return t.state === 'failed'; });
+            if (bad.length) {
+                html += chip('#tasks', 'Poll', bad.length + ' of ' + d.tasks.length + ' tasks failed', 'running',
+                             bad.map(function (t) { return t.task + ': ' + t.error; }).join('\n'));
+            } else {
+                html += chip('#device-body', 'Poll', d.last_poll_ok ? 'ok' : 'waiting', d.last_poll_ok ? 'ok' : 'idle', fmtTime(d.last_poll_ok));
+            }
         }
+        var noVpn = (d.tasks || []).filter(function (t) { return t.task === 'vpn' && t.state === 'unsupported'; })[0];
+        if (noVpn && !vpn.length) { html += chip('#tasks', 'VPN', 'not supported', 'idle', noVpn.error); }
         var down = adj.filter(function (a) { return a.state !== (a.proto === 'bgp' ? 'Established' : 'FULL'); });
         var flap = adj.filter(function (a) { return a.flapping; });
         html += chip('#sessions', 'Sessions', adj.length ? (down.length ? down.length + ' of ' + adj.length + ' down' : adj.length + ' up') : 'none',
@@ -832,6 +852,25 @@ function loadStatus(d) {
         }
         document.getElementById('status-strip').innerHTML = html;
     });
+}
+
+// The latest result of each poll task. A task the device does not support is skipped, not failed.
+var TASK_LOOK = { ok: ['ok', 'ok'], failed: ['failed', 'bad'], unsupported: ['not supported', 'idle'] };
+
+function showTasks(tasks) {
+    document.getElementById('task-rows').innerHTML = tasks.map(function (t) {
+        var look = TASK_LOOK[t.state] || [t.state, 'idle'];
+        var why = t.error.replace(/^not supported: /, '') + (t.state === 'unsupported' ? '. Skipped; asked again later, or on Poll now. Last asked ' + fmtTime(t.at) + '.' : '');
+        return '<tr><td>' + esc(t.task) + '</td><td data-sort="' + ctxMenu.attr(t.state) + '"><span class="pill ' + look[1] + '">' +
+            esc(look[0]) + '</span></td>' + timeCell(t.last_ok_at) + '<td>' + esc(why) + '</td></tr>';
+    }).join('');
+    var odd = tasks.filter(function (t) { return t.state !== 'ok'; }).length;
+    document.getElementById('task-count').textContent = tasks.length ? '(' + (tasks.length - odd) + ' of ' + tasks.length + ' ok)' : '';
+    var box = document.getElementById('tasks'), shown = tasks.length > 0;
+    if ((box.style.display !== 'none') !== shown) {
+        box.style.display = shown ? '' : 'none';
+        window.dispatchEvent(new Event('resize'));   // the box grid places the boxes again
+    }
 }
 
 function loadVpn() {
@@ -938,7 +977,7 @@ function pollNow() {
         for (var task in data.results) {
             if (data.results.hasOwnProperty(task)) {
                 var r = data.results[task];
-                summary.push(task + (r.ok ? ':ok' : ':fail' + (r.error ? ' (' + r.error + ')' : '')));
+                summary.push(task + (r.ok ? ':ok' : r.unsupported ? ':not supported' : ':fail' + (r.error ? ' (' + r.error + ')' : '')));
             }
         }
         msg.textContent = summary.join(' ');
@@ -965,7 +1004,7 @@ function pollNow() {
 
 // Right-click menus (static/ctxmenu.js). Each table body is one menu target; the row under the pointer is found
 // when the menu opens, so the tables can be rebuilt (poll, refresh) without touching the menu.
-['alias-rows', 'source-rows', 'event-rows', 'lldp-rows', 'adj-rows', 'vpn-rows', 'interface-rows', 'route-rows', 'mac-rows',
+['task-rows', 'alias-rows', 'source-rows', 'event-rows', 'lldp-rows', 'adj-rows', 'vpn-rows', 'interface-rows', 'route-rows', 'mac-rows',
  'trunk-rows', 'vlan-rows', 'config-rows'].forEach(function (id) {
     document.getElementById(id).setAttribute('data-ctx', 'row');
 });

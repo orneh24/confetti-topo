@@ -308,6 +308,20 @@ def main():
             name = "dev:{}".format(conn.execute("SELECT id FROM devices WHERE hostname = ?", (name,)).fetchone()[0])
         conn.execute("INSERT INTO node_positions (node_id, x, y, updated_at) VALUES (?,?,?,?)", (name, x, y, now))
 
+    # The latest result of each poll task (the device page's Poll results box). lab-rtr-c fails every task; one task
+    # of lab-rtr-b fails while the rest are fine.
+    for idx, dev_id in enumerate(every):
+        tasks = ("version", "interfaces", "lldp", "bgp", "ospf", "routes", "vpn") + (() if dev_id == fw else ("config",))
+        for task in tasks:
+            if idx == 2:
+                state, error, good = "failed", "no answer on SSH (port 22) within 15 s", ts(180)
+            elif idx == 1 and task == "config":
+                state, error, good = "failed", "the command for config did not finish in time", ts(240)
+            else:
+                state, error, good = "ok", "", now
+            conn.execute("INSERT INTO task_status (device_id, task, state, error, at, last_ok_at) VALUES (?,?,?,?,?,?)",
+                         (dev_id, task, state, error, now, good))
+
     # Two topology snapshots, for the dashboard's Map changes widget and the topology page's Compare.
     older_snapshot(conn, ids, ts(180))
     history.maybe_snapshot(conn, force=True)

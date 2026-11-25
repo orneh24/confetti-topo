@@ -110,6 +110,9 @@ function pingCell(r) {
     return r ? '<span class="pill ok">up</span>' : '<span class="pill bad">down</span>';
 }
 
+// The device answers, but some of its tasks failed.
+function partly(d) { return !isUnpolled(d) && !(d.fail_count > 0) && (d.failed_tasks || []).length > 0; }
+
 // Result of the last poll: a tick, a cross, or a dash when it was never polled.
 // fail_count is the number of polls in a row that got nothing; last_poll_ok is the last time one did.
 function pollResultIcon(d) {
@@ -118,6 +121,9 @@ function pollResultIcon(d) {
         return '<span class="pill bad" title="Last poll failed (' + d.fail_count + ' in a row)' +
             (d.last_poll_error ? ': ' + ctxMenu.attr(d.last_poll_error) : '') +
             (d.last_poll_ok ? '; last success ' + esc(timeAgo(d.last_poll_ok)) : '') + '">&#10007;</span> ';
+    }
+    if (partly(d)) {
+        return '<span class="pill running" title="' + ctxMenu.attr('These tasks failed on the last poll: ' + d.failed_tasks.join(', ')) + '">!</span> ';
     }
     if (d.last_poll_ok) {
         return '<span class="pill ok" title="Last poll succeeded ' + esc(timeAgo(d.last_poll_ok)) + '">&#10003;</span> ';
@@ -173,7 +179,7 @@ var foldedSites = {};
 try { foldedSites = JSON.parse(localStorage.getItem(FOLD_KEY)) || {}; } catch (e) { foldedSites = {}; }
 
 function isDown(d) { return d.reachable === 0 || d.reachable === false; }
-function isFailing(d) { return !isUnpolled(d) && d.fail_count > 0; }
+function isFailing(d) { return !isUnpolled(d) && (d.fail_count > 0 || partly(d)); }
 function neverPolled(d) { return !isUnpolled(d) && d.enabled && !d.last_poll_ok && !(d.fail_count > 0); }
 function isDrifted(d) { return d.drift_status === 'drifted'; }
 function chipMatch(d) {
@@ -277,7 +283,8 @@ function renderDevices(fresh) {
             '<td>' + esc(d.vendor || '') + '</td><td>' + esc(d.model || '') + '</td><td>' + esc(d.os_version || '') + '</td>' +
             '<td>' + esc(d.platform || '') + '</td><td>' + esc(d.serial || '') + '</td>' +
             '<td class="poll-err" title="' + ctxMenu.attr(d.fail_count > 0 ? d.last_poll_error || '' : '') + '">' +
-            (!isUnpolled(d) && d.fail_count > 0 && d.last_poll_error ? esc(d.last_poll_error.split('. ')[0]) : '') + '</td>' +
+            (!isUnpolled(d) && d.fail_count > 0 && d.last_poll_error ? esc(d.last_poll_error.split('. ')[0])
+                : partly(d) ? '<a href="/devices/' + d.id + '#tasks">failed: ' + esc(d.failed_tasks.join(', ')) + '</a>' : '') + '</td>' +
             '</tr>';
     }
     document.getElementById('device-rows').innerHTML = rows;
@@ -294,7 +301,7 @@ function loadDevices() {
 function pollSummary(data) {
     var failed = [], why = '';
     for (var task in data.results || {}) {
-        if (!data.results[task].ok) { failed.push(task); why = why || data.results[task].error || ''; }
+        if (!data.results[task].ok && !data.results[task].unsupported) { failed.push(task); why = why || data.results[task].error || ''; }
     }
     return failed.length ? 'failed (' + failed.join(', ') + ')' + (why ? ': ' + why : '') : 'ok';
 }

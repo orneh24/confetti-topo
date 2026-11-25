@@ -8,7 +8,9 @@ checks leaking settings, checks that could pass without testing anything). Devic
 
 Verified on real devices (dev machine, through the app): one IKEv1 tunnel between an IOS-XE 17.3.2 router and a PA-VM on PAN-OS
 11.1; stored values matched the raw output, each end resolved to the other, one line on the map. IOS-XE 17.3.8a without a VPN
-answers empty (stored as no tunnels). IOS 15.4 refuses the command: that task fails, the others succeed.
+answers empty (stored as no tunnels). IOS 15.4 refuses the command: since 2026-11-25 that task is "not supported"
+(constraint 43, R61; polled on the real 15.4 router: other tasks ok, no poll error). Each task's latest result is on the
+device page (table `task_status`).
 Browser (mock lab): Dark and Light, Classic, Retro 95 and MS-DOS.
 
 Not verified on real devices: a tunnel that is down, IKEv2, an inside VRF, crypto maps, more than one tunnel, a firewall with no

@@ -15,6 +15,8 @@ import requests
 from netmiko.exceptions import NetmikoAuthenticationException, NetmikoTimeoutException, ReadTimeout
 
 MAX_DETAIL = 140
+# A task error that starts like this is not a failure: the device does not have the command (poller.py, task_status).
+UNSUPPORTED = "not supported: "
 # errno values by name differ per OS (Linux 111, Windows 10061), so both are listed.
 _REFUSED = {errno.ECONNREFUSED, 10061}
 _NO_ROUTE = {errno.EHOSTUNREACH, errno.ENETUNREACH, 10065, 10051}
@@ -60,6 +62,11 @@ def _sentence(text, hint):
 def short(message):
     """The reason without its advice: what goes in an event's subject."""
     return (message or "").split(". ", 1)[0].rstrip(".")
+
+
+def unsupported(command, why):
+    """The task error for a device that does not know a command."""
+    return _one_line("{}the device does not know '{}' ({})".format(UNSUPPORTED, command, why), 200)
 
 
 def explain(exc, via="ssh", task=None, timeout=None):

@@ -139,10 +139,28 @@ def poll_now(device_id):
     does, so it composes safely with the background loop picking the same
     device up later.
     """
-    return _poll_device(device_id)
+    return _poll_device(device_id, force=True)
 
 
-def _poll_device(device_id):
+def _skipped(conn, device_id):
+    """{task: error} for the tasks this device said it does not support, recently enough not to ask again."""
+    if config.UNSUPPORTED_RECHECK_H <= 0:
+        return {}
+    return {r["task"]: r["error"] for r in conn.execute(
+        "SELECT task, error FROM task_status WHERE device_id = ? AND state = 'unsupported' "
+        "AND at > datetime('now', ? || ' hours')", (device_id, "-{:d}".format(config.UNSUPPORTED_RECHECK_H)))}
+
+
+def _save_status(conn, device_id, task, state, error, at):
+    conn.execute(
+        """INSERT INTO task_status (device_id, task, state, error, at, last_ok_at) VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(device_id, task) DO UPDATE SET state = excluded.state, error = excluded.error, at = excluded.at,
+               last_ok_at = CASE WHEN excluded.state = 'ok' THEN excluded.at ELSE task_status.last_ok_at END""",
+        (device_id, task, state, error or "", at, at if state == "ok" else ""))
+
+
+def _poll_device(device_id, force=False):
+    """force asks for every task, also one the device said it does not support ("Poll now")."""
     conn = db.connect()
     any_ok = False
     errors = {}
@@ -157,7 +175,13 @@ def _poll_device(device_id):
 
         results = {}
         started = db.sqlite_now()
-        for task, ok, output, error, parsed in collector.run_tasks(dict(device), creds):
+        skip = {} if force or transport != "ssh" else _skipped(conn, device_id)
+        if skip:
+            wanted = tuple(t for t in platforms.tasks(platforms.get(device["platform"])) if t not in skip)
+            run = collector.run_tasks(dict(device), creds, wanted)
+        else:
+            run = collector.run_tasks(dict(device), creds)
+        for task, ok, output, error, parsed in run:
             if ok:
                 try:
                     ssh_collector.apply_result(conn, device_id, task, parsed)
@@ -179,11 +203,23 @@ def _poll_device(device_id):
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (device_id, transport, task, 1 if ok else 0, error, (output or "")[:20000], started, received),
             )
+            unsupported = not ok and (error or "").startswith(pollerr.UNSUPPORTED)
+            _save_status(conn, device_id, task, "ok" if ok else "unsupported" if unsupported else "failed",
+                         None if ok else error or "failed", received)
             conn.commit()
             results[task] = {"ok": ok, "error": error}
-            if not ok:
+            if unsupported:
+                results[task]["unsupported"] = True
+            elif not ok:
                 errors[task] = error or "failed"
             started = received
+        for task, error in skip.items():   # not asked this time: its stored status stays as it is
+            results[task] = {"ok": False, "error": error, "unsupported": True, "skipped": True}
+        if results:
+            # A task the device is no longer asked for (another platform, not a switch any more) must not stay "failing".
+            conn.execute("DELETE FROM task_status WHERE device_id = ? AND task NOT IN ({})".format(
+                ",".join("?" * len(results))), (device_id,) + tuple(results))
+            conn.commit()
         return results
     finally:
         # Always release the per-device lock, even if something above raised

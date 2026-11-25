@@ -19,6 +19,8 @@ the ones to grep for, not line numbers.
    - Delete rows not seen **only on a successful answer** (constraint 14). Decide what an empty parse means: a parse failure (delete nothing, as
      `interfaces`, `vlans`, `mac`) or a real answer (clear, as `lldp`, `trunks`).
    - `_is_cli_error` already fails a `SWITCH_TASKS` task on `%`; a task outside that list needs its own check.
+   - A device that may not have the command at all can report `ssh.Unsupported` instead of failing (constraint 43, today
+     only `vpn`). Use it only for an answer that clearly says so.
    - Events: `events.emit` inside the same transaction, never commit, and guard with `events.is_baseline(conn, device_id, "<task>")`
      (constraint 11). Add the kind to `events.describe` (type / change / item / before / after) or the Recent changes page shows it raw.
 5. **Schema** `topo/app/db.py`: `CREATE TABLE IF NOT EXISTS` in the script, **and** an `ALTER TABLE ... ADD COLUMN` block for any column added to

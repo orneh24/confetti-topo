@@ -242,7 +242,7 @@ function ipKey(ip) {
 function pingRank(d) { return d.reachable === 0 ? 0 : (d.reachable === 1 ? 2 : 1); }
 function pollRank(d) {
     if (isUnpolled(d) || !d.enabled) { return 3; }
-    return d.fail_count > 0 ? 0 : (d.last_poll_ok ? 2 : 1);
+    return d.fail_count > 0 ? 0 : (d.failed_tasks || []).length ? 0.5 : (d.last_poll_ok ? 2 : 1);
 }
 function textCell(field) { return function (d) { return esc(d[field]); }; }
 function textVal(field) { return function (d) { return String(d[field] || '').toLowerCase(); }; }
@@ -263,6 +263,7 @@ var DEV_COLUMNS = [
       cell: function (d) {
           return isUnpolled(d) || !d.enabled ? '<span class="pill idle">not polled</span>'
               : (d.fail_count > 0 ? '<span class="pill bad" title="' + d.fail_count + ' failed in a row">failing</span>'
+                 : (d.failed_tasks || []).length ? '<span class="pill running" title="' + ctxMenu.attr('failed: ' + d.failed_tasks.join(', ')) + '">partly</span>'
                  : (d.last_poll_ok ? '<span class="pill ok">ok</span>' : '<span class="pill idle">waiting</span>'));
       } },
     { key: 'last_poll_ok', label: 'Last good poll', val: function (d) { return isUnpolled(d) ? '' : (d.last_poll_ok || ''); },
@@ -336,7 +337,7 @@ function toggleCap(name) {
 
 // "Problems only": just the devices that are down, failing to poll or off their template. A long list starts that way.
 var PROB_KEY = 'confetti-topo-dashboard-problems';
-function isProblem(d) { return d.reachable === 0 || (!isUnpolled(d) && d.fail_count > 0) || d.drift_status === 'drifted'; }
+function isProblem(d) { return d.reachable === 0 || (!isUnpolled(d) && (d.fail_count > 0 || (d.failed_tasks || []).length > 0)) || d.drift_status === 'drifted'; }
 function problemsOn() {
     var saved = null;
     try { saved = localStorage.getItem(PROB_KEY); } catch (e) { saved = null; }

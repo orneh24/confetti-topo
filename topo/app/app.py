@@ -377,7 +377,10 @@ def api_list_devices():
                   reachable, last_ping_at, template_name, drift_status
            FROM devices ORDER BY role, hostname"""
     ).fetchall()
-    return jsonify([device_row(r) for r in rows])
+    failed = {}
+    for r in conn.execute("SELECT device_id, task FROM task_status WHERE state = 'failed' ORDER BY rowid"):
+        failed.setdefault(r["device_id"], []).append(r["task"])
+    return jsonify([dict(device_row(r), failed_tasks=failed.get(r["id"], [])) for r in rows])
 
 
 @app.route("/api/devices", methods=["POST"])
@@ -430,6 +433,10 @@ def api_get_device(device_id):
     if not row:
         return jsonify({"error": "not found"}), 404
     out = device_row(row)
+    out["tasks"] = [{"task": t["task"], "state": t["state"], "error": t["error"], "at": db.iso(t["at"]),
+                     "last_ok_at": db.iso(t["last_ok_at"]) if t["last_ok_at"] else None}
+                    for t in conn.execute("SELECT * FROM task_status WHERE device_id = ? ORDER BY rowid", (device_id,))]
+    out["failed_tasks"] = [t["task"] for t in out["tasks"] if t["state"] == "failed"]   # the map's node card
     out["aliases"] = [dict(a) for a in conn.execute(
         "SELECT kind, value, first_seen FROM device_aliases WHERE device_id = ? ORDER BY kind", (device_id,)
     ).fetchall()]

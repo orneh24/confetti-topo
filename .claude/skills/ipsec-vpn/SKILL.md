@@ -27,7 +27,8 @@ proven for a parser: capture it first (constraint 3).
 | `show crypto ipsec sa` | the transform (algorithms); asked only when there are tunnels, may fail | seen |
 
 - Needs privileged EXEC and a crypto feature set. IOS 15.4 without it answers `% Invalid input` (seen): the task
-  fails with that text and stores nothing.
+  is `unsupported` (constraint 43): nothing stored or deleted, not a poll error, asked again after
+  `TOPO_UNSUPPORTED_RECHECK_H` hours (24) and on "Poll now". Any other `%` answer fails the task.
 - IOS-XE 17.3.8a with no VPN answers **nothing at all** (seen). Empty output = no tunnels. Output without the header
   `Crypto session current status` is not understood and fails the task.
 - One block per session: `Interface:`, `Session status:`, `Peer: <ip> port <n> fvrf: .. ivrf: ..`,
@@ -84,6 +85,7 @@ Official: [find XML API syntax with the CLI](https://docs.paloaltonetworks.com/p
 
 ## A tunnel is missing or wrong on the map
 1. Device page, VPN tunnels box, or `GET /api/vpn?device_id=N`.
-2. No rows: Poll now and read the `vpn` result. A `%` text means the login or the feature set.
+2. No rows: Poll now and read the `vpn` result (device page, Poll results). "not supported" or a `%` text means the
+   login or the feature set.
 3. Rows but no line: the peer address is on no polled interface (NAT, or the interfaces task failed), or on two devices.
 4. Two lines for one tunnel: each end resolves the other to a different device, or only one end resolves.

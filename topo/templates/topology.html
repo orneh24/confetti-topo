@@ -1918,6 +1918,7 @@ function fillDeviceInfo(info, d, type) {
     if (d.hub_info) { addRow(info, 'hub says', d.hub_info); }
     if (!(d.role === 'node' && d.platform !== 'confetti_node')) {
         addRow(info, 'last poll', d.fail_count > 0 ? 'failing (' + d.fail_count + ' in a row)'
+            : (d.failed_tasks || []).length ? 'failed: ' + d.failed_tasks.join(', ')
             : (d.last_poll_ok ? 'ok, ' + ago(d.last_poll_ok) : 'not polled yet'));
     }
 }
@@ -2390,7 +2391,7 @@ function pollFromMenu(deviceId, name) {
         return r.json().then(function (data) { return { ok: r.ok, data: data }; });
     }).then(function (res) {
         if (!res.ok) { toast(name + ': ' + (res.data.error || 'poll failed')); return; }
-        var failed = Object.keys(res.data.results || {}).filter(function (t) { return !res.data.results[t].ok; });
+        var failed = Object.keys(res.data.results || {}).filter(function (t) { return !res.data.results[t].ok && !res.data.results[t].unsupported; });
         var why = failed.length ? (res.data.results[failed[0]].error || '') : '';
         toast(name + ': ' + (failed.length ? 'poll failed' + (why ? ': ' + why : ' (' + failed.join(', ') + ')') : 'poll ok'));
         load();

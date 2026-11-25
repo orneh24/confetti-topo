@@ -109,6 +109,10 @@ TOPO_PORT=8080 python serve.py
 Open http://localhost:8080 and add a device on the Devices page. Set the SSH login for all devices on the
 Settings page (or for one device on its page, under Credentials), then click **Poll now** (Devices page or device page) or **Poll all now**. The database is `topo.db` in the working folder. To ask for a token before anything is shown, start it with `TOPO_AUTH_TOKEN=<secret>` (a login page for browsers, `Authorization: Bearer <secret>` for scripts and Prometheus; `/api/health` stays open). It is one shared token, not user accounts, and it needs HTTPS in front of it to be safe on an untrusted network.
 
+Each task's latest result is on the device page (Poll results); a poll with a failed task is not shown as plain ok. A router
+that does not know the VPN command shows it as not supported, and it is asked again every `TOPO_UNSUPPORTED_RECHECK_H` hours
+(default 24) and on **Poll now**.
+
 To look around without a router, fill a new database with a fake lab:
 
 ```sh
