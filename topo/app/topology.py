@@ -246,7 +246,9 @@ def build(conn, layer=None):
             "asn": device_as.get(d["id"]),
             "device_type": device_type(d["role"], d["model"], d["hostname"], d["platform"]),
             "vendor": (d["vendor"] or "").lower(),
-            "site": d["site"] or "",   # the map's "By site" layout groups by it
+            # The map groups by it ("By site", site bundles, the grouped device list). A device with no site of its own counts
+            # its BGP AS as its site, so two AS are two sites. Worked out here, never stored in devices.site.
+            "site": d["site"] or ("AS {}".format(device_as[d["id"]]) if device_as.get(d["id"]) else ""),
         }
 
     def ghost_id(kind, key, linux=False):

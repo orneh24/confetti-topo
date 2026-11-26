@@ -609,6 +609,16 @@ def _():
     need(labels == ["eBGP AS65001 - AS65002 Established"], "BGP label must name both AS numbers: %r" % labels, p)
     need([e["bgp_type"] for e in built["edges"]] == ["ebgp"], "two different ASes must be an eBGP edge: %r" % built["edges"], p)
     need({n["device_id"]: n["asn"] for n in built["nodes"]} == {a: 65001, b: 65002}, "nodes must carry their AS: %r" % built["nodes"], p)
+    # Different AS are different sites by default; a site set on the device wins, and nothing is written to devices.site
+    sites = lambda: {n["device_id"]: n["site"] for n in topology.build(conn, "bgp")["nodes"]}
+    need(sites() == {a: "AS 65001", b: "AS 65002"}, "with no site of its own a device's AS must be its site: %r" % sites(), p)
+    need({r[0] or "" for r in conn.execute("SELECT site FROM devices")} == {""}, "the AS must not be stored as a device's site", p)
+    conn.execute("UPDATE devices SET site = 'hq' WHERE id = ?", (a,))
+    need(sites() == {a: "hq", b: "AS 65002"}, "a site set on the device must win over its AS: %r" % sites(), p)
+    conn.execute("UPDATE devices SET site = '' WHERE id = ?", (a,))
+    lone = add_device(conn, "192.0.2.77", "no-bgp")
+    need(sites()[lone] == "", "no site and no AS must stay without a site: %r" % sites(), p)
+    conn.execute("DELETE FROM devices WHERE id = ?", (lone,))
     # Same AS at both ends is iBGP, and a router's own `local AS` wins over what the other row says about it.
     conn.execute("UPDATE adjacencies SET remote_as = 65001, local_as = 65001 WHERE proto = 'bgp'")
     conn.commit()

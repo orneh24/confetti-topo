@@ -172,7 +172,9 @@ with an address in the same subnet (orange): two devices get one line, three or 
 a port reported not up draws the line red and dashed. Constraint 23.
 The **Layout** dropdown (Free / Hierarchical, `confetti-topo-layout-mode`, per browser) lays the map out as the focus tree does
 (`treePositions`), from the Focus device if one is set, else from the shown device with the most links (`autoRoot`); places are
-never saved (`treeOn`). **By site** (`site`) is different: `sitePositions` puts each `devices.site` (nodes carry `site`) in its own block, laid out
+never saved (`treeOn`). **By site** (`site`) is different: `sitePositions` puts each site (nodes carry `site`: `devices.site`, or when that is empty
+`AS <n>` from the device's BGP AS, so different AS are different sites; worked out in `topology.build`, never stored, and a
+device that has saved places moves into a new group only on Re-arrange or when By site is picked again) in its own block, laid out
 with `treePositions` from the site's `autoRoot`, blocks packed in rows; the places ARE saved and can be dragged, a new device goes
 right of its site's last row, or on a row below when that would run into another site's box (`siteSlot`), a subnet dot goes under
 its lowest device, midway between them when it spans sites (`placeSubnets`), and the page draws a solid box per site under the AS

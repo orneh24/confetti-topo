@@ -253,7 +253,7 @@ against them.
   bring the big box back.
   An unknown node seen by several devices is easily placed far away by physics and then makes the whole map small. It is
   moved back only from outside the box around the devices to a place inside it, so it moves once (these are shared saved
-  places). **Fit** has a menu to zoom to the devices only or to one layer. Zoomed out, device names grow as far as there is room beside them, and links to unknown nodes are faded until a node is pointed at or selected. A device can be given its own name on the map (right-click, Rename on map); it is a label only. An LLDP port id that is only a MAC address (Linux lldpd) is labelled with the port
+  places). **Fit** has a menu to zoom to the devices only or to one layer. Zoomed out, device names grow as far as there is room beside them, and links to unknown nodes are faded until a node is pointed at or selected. A device with no site of its own is grouped under its BGP AS, so By site shows different AS as different sites. A device can be given its own name on the map (right-click, Rename on map); it is a label only. An LLDP port id that is only a MAC address (Linux lldpd) is labelled with the port
   description when there is one (`topology.port_text`); the cable key still uses the port id. LLDP / BGP / OSPF toggle buttons (independent, remembered in `confetti-topo-layers`, a FILTERED marker while any is off) pass `?layer=` as a comma list. An independent **Unknown nodes** toggle
   (remembered in `confetti-topo-hide-unknown`) hides ghost nodes and their edges in the browser only; it is not
   sent as `?layer=`, and the FILTERED marker shows while it is off too.
