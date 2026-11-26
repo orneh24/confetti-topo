@@ -1580,6 +1580,24 @@ def api_topology_positions_clear():
     return jsonify({"status": "cleared"})
 
 
+DISPLAY_NAME_MAX = 64
+
+
+@app.route("/api/devices/<int:device_id>/display-name", methods=["PUT"])
+def api_device_display_name(device_id):
+    """{name}: the name the topology map shows for this device; an empty name goes back to the hostname. One line of at
+    most 64 characters. Only a label: the hostname, the device's identity and peer matching do not change."""
+    data = request.get_json(force=True, silent=True) or {}
+    name = data.get("name")
+    if not isinstance(name, str) or len(name.strip()) > DISPLAY_NAME_MAX or not name.strip().isprintable():
+        return jsonify({"error": "name must be one line of at most {} characters".format(DISPLAY_NAME_MAX)}), 400
+    conn = db.get_db()
+    if not conn.execute("UPDATE devices SET display_name = ? WHERE id = ?", (name.strip(), device_id)).rowcount:
+        return jsonify({"error": "not found"}), 404
+    conn.commit()
+    return jsonify({"status": "saved" if name.strip() else "removed", "name": name.strip()})
+
+
 NOTE_MAX = 2000
 
 

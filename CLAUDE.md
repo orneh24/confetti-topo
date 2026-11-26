@@ -174,11 +174,14 @@ The **Layout** dropdown (Free / Hierarchical, `confetti-topo-layout-mode`, per b
 (`treePositions`), from the Focus device if one is set, else from the shown device with the most links (`autoRoot`); places are
 never saved (`treeOn`). **By site** (`site`) is different: `sitePositions` puts each `devices.site` (nodes carry `site`) in its own block, laid out
 with `treePositions` from the site's `autoRoot`, blocks packed in rows; the places ARE saved and can be dragged, a new device goes
-right of its site's last row (`siteSlot`), and the page draws a solid box per site under the AS areas (`drawSiteAreas`). On a
+right of its site's last row, or on a row below when that would run into another site's box (`siteSlot`), a subnet dot goes under
+its lowest device, midway between them when it spans sites (`placeSubnets`), and the page draws a solid box per site under the AS
+areas (`drawSiteAreas`). On a
 map with more than `BIG_MAP` (20) devices, a browser with no saved choice starts with only LLDP + BGP shown (no FILTERED marker,
 `layersBig`) and, with no saved places, in By site. A pair of nodes with one link draws it straight; parallel links still curve.
 Zoomed out, vis leaves out small labels (`scaling.label.drawThreshold`) and below 60 % zoom the vendor mark is dropped (`zoomDetail`).
 The **Labels** dropdown (Default / Hover only / Off, `confetti-topo-label-mode`, per browser) sets when link labels show (`edgeLabel`).
+Readability: `fitMap` takes the zoom from the shown nodes' own boxes and the width the panels leave free (at most 1, 1.5 from the Fit menu). Zoomed out, a known device's name is drawn larger so it stays about 11 px on screen (`labelSize`, steps of 2, at most 36, with a halo), but only as far as two names side by side have room (`roomySizes`, Compare too), so names in a packed row stay small until zoomed in; unknown and subnet names still drop out. Site and AS box titles (`titleSize`) and bundle counts (`bundleFont`) grow the same way. A link to an unknown node is thinner and faded (`edgeOpacity`, `UNKNOWN_FADE`; not in Compare); pointing at or selecting a node shows its links in full. A selected or pointed-at link keeps its colour, and its label (and those of the selected device's links) is readable at any zoom, wrapped when long (`edgeFont`, `edgeWrap`). The Compare row is hidden until the **Compare...** button in Actions or a `?compare=` link opens it (`showCompareRow`; not saved).
 The toolbar is three groups, Show (layers, unknown nodes) / Look / Actions (Fit, Tidy AS areas, Re-arrange, History, an Export menu); a switched-on toggle is filled. The **Fit** button is `fitMap`; it leaves room for the Devices list and an open legend. The ▾ beside it (`openFitMenu`) zooms to the known devices only or to the nodes of one shown layer's links (the view only, nothing saved). An open node or link card takes the legend's place at full height (`fitNodePanel`). "Tidy AS areas" puts each node with no AS in the free slot nearest the mean x of the nodes it links to. On this full-height page the footer's "Is it DNS..?" / "Make it rain!" are in the map's right-click menu instead. Selecting a device fades every node and link that is not it or one link away (`dimMap`, `selNear`,
 `edgeOpacity`; combined with the search fade, nothing saved).
 
@@ -274,6 +277,10 @@ These came over on 2026-11-21 as the same code, `BUTLER_*` renamed to `TOPO_*`.
   nothing (constraint 37); refused for `role='node'`.
 - **Map notes** (`map_notes`, `GET|PUT /api/topology/notes`): free text (2000 characters) on a node or a link (`edge:<edgeKey>`), edited in
   the node and link cards, included in the JSON export. An empty note deletes it.
+- **Name on map** (constraint 46): `devices.display_name`, set from the map (right-click a device, **Rename on map...**, or the node
+  card), `PUT /api/devices/<id>/display-name` `{name}` (one line, 64 characters; empty = the hostname). `/api/topology` then gives it
+  as the node's `label` and keeps `hostname`; the device search matches both. Only the map shows it. Not offered on unknown nodes, in
+  History or in Compare. A stored snapshot keeps the name it was taken with, and a rename alone makes no new snapshot.
 - **Device page status strip**: ping, poll (or "N of M tasks failed"), VPN not supported, sessions, flapping, template drift, interface errors 24 h and ports down, each a link to its box.
 - **Recent changes, flapping and column widths**: a peer, interface or port (device + type + item) that changed `count` times or more within
   `window_min` minutes gets a yellow "flapping" pill in Notes and a line in the details pane (`computeFlaps`, display only, from the events
@@ -319,7 +326,7 @@ than `TOPO_SNAPSHOT_RETENTION_DAYS` (14) are pruned. `GET /api/topology/snapshot
 `GET /api/topology/snapshots/<id>` are read-only. The topology page's History dropdown shows one with a banner and "Back to live".
 A snapshot is the `/api/topology` answer, so it holds nothing the page does not already show.
 
-**Compare** (its own toolbar row; `buildCompare` and `matchEdges` in `static/compare.js`, browser only, no API of its own, nothing stored; constraint 41): From (Off or a
+**Compare** (its own toolbar row, folded away until asked for; `buildCompare` and `matchEdges` in `static/compare.js`, browser only, no API of its own, nothing stored; constraint 41): From (Off or a
 snapshot) and To (Live or a snapshot), always read older → newer; `/topology?compare=<id>,<id|live>` opens one. The newer map is drawn
 with what is gone added back. A link is `added`, `gone`, `changed` (up/down, label, flapping) or `same`; BGP/OSPF/IPsec links are matched by
 ends and protocol, because their label holds the state (`matchEdges`). A device is `changed` when its ping state or **any of its links**
@@ -558,6 +565,13 @@ Keep the two in step; `confetti-interop-checker` reports drift.
 - Do not display code changes in output unless asked to.
 - Always check a UI change in a real browser (Claude in Chrome, or the `dashboard-ui-checker` agent) before saying it is done:
   load the page, use the changed control, and read the console for errors. A regression run or a code read is not enough.
+- Always test a topology change in a real browser on **all layout types** in the Layout dropdown (`#layout-sel`): **Free**,
+  **Hierarchical** and **By site**; a layout type added later counts too.
+  - On each one: use the changed control, press Fit, select a node, and read the console.
+  - **By site** saves node places on the server: never switch it on against `topo/topo.db`. Use a scratch mock database with
+    several sites (`seed_mock_lab.py` makes only the site `lab`, so set more sites in that scratch copy), to see the site
+    boxes, the space between sites and Bundle site links.
+  - Report the result per layout and name any layout not tested. A quick look is not "tested": say it was only a quick look.
 - Always restart the dev server when a change needs it to take effect (the app
   reads templates and Python code only at start), and check that the running
   copy serves the change, before telling the user to look at it.
@@ -740,6 +754,10 @@ Keep the two in step; `confetti-interop-checker` reports drift.
     candidate is inside that box. Devices never move; nothing is saved in History, Compare or Focus. Do not replace the trigger
     with a distance to its devices: two far-apart devices would move the node on every load. Checked by R63.
 
+46. **A map name is only a label.** `devices.display_name` changes nothing but what the topology shows: the hostname, `devices.key`,
+    aliases, LLDP name matching and the device type (read from the hostname) never use it, and Rename is off while `readOnlyView()`.
+    Checked by R64.
+
 ## Regression gate
 
 `python dev/regress.py` (stdlib only, except that `R39` runs ruff: `pip install -r dev/requirements-dev.txt`, else R39 is `NOT RUN`; `--static` skips the live tier, `-v` shows detail for passes) is the
@@ -754,7 +772,8 @@ the PAN-OS XML API: real-output fixtures, read-only `<show>` ops, secrets out of
 SNMP, drift and interface error history; `R51` (constraint 34) the in-place upgrade of an old database; `R52`..`R55` (constraints 35..38) traffic rates, database backup/restore,
 Find / Test login storing nothing, failed-poll reasons (R55), the managed Confetti Traffic node (R56), IPAM prefixes (R57), IPsec tunnels (R58, constraint 40), Compare (R59, 41) and the colour palette (R60, 42);
 not supported tasks and task results (R61, constraint 43), AS area boxes (R62, 44) and shared unknown nodes (R63, 45);
-the next constraint (46) takes `R64`. `R13-labels` and `R13-positions` (more of constraint 13) and `R37-display` (the flapping-mark setting) sit beside
+the map name (R64, constraint 46);
+the next constraint (47) takes `R65`. `R13-labels` and `R13-positions` (more of constraint 13) and `R37-display` (the flapping-mark setting) sit beside
 their numbers. The script drops `TOPO_*` variables, restores any setting a check changes, and reads files with LF line ends. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by

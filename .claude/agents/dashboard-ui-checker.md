@@ -26,11 +26,12 @@ Unless told otherwise check Dark, Light and Rainbow, and every layout once on th
 
 ## The topology page
 
+- Check every Layout dropdown type, Free, Hierarchical and By site, as the "Working style" rule in CLAUDE.md says (By site only on a mock database, with several sites), and report each one. Remove `confetti-topo-layout-mode` afterwards.
 - The vis network exists (`.vis-network` canvas), the mock lab shows 3 routers, the firewall `lab-fw-1`, a subnet dot and unknown nodes (`198.51.100.7` and several "N unknown" groups).
 - The lab-rtr-c box has a red outline (mock ping state); the `Idle (Admin)` BGP edge is red and dashed.
 - One line per BGP/OSPF session between two routers, not two. BGP and OSPF lines bend opposite ways.
 - IPsec (pink): one line firewall to lab-rtr-b (up), one lab-rtr-a to lab-rtr-c (down, red dashed), two to unknown peers. Clicking one opens a card with a block per reporting end. lab-fw-1's device page has a VPN tunnels box with 3 rows.
-- Compare (second toolbar row): pick the older snapshot in From. A removed router (lab-rtr-old, red, `−`), an added unknown node (green, `+`) and changed devices (orange, `~`) show, with a count bar; its three buttons group and hide. Remove `confetti-topo-cmp-*` afterwards.
+- Compare (the Compare... button in Actions opens its row): pick the older snapshot in From. A removed router (lab-rtr-old, red, `−`), an added unknown node (green, `+`) and changed devices (orange, `~`) show, with a count bar; its three buttons group and hide. Remove `confetti-topo-cmp-*` afterwards.
 - Layer toggles LLDP / BGP / OSPF / IPsec / Default / Connected (all on by default, independent, remembered in localStorage `confetti-topo-layers` and `confetti-topo-layers-known`): switching one off removes that layer's edges and shows the yellow FILTERED marker; its "Show all" button clears it. The legend is present (closed by default; open it with its summary to check it matches). Remove `confetti-topo-layers`, `confetti-topo-layers-known` and `confetti-topo-legend-open` before and after (the 8097 origin holds only your own settings) so the check leaves no state behind. The "Unknown nodes" button (on by default) hides the dashed ghost dots and their edges and also shows the FILTERED marker; run the other checks with it on, and remove `confetti-topo-hide-unknown` too. BGP edge labels carry AS numbers (e.g. `bgp AS65001 - AS65002 Established`).
 - A theme change recolours the graph without resetting its zoom or layout. Double-clicking a router opens `/devices/<id>`.
 - Colours must be readable in each theme (canvas colours come from `themeColor()`).

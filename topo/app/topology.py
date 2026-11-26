@@ -235,11 +235,13 @@ def build(conn, layer=None):
     device_as = bgp_as_numbers(conn, owners)
     nodes = {}
     names = {}
-    for d in conn.execute("SELECT id, hostname, role, model, vendor, platform, reachable, mgmt_ip, site FROM devices"):
+    for d in conn.execute("SELECT id, hostname, display_name, role, model, vendor, platform, reachable, mgmt_ip, site "
+                          "FROM devices"):
         nid = "dev:{}".format(d["id"])
         names[d["id"]] = d["hostname"]
         nodes[nid] = {
-            "id": nid, "label": d["hostname"], "group": d["role"],
+            # label is what the map shows: the operator's own name for it if one is set, else the hostname.
+            "id": nid, "label": d["display_name"] or d["hostname"], "hostname": d["hostname"], "group": d["role"],
             "device_id": d["id"], "ghost": False, "reachable": d["reachable"], "mgmt_ip": d["mgmt_ip"],
             "asn": device_as.get(d["id"]),
             "device_type": device_type(d["role"], d["model"], d["hostname"], d["platform"]),

@@ -3400,6 +3400,42 @@ need(g.deviceBox({ 'ghost:far': { x: 1, y: 1 } }, 250) === null && g.sharedOutli
     return p
 
 
+@check("R64", "the map name of a device is only a label: the hostname, identity, peer matching and device type stay, bad names are refused, and it is not offered on an old or compared map")
+def _():
+    p = []
+    m, conn = fresh_db()
+    from app import topology
+    client = m["appmod"].app.test_client()
+    dev = add_device(conn, "192.0.2.1", "edge-rtr")
+    other = add_device(conn, "192.0.2.2", "core-rtr")
+    conn.commit()
+    url = "/api/devices/%d/display-name" % dev
+    node = lambda: [n for n in topology.build(conn)["nodes"] if n["device_id"] == dev][0]
+    row = lambda: dict(conn.execute("SELECT hostname, key, display_name FROM devices WHERE id = ?", (dev,)).fetchone())
+    aliases = lambda: sorted(tuple(r) for r in conn.execute("SELECT kind, value, device_id FROM device_aliases"))
+    before, known, kind = row(), aliases(), node()["device_type"]
+    need(node()["label"] == "edge-rtr" == node()["hostname"], "no map name: the label is the hostname", p)
+    r = client.put(url, json={"name": "  Core Switch Firewall  "})
+    need(r.status_code == 200 and node()["label"] == "Core Switch Firewall" and node()["hostname"] == "edge-rtr", "rename: %r %r" % (r.status_code, node()), p)
+    need(row()["hostname"] == before["hostname"] and row()["key"] == before["key"] and aliases() == known, "a map name changed the identity: %r" % row(), p)
+    need(node()["device_type"] == kind, "words in a map name must not change the device type: %r" % node()["device_type"], p)
+    ctx = dict(topology.lldp_context(conn), names=topology.name_owners(conn))
+    need(topology.resolve_lldp(ctx, other, None, None, None, "Core Switch Firewall")[0] is None, "a neighbor was matched by a map name", p)
+    need(topology.resolve_lldp(ctx, other, None, None, None, "edge-rtr")[0] == dev, "the hostname must still match", p)
+    for bad in ({"name": "x" * 65}, {"name": "a\nb"}, {"name": 7}, {}):
+        need(client.put(url, json=bad).status_code == 400, "accepted %r" % bad, p)
+    need(row()["display_name"] == "Core Switch Firewall", "a refused name changed the stored one", p)
+    need(client.put("/api/devices/99999/display-name", json={"name": "a"}).status_code == 404, "an unknown device must be a 404", p)
+    client.put(url, json={"name": ""})
+    need(node()["label"] == "edge-rtr" and row()["display_name"] == "", "an empty name goes back to the hostname", p)
+    page = read("topo/templates/topology.html")
+    need("node.device_id !== undefined && !readOnlyView(); }" in page and "disabled: !canRename(node)" in page,
+         "topology.html: Rename must be off for unknown nodes and on an old or compared map", p)
+    need("(n.hostname || '').toLowerCase().indexOf(q)" in page, "topology.html: the device search must still find a renamed device by hostname", p)
+    conn.close()
+    return p
+
+
 # ============================================================ live tier (a real server)
 
 

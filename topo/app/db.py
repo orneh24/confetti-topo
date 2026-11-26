@@ -478,6 +478,9 @@ def init_db():
     for col in ("in_bytes", "out_bytes"):
         if col not in have:
             db.execute("ALTER TABLE interface_stats ADD COLUMN {} INTEGER".format(col))
+    # The name a device is shown with on the topology map (operator's choice; '' = its hostname). Never an identity.
+    if "display_name" not in [r[1] for r in db.execute("PRAGMA table_info(devices)")]:
+        db.execute("ALTER TABLE devices ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
     db.execute("CREATE INDEX IF NOT EXISTS idx_if_network ON interfaces(network)")
     db.commit()
     db.close()

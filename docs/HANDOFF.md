@@ -1,5 +1,14 @@
 # confetti-topo — handoff
 
+## Map: readability, all three layouts, Name on map (2026-11-27)
+
+Readability pass, then Free, Hierarchical and By site tested in Chrome. Mock labs: one site and several sites, all three
+layouts. Real dev map: Free and Hierarchical only (By site saves places); saved places unchanged. Fixed: names piling up
+(room limit, also in Compare), unreadable site titles and bundle counts, a new By site device landing in a neighbour's box,
+subnet dots far from their devices. New: Name on map (constraint 46, R64, column `devices.display_name`); database backup
+from before the column: `topo-web-20261126-230640.db`. Not changed: in By site a straight link between two sites can run
+through a router that sits in the same row.
+
 ## Map: split AS boxes, Fit menu, shared unknown nodes (2026-11-25)
 
 `static/mapgeo.js`, constraints 44-45, checks R62-R63. Real dev map: the five unknown nodes seen by several devices moved

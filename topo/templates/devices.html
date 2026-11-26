@@ -425,9 +425,11 @@ document.getElementById('confetti-form').addEventListener('submit', function (ev
     runDiscover('/api/discover/confetti', { hub_url: hubUrl }, 'Confetti Traffic import');
 });
 
-// The URL saved on the Settings page: one click imports from it.
+// The URL saved on the Settings page: filled into the field (unless something is typed there), and one click imports from it.
 fetch('/api/settings/links').then(function (r) { return r.json(); }).then(function (l) {
     if (!l.traffic) { return; }
+    var field = document.getElementById('confetti-form').hub_url;
+    if (!field.value) { field.value = l.traffic; }
     var b = document.getElementById('confetti-saved-btn');
     b.textContent = 'Import from saved URL (' + l.traffic + ')';
     b.style.display = '';

@@ -61,6 +61,7 @@ those two columns to NULL, so its neighbors become ghosts again.
 - `POST /api/devices/<id>/credentials/test` — log in and run `version` only, stores nothing
 - `GET|PUT /api/settings/links` (the Traffic URL), `GET|PUT /api/settings/syslog-pull`, `GET /api/syslog[?after_id=N&origin=local]`, `GET /api/syslog/sources`
 - `GET|PUT /api/topology/notes` — map notes per node or link
+- `PUT /api/devices/<id>/display-name {name}` — the name the map shows (empty = hostname; node `label`, with `hostname` beside it). A label only (constraint 46)
 - `GET /api/routes|vlans|stp|trunks|mac?device_id=N` — one device's routing table (`vrf`, `kind`, `prefix`), VLANs, spanning-tree summary,
   trunk ports, learned MACs (`q` filters; a MAC owned by one other device carries `device`/`interface`)
 - `GET /api/topology/snapshots[?limit=]` and `/api/topology/snapshots/<id>` — read-only topology history (`TOPO_SNAPSHOT_*`)
