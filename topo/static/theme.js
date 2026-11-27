@@ -44,7 +44,9 @@ function shuffleStep(fromTimer) {
         var avoid = st && themeKnown(st.theme) ? st.theme : currentTheme();
         var pick;
         do { pick = THEMES[Math.floor(Math.random() * THEMES.length)][0]; } while (pick === avoid);
-        st = { theme: pick, until: now + SHUFFLE_MIN_MS + Math.random() * (SHUFFLE_MAX_MS - SHUFFLE_MIN_MS) };
+        // The layout shown last is kept for the next layout pick, which must differ from it.
+        var last = st ? st.layout || st.last : undefined;
+        st = { theme: pick, until: now + SHUFFLE_MIN_MS + Math.random() * (SHUFFLE_MAX_MS - SHUFFLE_MIN_MS), last: last };
         try { localStorage.setItem('confetti-topo-theme-shuffle', JSON.stringify(st)); } catch (e) {}
     }
     applyTheme(st.theme);
@@ -206,7 +208,9 @@ function syncLayoutSelect() {
 function shuffleLayout(st) {
     var names = LAYOUTS.map(function (l) { return l[0]; });
     if (names.indexOf(st.layout) < 0) {
-        var cur = document.documentElement.getAttribute('data-layout') || 'classic';
+        // Avoid the last shuffled layout. Not the one on screen: during a page load that is the viewer's own saved
+        // layout, which would then never be picked. With no earlier pick, what is on screen is what changes.
+        var cur = names.indexOf(st.last) >= 0 ? st.last : document.documentElement.getAttribute('data-layout') || 'classic';
         var pick;
         do { pick = names[Math.floor(Math.random() * names.length)]; } while (pick === cur);
         st.layout = pick;

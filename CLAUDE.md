@@ -760,6 +760,10 @@ Keep the two in step; `confetti-interop-checker` reports drift.
     aliases, LLDP name matching and the device type (read from the hostname) never use it, and Rename is off while `readOnlyView()`.
     Checked by R64.
 
+47. **A Shuffle layout pick avoids the last shuffled layout, never just the one on screen.** During a page load the screen shows
+    the viewer's own saved layout, so avoiding it meant that layout was never picked and the last one could repeat. The state keeps
+    it as `last` when a new theme is picked (`static/theme.js`; the same fix is in confetti-traffic's four pages). Checked by R65.
+
 ## Regression gate
 
 `python dev/regress.py` (stdlib only, except that `R39` runs ruff: `pip install -r dev/requirements-dev.txt`, else R39 is `NOT RUN`; `--static` skips the live tier, `-v` shows detail for passes) is the
@@ -775,7 +779,8 @@ SNMP, drift and interface error history; `R51` (constraint 34) the in-place upgr
 Find / Test login storing nothing, failed-poll reasons (R55), the managed Confetti Traffic node (R56), IPAM prefixes (R57), IPsec tunnels (R58, constraint 40), Compare (R59, 41) and the colour palette (R60, 42);
 not supported tasks and task results (R61, constraint 43), AS area boxes (R62, 44) and shared unknown nodes (R63, 45);
 the map name (R64, constraint 46);
-the next constraint (47) takes `R65`. `R13-labels` and `R13-positions` (more of constraint 13) and `R37-display` (the flapping-mark setting) sit beside
+Shuffle layout picks (R65, constraint 47);
+the next constraint (48) takes `R66`. `R13-labels` and `R13-positions` (more of constraint 13) and `R37-display` (the flapping-mark setting) sit beside
 their numbers. The script drops `TOPO_*` variables, restores any setting a check changes, and reads files with LF line ends. Output is one line per check
 and a verdict: `CLEAR`, `CLEAR WITH GAPS` (something not run) or `BLOCKED`. The unit tier imports the app, so
 it needs the app's own Python packages (else those checks are `NOT RUN`). Each check must be proven red by

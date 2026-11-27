@@ -3446,6 +3446,71 @@ def _():
     return p
 
 
+@check("R65", "Shuffle picks layouts fairly: on the timer and on a page load after the pick ran out, every layout can come up (the viewer's own too) and never the last one again")
+def _():
+    node = shutil.which("node")
+    if not node:
+        raise Skip("no node: static/theme.js was not run")
+    script = "const head = %s;\nconst late = '';\n" % json.dumps(read("topo/static/theme.js")) + r"""
+const vm = require('vm');
+const bad = [];
+let now = 1e12;
+const KEY = 'confetti-topo-theme-shuffle';
+function openPage(store, layouts) {
+  const attrs = {};
+  let timer = null;
+  const quiet = () => {};
+  const el = { getAttribute: (k) => (k in attrs ? attrs[k] : null), setAttribute: (k, v) => { attrs[k] = v; },
+               removeAttribute: (k) => { delete attrs[k]; } };
+  const ctx = {
+    document: { documentElement: el, getElementById: () => null, querySelector: () => null, querySelectorAll: () => [],
+                addEventListener: quiet, dispatchEvent: quiet, body: null, readyState: 'loading' },
+    localStorage: { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); },
+                    removeItem: (k) => { delete store[k]; } },
+    matchMedia: () => ({ matches: false, addEventListener: quiet }),
+    setTimeout: (fn) => { timer = fn; return 1; }, clearTimeout: quiet, setInterval: quiet, Event: function () {},
+    Date: { now: () => now }, Math, JSON, console, fetch: () => new Promise(quiet), addEventListener: quiet,
+    location: {}, navigator: {},
+  };
+  ctx.window = ctx;
+  vm.createContext(ctx);
+  vm.runInContext(head, ctx);
+  if (layouts && late) { vm.runInContext(late, ctx); }
+  return { layout: () => attrs['data-layout'] || 'classic', fire: () => { const f = timer; timer = null; f(); } };
+}
+const expire = (store) => { now = JSON.parse(store[KEY]).until + 1; };
+function judge(name, seen, repeats) {
+  ['classic', 'modern', 'retro95', 'msdos'].forEach((l) => { if (!seen[l]) { bad.push(name + ': ' + l + ' is never picked'); } });
+  if (repeats) { bad.push(name + ': the same layout twice in a row, ' + repeats + ' times'); }
+}
+function run(name, own, step) {
+  const store = { 'confetti-topo-theme': 'shuffle', 'confetti-topo-layout': own };
+  let page = openPage(store, true), was = page.layout(), repeats = 0;
+  const seen = {};
+  for (let i = 0; i < 600; i++) {
+    page = step(store, page);
+    const shown = page.layout();
+    seen[shown] = true;
+    if (shown === was) { repeats++; }
+    was = shown;
+  }
+  judge(name, seen, repeats);
+}
+run('timer', 'classic', (store, page) => { expire(store); page.fire(); return page; });
+for (const own of ['classic', 'msdos']) {
+  run('page load, own layout ' + own, own, (store) => { expire(store); return openPage(store, true); });
+}
+console.log(JSON.stringify(bad));
+"""
+    tmp = os.path.join(TMP, "shuffle_check.js")
+    with open(tmp, "w", encoding="utf-8") as fh:
+        fh.write(script)
+    r = subprocess.run([node, tmp], capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        return ["static/theme.js did not run: " + r.stderr.strip()[:300]]
+    return json.loads(r.stdout.strip().splitlines()[-1])
+
+
 # ============================================================ live tier (a real server)
 
 
