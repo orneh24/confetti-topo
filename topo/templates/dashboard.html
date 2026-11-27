@@ -156,7 +156,8 @@ function fullness(pct, warn, bad) {
 }
 
 function renderTime(data) {
-    var html = kv('server utc', data.utc);
+    // The server's clock, shown like the device page's times: the viewer's own format and time zone.
+    var html = kv('server time', new Date(data.utc).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }));
     if (data.chrony) {
         html += kv('synced', data.chrony.synced ? 'yes' : 'no', data.chrony.synced ? 'ok' : 'bad');
         html += kv('stratum', data.chrony.stratum === null ? 'unknown' : data.chrony.stratum);

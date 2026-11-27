@@ -8,8 +8,6 @@ Ideas only. Nothing here is built until the user picks it.
   template assigned to it) and SNMP against a real `snmpd`. Neither has run against the lab yet.
 
 ## To do (left from the 2026-11-25 feature list)
-- **Dashboard server time:** the System widget shows a raw timestamp (`2026-11-25T22:48:21Z`). Show it in a readable format,
-  as the device page does with its times.
 - **VPN syslog poll trigger:** poll a device early when one of its tunnels changes (constraint 25,
   `syslog_trigger.TOPOLOGY_MNEMONICS`). Needs real CRYPTO messages from the lab devices first; none has been seen.
 - **VPN cases not seen on real gear:** a tunnel that is down (shut one end of the lab tunnel), then IKEv2. Also an inside VRF,
